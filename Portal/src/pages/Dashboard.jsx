@@ -1,6 +1,5 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useAuth } from '../context/AuthContext';
-import { useData } from '../context/DataContext';
 import Navbar from '../components/Navbar';
 import BoxDashboard from '../components/BoxDashboard';
 import SuppliersList from '../components/SuppliersList';
@@ -18,6 +17,7 @@ const Dashboard = () => {
     { id: 'suppliers', label: '🚜 Suppliers', icon: '📦' },
     { id: 'customers', label: '👥 Customers', icon: '👤' },
     { id: 'transactions', label: '📋 Transactions', icon: '📜' },
+    { id: 'payment', label: '💳 Payment', icon: '💰' },
   ];
 
   return (
@@ -82,7 +82,7 @@ const Dashboard = () => {
                 </button>
               </div>
               <div className="modal-body max-h-[70vh] overflow-y-auto">
-                <TransactionForm onClose={() => setShowTransactionModal(false)} />
+                <TransactionForm entryMode="sale" onClose={() => setShowTransactionModal(false)} />
               </div>
             </div>
           </div>
@@ -94,6 +94,12 @@ const Dashboard = () => {
           {activeTab === 'suppliers' && <SuppliersList />}
           {activeTab === 'customers' && <CustomersList />}
           {activeTab === 'transactions' && <TransactionsList />}
+          {activeTab === 'payment' && (
+            <div className="card">
+              <h3 className="section-header">💳 Payment</h3>
+              <TransactionForm entryMode="payment" />
+            </div>
+          )}
         </div>
       </div>
     </div>

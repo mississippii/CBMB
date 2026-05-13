@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useData } from '../context/DataContext';
 
 const BoxDashboard = () => {
@@ -11,21 +11,36 @@ const BoxDashboard = () => {
     reason: 'lost',
     description: '',
   });
+  const [statusMessage, setStatusMessage] = useState('');
 
   const handleAddBoxes = () => {
-    if (formData.quantity > 0) {
-      addBoxes(formData.boxType, parseInt(formData.quantity));
-      setFormData({ boxType: 'wooden', quantity: 0, reason: 'lost', description: '' });
-      setShowAddForm(false);
+    const quantity = Number(formData.quantity) || 0;
+    if (quantity <= 0) {
+      setStatusMessage('Please enter a valid quantity to add.');
+      return;
     }
+
+    addBoxes(formData.boxType, quantity);
+    setFormData({ boxType: 'wooden', quantity: 0, reason: 'lost', description: '' });
+    setShowAddForm(false);
+    setStatusMessage(`Added ${quantity} ${formData.boxType} box(es) to inventory.`);
   };
 
   const handleMarkLost = () => {
-    if (formData.quantity > 0) {
-      markBoxesLost(formData.boxType, parseInt(formData.quantity));
-      setFormData({ boxType: 'wooden', quantity: 0, reason: 'lost', description: '' });
-      setShowLossForm(false);
+    const quantity = Number(formData.quantity) || 0;
+    if (quantity <= 0) {
+      setStatusMessage('Please enter a valid quantity to mark as lost/damaged.');
+      return;
     }
+
+    const removed = markBoxesLost(formData.boxType, quantity);
+    setFormData({ boxType: 'wooden', quantity: 0, reason: 'lost', description: '' });
+    setShowLossForm(false);
+    if (removed === 0) {
+      setStatusMessage(`No ${formData.boxType} boxes available in shop storage to mark as lost.`);
+      return;
+    }
+    setStatusMessage(`Marked ${removed} ${formData.boxType} box(es) as lost/damaged.`);
   };
 
   const boxesDue = boxInventory.boxesWithSuppliers + boxInventory.boxesWithCustomers;
@@ -33,6 +48,12 @@ const BoxDashboard = () => {
 
   return (
     <div className="space-y-6">
+      {statusMessage && (
+        <div className="status-success">
+          <span>ℹ️</span>
+          <span>{statusMessage}</span>
+        </div>
+      )}
       {/* Main Stats */}
       <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
         {/* Total Boxes */}

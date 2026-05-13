@@ -1,9 +1,9 @@
-import React, { useState } from 'react';
+import { useState } from 'react';
 import { useData } from '../context/DataContext';
 import SupplierDetail from './SupplierDetail';
 
 const SuppliersList = () => {
-  const { suppliers, addSupplier } = useData();
+  const { suppliers, supplierProducts, addSupplier } = useData();
   const [showForm, setShowForm] = useState(false);
   const [selectedSupplierId, setSelectedSupplierId] = useState(null);
   const [formData, setFormData] = useState({
@@ -119,36 +119,48 @@ const SuppliersList = () => {
               <tr>
                 <th className="px-4 py-2 text-left font-semibold text-gray-900">Name</th>
                 <th className="px-4 py-2 text-left font-semibold text-gray-900">Contact</th>
-                <th className="px-4 py-2 text-left font-semibold text-gray-900">Location</th>
+                <th className="px-4 py-2 text-left font-semibold text-gray-900">Product Categories</th>
+                <th className="px-4 py-2 text-right font-semibold text-gray-900">Amount Due</th>
                 <th className="px-4 py-2 text-center font-semibold text-gray-900">Commission</th>
-                <th className="px-4 py-2 text-right font-semibold text-gray-900">Due Amount</th>
-                <th className="px-4 py-2 text-center font-semibold text-gray-900">Boxes</th>
+                <th className="px-4 py-2 text-center font-semibold text-gray-900">Box Due</th>
                 <th className="px-4 py-2 text-center font-semibold text-gray-900">Action</th>
               </tr>
             </thead>
             <tbody>
-              {suppliers.map((supplier) => (
-                <tr key={supplier.id} className="border-b hover:bg-gray-50">
-                  <td className="px-4 py-2 font-semibold text-gray-900">{supplier.name}</td>
-                  <td className="px-4 py-2 text-gray-700">{supplier.contact}</td>
-                  <td className="px-4 py-2 text-gray-700">{supplier.location}</td>
-                  <td className="px-4 py-2 text-center text-gray-700">{supplier.commissionRate}%</td>
-                  <td className="px-4 py-2 text-right font-bold text-red-600">
-                    ৳ {supplier.amountDue.toLocaleString()}
-                  </td>
-                  <td className="px-4 py-2 text-center font-semibold text-gray-900">
-                    {supplier.totalBoxesHolding}
-                  </td>
-                  <td className="px-4 py-2 text-center">
-                    <button
-                      onClick={() => setSelectedSupplierId(supplier.id)}
-                      className="text-blue-600 hover:text-blue-800 font-semibold"
-                    >
-                      View
-                    </button>
-                  </td>
-                </tr>
-              ))}
+              {suppliers.map((supplier) => {
+                const categories = [
+                  ...new Set(
+                    supplierProducts
+                      .filter((product) => product.supplierId === supplier.id)
+                      .map((product) => product.category),
+                  ),
+                ];
+
+                return (
+                  <tr key={supplier.id} className="border-b hover:bg-gray-50">
+                    <td className="px-4 py-2 font-semibold text-gray-900">{supplier.name}</td>
+                    <td className="px-4 py-2 text-gray-700">{supplier.contact}</td>
+                    <td className="px-4 py-2 text-gray-700">{categories.join(', ') || 'N/A'}</td>
+                    <td className="px-4 py-2 text-right font-bold text-red-600">
+                      ৳ {supplier.amountDue.toLocaleString()}
+                    </td>
+                    <td className="px-4 py-2 text-center text-gray-700">
+                      {supplier.commissionRate}% (৳ {supplier.totalCommissionEarned.toLocaleString()})
+                    </td>
+                    <td className="px-4 py-2 text-center font-semibold text-gray-900">
+                      {supplier.totalBoxesHolding}
+                    </td>
+                    <td className="px-4 py-2 text-center">
+                      <button
+                        onClick={() => setSelectedSupplierId(supplier.id)}
+                        className="text-blue-600 hover:text-blue-800 font-semibold"
+                      >
+                        View
+                      </button>
+                    </td>
+                  </tr>
+                );
+              })}
             </tbody>
           </table>
         )}
