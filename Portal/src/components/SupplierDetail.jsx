@@ -1,108 +1,205 @@
-import { useData } from '../context/DataContext';
+import { useData } from '../context/DataContext'
 
-const SupplierDetail = ({ supplierId }) => {
-  const { suppliers, supplierProducts } = useData();
+const formatCurrency = (value) => `৳ ${(Number(value) || 0).toLocaleString()}`
+const getDateOnly = (value) => new Date(value).toISOString().split('T')[0]
 
-  const supplier = suppliers.find((item) => item.id === supplierId);
-  const products = supplierProducts.filter((product) => product.supplierId === supplierId);
+const SupplierDetail = ({ supplierId, onBack }) => {
+  const { suppliers, supplierProducts, transactions } = useData()
+
+  const supplier = suppliers.find((item) => item.id === supplierId)
+  const products = supplierProducts.filter((product) => product.supplierId === supplierId)
 
   if (!supplier) {
-    return <div className="text-gray-600">Supplier not found</div>;
+    return <div className="text-gray-600">Supplier not found</div>
   }
 
-  const totalProductValue = products.reduce((sum, product) => sum + product.totalValue, 0);
-
+  const totalProductValue = products.reduce((sum, product) => sum + product.totalValue, 0)
+  const totalStockQuantity = products.reduce((sum, product) => sum + (Number(product.quantity) || 0), 0)
+  const today = getDateOnly(new Date())
+  const todaySales = transactions.filter(
+    (transaction) =>
+      transaction.transactionType !== 'Payment' &&
+      transaction.transactionType !== 'SupplierDelivery' &&
+      transaction.supplierId === supplier.id &&
+      getDateOnly(transaction.createdAt || transaction.date) === today,
+  )
+  const todaySalesAmount = todaySales.reduce(
+    (sum, transaction) => sum + (Number(transaction.totalAmount) || 0),
+    0,
+  )
+  const todayCommission = todaySales.reduce(
+    (sum, transaction) => sum + (Number(transaction.commissionAmount) || 0),
+    0,
+  )
+  const previousDue = Math.max((Number(supplier.amountDue) || 0) - todayCommission, 0)
   const initials = supplier.name
     .split(' ')
     .map((name) => name[0])
-    .join('');
+    .join('')
+  const payableRatio =
+    supplier.totalCommissionEarned > 0
+      ? Math.min(Math.round((supplier.amountDue / supplier.totalCommissionEarned) * 100), 100)
+      : 0
 
   return (
-    <div className="space-y-6">
-      <div className="status-success">
-        <span>ℹ️</span>
-        <span>Payments and box updates are managed from "Payment / Due / Box Update" in Transactions.</span>
-      </div>
+    <div className="space-y-5">
+      <div className="supplier-profile-header">
+        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+          <div className="flex items-start gap-4">
+            <div className="supplier-avatar">{initials}</div>
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-2xl font-extrabold text-slate-950">{supplier.name}</h2>
+                <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-bold text-[#307D7E]">
+                  {supplier.commissionRate}% commission
+                </span>
+              </div>
+              <p className="mt-1 text-sm font-medium text-slate-600">
+                {supplier.location} • {supplier.contact}
+              </p>
+              <p className="mt-1 text-xs font-semibold text-slate-500">
+                Last settlement: {supplier.lastSettlementDate}
+              </p>
+            </div>
+          </div>
 
-      <div className="border-b border-gray-200 pb-6">
-        <div className="flex items-start gap-4 mb-6">
-          <div className="w-16 h-16 bg-gray-100 rounded-xl flex items-center justify-center border border-gray-200">
-            <span className="text-2xl font-bold text-gray-700">{initials}</span>
-          </div>
-          <div className="flex-1">
-            <h2 className="text-3xl font-bold text-gray-900 mb-1">{supplier.name}</h2>
-            <p className="text-gray-500 text-sm">
-              Commission Rate: <span className="font-semibold text-gray-700">{supplier.commissionRate}%</span>
-            </p>
-          </div>
-        </div>
-        <div className="grid grid-cols-3 gap-4">
-          <div className="bg-gray-50 rounded-lg p-4 border border-gray-100">
-            <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Location</p>
-            <p className="text-sm font-medium text-gray-900">{supplier.location}</p>
-          </div>
-          <div className="bg-gray-50 rounded-lg p-4 border border-gray-100">
-            <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Contact</p>
-            <p className="text-sm font-medium text-gray-900">{supplier.contact}</p>
-          </div>
-          <div className="bg-gray-50 rounded-lg p-4 border border-gray-100">
-            <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Last Settlement</p>
-            <p className="text-sm font-medium text-gray-900">{supplier.lastSettlementDate}</p>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            {onBack && (
+              <button type="button" onClick={onBack} className="btn-secondary">
+                Back to Suppliers
+              </button>
+            )}
           </div>
         </div>
       </div>
 
-      <div>
-        <h3 className="text-lg font-bold text-gray-900 mb-4">Account Summary</h3>
-        <div className="grid grid-cols-2 gap-4">
-          <div className="bg-white rounded-lg p-5 border border-gray-200">
-            <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Total Sales</p>
-            <p className="text-2xl font-bold text-gray-900">৳ {supplier.totalSales.toLocaleString()}</p>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+        <div className="metric-tile">
+          <p>Today Sales</p>
+          <strong>{formatCurrency(todaySalesAmount)}</strong>
+        </div>
+        <div className="metric-tile">
+          <p>Today Commission</p>
+          <strong>{formatCurrency(todayCommission)}</strong>
+        </div>
+        <div className="metric-tile danger">
+          <p>Current Due</p>
+          <strong>{formatCurrency(supplier.amountDue)}</strong>
+        </div>
+        <div className="metric-tile">
+          <p>Stock Value</p>
+          <strong>{formatCurrency(totalProductValue)}</strong>
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_20rem]">
+        <div className="supplier-panel">
+          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <h3>Due Summary</h3>
+              <p>Current due is separated from today's commission.</p>
+            </div>
+            <div className="rounded-lg bg-slate-50 px-3 py-2 text-right">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Total Quantity</p>
+              <p className="text-lg font-extrabold text-slate-900">{totalStockQuantity.toLocaleString()}</p>
+            </div>
           </div>
-          <div className="bg-white rounded-lg p-5 border border-gray-200">
-            <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Commission Earned</p>
-            <p className="text-2xl font-bold text-gray-900">
-              ৳ {supplier.totalCommissionEarned.toLocaleString()}
-            </p>
+          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
+            <div className="rounded-xl bg-slate-50 p-4">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Previous Due</p>
+              <p className="mt-1 text-xl font-extrabold text-slate-900">{formatCurrency(previousDue)}</p>
+            </div>
+            <div className="rounded-xl bg-emerald-50 p-4">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Today Added</p>
+              <p className="mt-1 text-xl font-extrabold text-emerald-800">{formatCurrency(todayCommission)}</p>
+            </div>
+            <div className="rounded-xl bg-rose-50 p-4">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-rose-700">Current Due</p>
+              <p className="mt-1 text-xl font-extrabold text-rose-800">{formatCurrency(supplier.amountDue)}</p>
+            </div>
           </div>
-          <div className="bg-white rounded-lg p-5 border border-gray-200">
-            <p className="text-xs text-gray-500 uppercase tracking-wider mb-2">Commission Paid</p>
-            <p className="text-2xl font-bold text-gray-900">৳ {supplier.advancePaymentsMade.toLocaleString()}</p>
+        </div>
+
+        <div className="supplier-panel">
+          <h3>Box Accountability</h3>
+          <div className="mt-4 space-y-3">
+            <div className="box-row">
+              <span>Wooden</span>
+              <strong>{supplier.boxesHoldingWooden}</strong>
+            </div>
+            <div className="box-row">
+              <span>Plastic</span>
+              <strong>{supplier.boxesHoldingPlastic}</strong>
+            </div>
+            <div className="box-row total">
+              <span>Total Due</span>
+              <strong>{supplier.totalBoxesHolding}</strong>
+            </div>
           </div>
-          <div className="bg-gray-50 rounded-lg p-5 border border-gray-300">
-            <p className="text-xs text-gray-600 uppercase tracking-wider font-semibold mb-2">
-              Commission Due
-            </p>
-            <p className="text-2xl font-bold text-gray-900">৳ {supplier.amountDue.toLocaleString()}</p>
+
+          <div className="mt-5">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Commission Pending</p>
+            <p className="mt-1 text-lg font-extrabold text-slate-900">{payableRatio}%</p>
+            <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
+              <div
+                className={`h-full rounded-full ${
+                  payableRatio > 60 ? 'bg-rose-500' : payableRatio > 30 ? 'bg-amber-500' : 'bg-emerald-500'
+                }`}
+                style={{ width: `${payableRatio}%` }}
+              />
+            </div>
           </div>
         </div>
       </div>
 
-      <div>
-        <h3 className="text-lg font-bold text-gray-900 mb-4">Boxes Inventory</h3>
-        <div className="grid grid-cols-3 gap-4">
-          <div className="bg-white rounded-lg p-6 border border-gray-200 text-center">
-            <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-3">Wooden</p>
-            <p className="text-4xl font-bold text-gray-900">{supplier.boxesHoldingWooden}</p>
-          </div>
-          <div className="bg-white rounded-lg p-6 border border-gray-200 text-center">
-            <p className="text-xs text-gray-500 uppercase tracking-wider font-semibold mb-3">Plastic</p>
-            <p className="text-4xl font-bold text-gray-900">{supplier.boxesHoldingPlastic}</p>
-          </div>
-          <div className="bg-gray-50 rounded-lg p-6 border border-gray-300 text-center">
-            <p className="text-xs text-gray-600 uppercase tracking-wider font-semibold mb-3">Total</p>
-            <p className="text-4xl font-bold text-gray-900">{supplier.totalBoxesHolding}</p>
-          </div>
-        </div>
-      </div>
+      <div className="supplier-panel">
+        <h3 className="mb-4 text-lg font-bold text-slate-900">Products In Stock</h3>
 
-      {products.length > 0 && (
-        <div>
-          <h3 className="text-lg font-bold text-gray-900 mb-4 flex items-center gap-2">
-            <span>🛒</span>Products In Stock
-          </h3>
-          <div className="overflow-x-auto rounded-xl border border-gray-200">
-            <table className="w-full text-sm">
+        {products.length === 0 ? (
+          <div className="rounded-lg border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm font-medium text-slate-500">
+            No products received from this supplier yet.
+          </div>
+        ) : (
+          <>
+          <div className="space-y-3 lg:hidden">
+            {products.map((product) => {
+              const isStockOut = Number(product.quantity) <= 0
+              return (
+              <div key={product.id} className="rounded-lg border border-slate-200 bg-slate-50 p-3">
+                <div className="flex items-start justify-between gap-2">
+                  <div>
+                    <p className="font-semibold text-slate-900">{product.productName}</p>
+                    <p className="text-xs text-slate-500">{product.category}</p>
+                  </div>
+                  <span
+                    className={`rounded-full px-2 py-0.5 text-[11px] font-semibold ${
+                      isStockOut ? 'bg-rose-100 text-rose-700' : 'bg-emerald-100 text-emerald-700'
+                    }`}
+                  >
+                    {isStockOut ? 'Stock Out' : 'In Stock'}
+                  </span>
+                </div>
+                <div className="mt-2 grid grid-cols-3 gap-2 text-sm">
+                  <div>
+                    <p className="text-[11px] text-slate-500">Qty</p>
+                    <p className="font-semibold text-slate-800">{product.quantity}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-slate-500">Unit</p>
+                    <p className="font-semibold text-slate-800">{formatCurrency(product.unitPrice)}</p>
+                  </div>
+                  <div>
+                    <p className="text-[11px] text-slate-500">Value</p>
+                    <p className="font-semibold text-emerald-700">{formatCurrency(product.totalValue)}</p>
+                  </div>
+                </div>
+              </div>
+              )
+            })}
+          </div>
+
+          <div className="hidden lg:block overflow-x-auto rounded-xl border border-gray-200">
+            <table className="w-full min-w-[760px] text-sm">
               <thead className="bg-gradient-to-r from-gray-50 to-gray-100 border-b border-gray-200">
                 <tr>
                   <th className="px-4 py-3 text-left font-semibold text-gray-700">Product</th>
@@ -114,43 +211,44 @@ const SupplierDetail = ({ supplierId }) => {
                 </tr>
               </thead>
               <tbody>
-                {products.map((product) => (
-                  <tr key={product.id} className="border-b border-gray-200 hover:bg-gray-50 transition">
-                    <td className="px-4 py-3 text-gray-800 font-medium">{product.productName}</td>
-                    <td className="px-4 py-3 text-gray-700">{product.category}</td>
-                    <td className="px-4 py-3 text-center text-gray-700">{product.quantity}</td>
-                    <td className="px-4 py-3 text-right text-gray-700">৳ {product.unitPrice}</td>
-                    <td className="px-4 py-3 text-right">
-                      <span className="money money-income font-bold">
-                        ৳ {product.totalValue.toLocaleString()}
-                      </span>
-                    </td>
-                    <td className="px-4 py-3 text-center">
-                      <span
-                        className={`px-2 py-1 rounded text-xs font-bold ${
-                          product.status === 'in_stock'
-                            ? 'bg-green-100 text-green-700'
-                            : 'bg-gray-200 text-gray-700'
-                        }`}
-                      >
-                        {product.status}
-                      </span>
-                    </td>
-                  </tr>
-                ))}
+                {products.map((product) => {
+                  const isStockOut = Number(product.quantity) <= 0
+                  return (
+                    <tr key={product.id} className="border-b border-gray-200 hover:bg-gray-50 transition">
+                      <td className="px-4 py-3 text-gray-800 font-medium">{product.productName}</td>
+                      <td className="px-4 py-3 text-gray-700">{product.category}</td>
+                      <td className="px-4 py-3 text-center text-gray-700">{product.quantity}</td>
+                      <td className="px-4 py-3 text-right text-gray-700">{formatCurrency(product.unitPrice)}</td>
+                      <td className="px-4 py-3 text-right">
+                        <span className="money money-income font-bold">{formatCurrency(product.totalValue)}</span>
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        <span
+                          className={`px-2 py-1 rounded text-xs font-bold ${
+                            isStockOut ? 'bg-rose-100 text-rose-700' : 'bg-green-100 text-green-700'
+                          }`}
+                        >
+                          {isStockOut ? 'Stock Out' : 'In Stock'}
+                        </span>
+                      </td>
+                    </tr>
+                  )
+                })}
               </tbody>
             </table>
           </div>
-          <div className="flex justify-end mt-4 p-4 bg-green-50 rounded-xl border border-green-200">
+
+          <div className="mt-4 flex justify-end rounded-xl border border-emerald-100 bg-emerald-50 p-4">
             <div className="text-right">
-              <p className="text-gray-700 text-sm mb-1">Total Product Value:</p>
-              <p className="text-2xl font-bold money money-income">৳ {totalProductValue.toLocaleString()}</p>
+              <p className="text-sm text-emerald-700">Total Product Value</p>
+              <p className="text-2xl font-extrabold text-emerald-800">{formatCurrency(totalProductValue)}</p>
             </div>
           </div>
-        </div>
-      )}
+          </>
+        )}
+      </div>
     </div>
-  );
-};
+  )
+}
 
-export default SupplierDetail;
+export default SupplierDetail

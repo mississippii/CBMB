@@ -6,6 +6,7 @@ const SuppliersList = () => {
   const { suppliers, supplierProducts, addSupplier } = useData();
   const [showForm, setShowForm] = useState(false);
   const [selectedSupplierId, setSelectedSupplierId] = useState(null);
+  const [phoneSearch, setPhoneSearch] = useState('');
   const [formData, setFormData] = useState({
     name: '',
     contact: '',
@@ -28,22 +29,48 @@ const SuppliersList = () => {
     }
   };
 
+  const normalizePhone = (value) => String(value ?? '').replace(/\D/g, '');
+  const normalizedSearchPhone = normalizePhone(phoneSearch);
+  const filteredSuppliers = suppliers.filter((supplier) => {
+    if (!normalizedSearchPhone) return true;
+    return normalizePhone(supplier.contact).includes(normalizedSearchPhone);
+  });
+
+  if (selectedSupplierId) {
+    return (
+      <SupplierDetail
+        supplierId={selectedSupplierId}
+        onBack={() => setSelectedSupplierId(null)}
+      />
+    );
+  }
+
   return (
     <div className="space-y-4">
-      {/* Add Button */}
-      <button
-        onClick={() => setShowForm(true)}
-        className="btn-primary"
-      >
-        ➕ Add Supplier
-      </button>
+      <div className="flex flex-col gap-3 sm:flex-row sm:items-end sm:justify-between">
+        <button
+          onClick={() => setShowForm(true)}
+          className="btn-primary w-full sm:w-auto"
+        >
+          Add Supplier
+        </button>
+        <div className="w-full sm:w-[340px]">
+          <label>Search by phone number</label>
+          <input
+            type="text"
+            value={phoneSearch}
+            onChange={(event) => setPhoneSearch(event.target.value)}
+            className="input-field"
+            placeholder="e.g. 017XXXXXXXX"
+          />
+        </div>
+      </div>
 
-      {/* Add Supplier Modal */}
       {showForm && (
         <div className="modal-overlay">
           <div className="modal-content">
             <div className="modal-header">
-              <h2>🏪 Add New Supplier</h2>
+              <h2>Add New Supplier</h2>
               <button
                 onClick={() => setShowForm(false)}
                 className="modal-close-btn"
@@ -101,92 +128,128 @@ const SuppliersList = () => {
                 onClick={handleAddSupplier}
                 className="btn-primary"
               >
-                ✅ Add Supplier
+                Add Supplier
               </button>
             </div>
           </div>
         </div>
       )}
 
-      {/* Suppliers Table */}
       <div className="card">
-        <h3 className="text-lg font-bold text-gray-900 mb-4">Suppliers List</h3>
+        <h3 className="mb-4 text-lg font-bold text-gray-900">Suppliers List</h3>
         {suppliers.length === 0 ? (
           <div className="text-center py-6 text-gray-500">No suppliers added yet</div>
         ) : (
-          <table className="w-full text-sm">
-            <thead className="bg-gray-100">
-              <tr>
-                <th className="px-4 py-2 text-left font-semibold text-gray-900">Name</th>
-                <th className="px-4 py-2 text-left font-semibold text-gray-900">Contact</th>
-                <th className="px-4 py-2 text-left font-semibold text-gray-900">Product Categories</th>
-                <th className="px-4 py-2 text-right font-semibold text-gray-900">Amount Due</th>
-                <th className="px-4 py-2 text-center font-semibold text-gray-900">Commission</th>
-                <th className="px-4 py-2 text-center font-semibold text-gray-900">Box Due</th>
-                <th className="px-4 py-2 text-center font-semibold text-gray-900">Action</th>
-              </tr>
-            </thead>
-            <tbody>
-              {suppliers.map((supplier) => {
-                const categories = [
-                  ...new Set(
-                    supplierProducts
-                      .filter((product) => product.supplierId === supplier.id)
-                      .map((product) => product.category),
-                  ),
-                ];
+          <>
+            <div className="mb-4 text-sm font-semibold text-slate-600">
+              {filteredSuppliers.length} result{filteredSuppliers.length === 1 ? '' : 's'}
+            </div>
 
-                return (
-                  <tr key={supplier.id} className="border-b hover:bg-gray-50">
-                    <td className="px-4 py-2 font-semibold text-gray-900">{supplier.name}</td>
-                    <td className="px-4 py-2 text-gray-700">{supplier.contact}</td>
-                    <td className="px-4 py-2 text-gray-700">{categories.join(', ') || 'N/A'}</td>
-                    <td className="px-4 py-2 text-right font-bold text-red-600">
-                      ৳ {supplier.amountDue.toLocaleString()}
-                    </td>
-                    <td className="px-4 py-2 text-center text-gray-700">
-                      {supplier.commissionRate}% (৳ {supplier.totalCommissionEarned.toLocaleString()})
-                    </td>
-                    <td className="px-4 py-2 text-center font-semibold text-gray-900">
-                      {supplier.totalBoxesHolding}
-                    </td>
-                    <td className="px-4 py-2 text-center">
-                      <button
-                        onClick={() => setSelectedSupplierId(supplier.id)}
-                        className="text-blue-600 hover:text-blue-800 font-semibold"
-                      >
-                        View
-                      </button>
-                    </td>
-                  </tr>
-                );
-              })}
-            </tbody>
-          </table>
+            {filteredSuppliers.length === 0 ? (
+              <div className="text-center py-8 text-slate-500">No supplier found for this phone number.</div>
+            ) : (
+              <>
+                <div className="space-y-3 lg:hidden">
+                  {filteredSuppliers.map((supplier) => {
+                    const categories = [
+                      ...new Set(
+                        supplierProducts
+                          .filter((product) => product.supplierId === supplier.id)
+                          .map((product) => product.category),
+                      ),
+                    ];
+                    return (
+                      <div key={supplier.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                        <div className="flex items-start justify-between gap-3">
+                          <div>
+                            <p className="font-semibold text-slate-900">{supplier.name}</p>
+                            <p className="text-sm text-slate-500">{supplier.contact}</p>
+                          </div>
+                          <button
+                            onClick={() => setSelectedSupplierId(supplier.id)}
+                            className="btn-secondary !py-1.5 !px-3 text-xs"
+                          >
+                            Profile
+                          </button>
+                        </div>
+                        <div className="mt-3 space-y-1.5 text-sm">
+                          <p className="text-slate-600">
+                            <span className="font-semibold text-slate-800">Categories:</span>{' '}
+                            {categories.join(', ') || 'N/A'}
+                          </p>
+                          <p className="text-slate-600">
+                            <span className="font-semibold text-slate-800">Amount Due:</span>{' '}
+                            <span className="font-bold text-red-600">৳ {supplier.amountDue.toLocaleString()}</span>
+                          </p>
+                          <p className="text-slate-600">
+                            <span className="font-semibold text-slate-800">Commission:</span>{' '}
+                            {supplier.commissionRate}% (৳ {supplier.totalCommissionEarned.toLocaleString()})
+                          </p>
+                          <p className="text-slate-600">
+                            <span className="font-semibold text-slate-800">Box Due:</span> {supplier.totalBoxesHolding}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div className="hidden lg:block overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="w-full text-sm min-w-[900px]">
+                    <thead className="bg-gray-100">
+                      <tr>
+                        <th className="px-4 py-2 text-left font-semibold text-gray-900">Name</th>
+                        <th className="px-4 py-2 text-left font-semibold text-gray-900">Contact</th>
+                        <th className="px-4 py-2 text-left font-semibold text-gray-900">Product Categories</th>
+                        <th className="px-4 py-2 text-right font-semibold text-gray-900">Amount Due</th>
+                        <th className="px-4 py-2 text-center font-semibold text-gray-900">Commission</th>
+                        <th className="px-4 py-2 text-center font-semibold text-gray-900">Box Due</th>
+                        <th className="px-4 py-2 text-center font-semibold text-gray-900">Action</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {filteredSuppliers.map((supplier) => {
+                        const categories = [
+                          ...new Set(
+                            supplierProducts
+                              .filter((product) => product.supplierId === supplier.id)
+                              .map((product) => product.category),
+                          ),
+                        ];
+
+                        return (
+                          <tr key={supplier.id} className="border-b hover:bg-gray-50">
+                            <td className="px-4 py-2 font-semibold text-gray-900">{supplier.name}</td>
+                            <td className="px-4 py-2 text-gray-700">{supplier.contact}</td>
+                            <td className="px-4 py-2 text-gray-700">{categories.join(', ') || 'N/A'}</td>
+                            <td className="px-4 py-2 text-right font-bold text-red-600">
+                              ৳ {supplier.amountDue.toLocaleString()}
+                            </td>
+                            <td className="px-4 py-2 text-center text-gray-700">
+                              {supplier.commissionRate}% (৳ {supplier.totalCommissionEarned.toLocaleString()})
+                            </td>
+                            <td className="px-4 py-2 text-center font-semibold text-gray-900">
+                              {supplier.totalBoxesHolding}
+                            </td>
+                            <td className="px-4 py-2 text-center">
+                              <button
+                                onClick={() => setSelectedSupplierId(supplier.id)}
+                                className="text-blue-600 hover:text-blue-800 font-semibold"
+                              >
+                                Profile
+                              </button>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+              </>
+            )}
+          </>
         )}
       </div>
-
-      {/* Modal - Supplier Detail */}
-      {selectedSupplierId && (
-        <div className="fixed inset-0 bg-black bg-opacity-40 z-50 flex items-center justify-center p-4 backdrop-blur-sm">
-          <div className="bg-white rounded-2xl max-w-4xl w-full max-h-[90vh] overflow-y-auto shadow-2xl">
-            <div className="sticky top-0 bg-gradient-to-r from-indigo-50 via-white to-purple-50 border-b border-gray-200 p-6 flex justify-between items-center">
-              <h2 className="text-2xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent">
-                Supplier Details
-              </h2>
-              <button
-                onClick={() => setSelectedSupplierId(null)}
-                className="flex items-center justify-center w-10 h-10 rounded-full hover:bg-gray-100 transition-colors"
-              >
-                <span className="text-2xl">✕</span>
-              </button>
-            </div>
-            <div className="p-8">
-              <SupplierDetail supplierId={selectedSupplierId} />
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

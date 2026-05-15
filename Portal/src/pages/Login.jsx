@@ -5,8 +5,9 @@ import { useAuth } from '../context/AuthContext';
 const Login = () => {
   const { login } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState('admin@gmail.com');
+  const [email, setEmail] = useState('wholesaler@gmail.com');
   const [password, setPassword] = useState('Admin123');
+  const [showPassword, setShowPassword] = useState(false);
   const [error, setError] = useState('');
 
   const handleSubmit = (e) => {
@@ -27,77 +28,73 @@ const Login = () => {
   };
 
   return (
-    <div className="min-h-screen bg-white flex items-center justify-center px-4 py-8">
+    <div className="auth-shell">
       <div className="w-full max-w-md">
-        <div className="card">
-          {/* Header */}
-          <div className="text-center mb-8">
-            <div className="inline-flex items-center justify-center w-16 h-16 bg-gradient-to-br from-indigo-500 to-purple-600 rounded-2xl mb-4 mx-auto">
-              <span className="text-2xl">📦</span>
+        <div className="auth-card relative overflow-hidden border-slate-200/90">
+          <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-[#255f60] via-[#307D7E] to-[#4f9899]" />
+
+          <div className="mb-7 text-center pt-2">
+            <div className="mx-auto mb-4 inline-flex h-14 w-14 items-center justify-center rounded-2xl bg-gradient-to-br from-[#307D7E] to-[#255f60] text-xl font-bold text-white shadow-lg shadow-emerald-200/70">
+              CB
             </div>
-            <h1 className="text-3xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent mb-1">
+            <h1 className="mb-1 bg-gradient-to-r from-[#255f60] to-[#307D7E] bg-clip-text text-3xl font-extrabold text-transparent">
               CBTrading
             </h1>
-            <p className="text-sm text-gray-500 font-medium">Agricultural Trading Portal</p>
+            <p className="text-sm font-medium text-slate-500">Sign in to manage your wholesaler workspace</p>
           </div>
 
-          {/* Form */}
-          <form onSubmit={handleSubmit} className="space-y-5">
-            {/* Email/Username */}
+          <form onSubmit={handleSubmit} className="space-y-4">
             <div>
               <label>Email or Username</label>
-              <input
-                type="text"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                placeholder="admin@gmail.com"
-                className="input-field"
-              />
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-slate-400">
+                  @
+                </span>
+                <input
+                  type="text"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  placeholder="wholesaler@gmail.com"
+                  className="input-field pl-9"
+                />
+              </div>
             </div>
 
-            {/* Password */}
             <div>
               <label>Password</label>
-              <input
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                placeholder="Enter your password"
-                className="input-field"
-              />
+              <div className="relative">
+                <span className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-sm font-semibold text-slate-400">
+                  *
+                </span>
+                <input
+                  type={showPassword ? 'text' : 'password'}
+                  value={password}
+                  onChange={(e) => setPassword(e.target.value)}
+                  placeholder="Enter your password"
+                  className="input-field pl-9 pr-16"
+                />
+                <button
+                  type="button"
+                  onClick={() => setShowPassword((prev) => !prev)}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 rounded-lg px-2 py-1 text-xs font-semibold text-slate-600 hover:bg-slate-100"
+                >
+                  {showPassword ? 'Hide' : 'Show'}
+                </button>
+              </div>
+              <p className="mt-2 text-xs text-slate-500">Private access for the assigned stockist only.</p>
             </div>
 
-            {/* Error Message */}
             {error && (
               <div className="status-error">
-                <span>⚠️</span>
+                <span>!</span>
                 <span>{error}</span>
               </div>
             )}
 
-            {/* Submit Button */}
-            <button
-              type="submit"
-              className="btn-primary w-full py-3 mt-6"
-            >
-              🔓 Sign In
+            <button type="submit" className="btn-primary mt-4 w-full py-3">
+              Sign In
             </button>
           </form>
-
-          {/* Demo Info */}
-          <div className="mt-8 pt-6 border-t border-gray-200">
-            <p className="text-xs font-semibold text-gray-700 mb-3">📝 Demo Credentials</p>
-            <div className="space-y-2">
-              <div className="bg-indigo-50 p-3 rounded-lg">
-                <p className="text-xs text-gray-600">Email</p>
-                <p className="text-sm font-mono font-semibold text-indigo-600">admin@gmail.com</p>
-              </div>
-              <div className="bg-indigo-50 p-3 rounded-lg">
-                <p className="text-xs text-gray-600">Password</p>
-                <p className="text-sm font-mono font-semibold text-indigo-600">Admin123</p>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
     </div>

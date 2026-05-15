@@ -282,26 +282,91 @@ export const DataProvider = ({ children }) => {
   };
 
   const addSupplierProduct = (productData) => {
+    const supplierId = Number(productData.supplierId);
     const quantity = toPositiveNumber(productData.quantity);
     const unitPrice = toPositiveNumber(productData.unitPrice);
-    const newProduct = {
-      id: getNextId(supplierProducts),
-      ...productData,
+    const supplier = suppliers.find((item) => item.id === supplierId);
+
+    if (!supplier) {
+      throw new Error('Supplier not found.');
+    }
+    if (!productData.productName?.trim() || !productData.category?.trim()) {
+      throw new Error('Please provide product name and category.');
+    }
+    if (!quantity || !unitPrice) {
+      throw new Error('Please provide valid quantity and unit price.');
+    }
+
+    const productName = productData.productName.trim();
+    const category = productData.category.trim();
+    const unit = productData.unit || 'pcs';
+    const existingProduct = supplierProducts.find(
+      (product) =>
+        product.supplierId === supplierId &&
+        product.productName.trim().toLowerCase() === productName.toLowerCase() &&
+        product.category.trim().toLowerCase() === category.toLowerCase() &&
+        (product.unit || 'pcs') === unit,
+    );
+
+    const productAfterDelivery = existingProduct
+      ? {
+          ...existingProduct,
+          quantity: roundMoney((Number(existingProduct.quantity) || 0) + quantity),
+          unitPrice,
+          totalValue: roundMoney(
+            ((Number(existingProduct.quantity) || 0) + quantity) * unitPrice,
+          ),
+          dateReceived: getDateOnly(),
+          status: 'in_stock',
+        }
+      : {
+          id: getNextId(supplierProducts),
+          ...productData,
+          supplierId,
+          productName,
+          category,
+          unit,
+          quantity,
+          unitPrice,
+          totalValue: roundMoney(quantity * unitPrice),
+          dateReceived: getDateOnly(),
+          status: 'in_stock',
+        };
+
+    const deliveryValue = roundMoney(quantity * unitPrice);
+    const newTransaction = {
+      id: getNextId(transactions),
+      date: getDateOnly(),
+      createdAt: new Date().toISOString(),
+      transactionType: 'SupplierDelivery',
+      supplier: supplier.name,
+      supplierId: supplier.id,
+      product: productAfterDelivery.productName,
+      productId: productAfterDelivery.id,
+      category: productAfterDelivery.category,
       quantity,
       unitPrice,
-      totalValue: roundMoney(quantity * unitPrice),
-      dateReceived: getDateOnly(),
-      status: 'in_stock',
+      unit: productAfterDelivery.unit,
+      totalAmount: deliveryValue,
+      note: productData.note?.trim() || '',
     };
-    setSupplierProducts((prev) => [...prev, newProduct]);
-    return newProduct;
+
+    setSupplierProducts((prev) =>
+      existingProduct
+        ? prev.map((product) =>
+            product.id === existingProduct.id ? productAfterDelivery : product,
+          )
+        : [...prev, productAfterDelivery],
+    );
+    setTransactions((prev) => [...prev, newTransaction]);
+    return productAfterDelivery;
   };
 
   const addCustomer = (customerData) => {
     const newCustomer = {
       id: getNextId(customers),
       ...customerData,
-      type: customerData.type || 'Permanent',
+      type: 'Permanent',
       totalPurchases: 0,
       totalPaid: 0,
       amountDue: 0,
@@ -754,6 +819,7 @@ export const DataProvider = ({ children }) => {
       transactionType: 'Payment',
       partyType: partyType === 'customer' ? 'Customer' : 'Supplier',
       partyName,
+      partyId,
       paymentType,
       totalAmount: inputAmount,
       paymentAmount: appliedPayment,

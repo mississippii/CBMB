@@ -6,74 +6,52 @@ import SuppliersList from '../components/SuppliersList';
 import CustomersList from '../components/CustomersList';
 import TransactionForm from '../components/TransactionForm';
 import TransactionsList from '../components/TransactionsList';
+import AddProducts from '../components/AddProducts';
 
 const Dashboard = () => {
-  const { admin } = useAuth();
+  const { admin: wholesaler } = useAuth();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [showTransactionModal, setShowTransactionModal] = useState(false);
 
   const tabs = [
-    { id: 'dashboard', label: '📦 Box Dashboard', icon: '📊' },
-    { id: 'suppliers', label: '🚜 Suppliers', icon: '📦' },
-    { id: 'customers', label: '👥 Customers', icon: '👤' },
-    { id: 'transactions', label: '📋 Transactions', icon: '📜' },
-    { id: 'payment', label: '💳 Payment', icon: '💰' },
+    { id: 'dashboard', label: 'Box Dashboard' },
+    { id: 'add-products', label: 'Add Products' },
+    { id: 'suppliers', label: 'Suppliers' },
+    { id: 'customers', label: 'Customers' },
+    { id: 'transactions', label: 'Transactions' },
+    { id: 'payment', label: 'Payments' },
   ];
 
   return (
-    <div className="min-h-screen bg-gradient-to-br from-slate-50 to-slate-100">
-      <Navbar />
+    <div className="min-h-screen">
+      <Navbar onHome={() => setActiveTab('dashboard')} />
 
       <div className="container-main">
-        {/* Welcome Section */}
-        <div className="mb-8 card highlight">
-          <div className="flex items-start justify-between">
+        <div className="mb-5 welcome-banner">
+          <div className="flex flex-col items-start gap-2">
             <div>
-              <h2 className="text-3xl font-bold bg-gradient-to-r from-indigo-600 to-purple-600 bg-clip-text text-transparent mb-2">
-                👋 Welcome back, {admin?.fullName || 'Admin'}!
+              <h2 className="mb-1 bg-gradient-to-r from-[#255f60] to-[#307D7E] bg-clip-text text-2xl font-extrabold text-transparent md:text-3xl">
+                Welcome back, {wholesaler?.fullName || 'Wholesaler'}
               </h2>
-              <p className="text-gray-600 text-sm">
-                📧 {admin?.email} • 📱 {admin?.phone}
+              <p className="text-sm font-medium text-slate-600">
+                {wholesaler?.email} • {wholesaler?.phone}
               </p>
             </div>
-            <div className="text-right">
-              <p className="text-xs text-gray-500 uppercase tracking-wider mb-1">Status</p>
-              <div className="flex items-center gap-2 justify-end">
-                <div className="w-3 h-3 bg-green-500 rounded-full animate-pulse"></div>
-                <span className="text-sm font-semibold text-green-600">Active</span>
-              </div>
+          </div>
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">Status</p>
+            <div className="mt-1 flex items-center gap-2">
+              <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-emerald-500" />
+              <span className="text-sm font-semibold text-emerald-700">Active session</span>
             </div>
           </div>
         </div>
 
-        {/* Tab Navigation & New Sale Button */}
-        <div className="mb-8 tabs-container bg-white rounded-xl shadow-sm p-1 flex items-center justify-between">
-          <div className="flex">
-            {tabs.map((tab) => (
-              <button
-                key={tab.id}
-                onClick={() => setActiveTab(tab.id)}
-                className={`tab-button ${activeTab === tab.id ? 'active' : ''}`}
-              >
-                <span>{tab.icon}</span>
-                <span>{tab.label}</span>
-              </button>
-            ))}
-          </div>
-          <button
-            onClick={() => setShowTransactionModal(true)}
-            className="btn-primary flex items-center gap-2 whitespace-nowrap"
-          >
-            ➕ New Sale
-          </button>
-        </div>
-
-        {/* New Transaction Modal */}
         {showTransactionModal && (
           <div className="modal-overlay">
             <div className="modal-content" style={{ maxWidth: '48rem' }}>
               <div className="modal-header">
-                <h2>💰 Record New Sale</h2>
+                <h2>Record New Sale</h2>
                 <button
                   onClick={() => setShowTransactionModal(false)}
                   className="modal-close-btn"
@@ -88,18 +66,41 @@ const Dashboard = () => {
           </div>
         )}
 
-        {/* Content */}
-        <div className="animate-fadeIn">
-          {activeTab === 'dashboard' && <BoxDashboard />}
-          {activeTab === 'suppliers' && <SuppliersList />}
-          {activeTab === 'customers' && <CustomersList />}
-          {activeTab === 'transactions' && <TransactionsList />}
-          {activeTab === 'payment' && (
-            <div className="card">
-              <h3 className="section-header">💳 Payment</h3>
-              <TransactionForm entryMode="payment" />
+        <div className="workspace-layout">
+          <aside className="workspace-sidebar">
+            <div className="sidebar-header">
+              <button
+                onClick={() => setShowTransactionModal(true)}
+                className="btn-primary w-full"
+              >
+                +New Sale
+              </button>
             </div>
-          )}
+
+            <nav className="sidebar-nav">
+              {tabs.map((tab) => (
+                <button
+                  key={tab.id}
+                  type="button"
+                  onClick={() => setActiveTab(tab.id)}
+                  className={`sidebar-nav-item ${activeTab === tab.id ? 'active' : ''}`}
+                >
+                  <span className="sidebar-nav-title">{tab.label}</span>
+                </button>
+              ))}
+            </nav>
+          </aside>
+
+          <main className="workspace-content">
+            <div className="animate-fadeIn">
+              {activeTab === 'dashboard' && <BoxDashboard />}
+              {activeTab === 'add-products' && <AddProducts />}
+              {activeTab === 'suppliers' && <SuppliersList />}
+              {activeTab === 'customers' && <CustomersList />}
+              {activeTab === 'transactions' && <TransactionsList />}
+              {activeTab === 'payment' && <TransactionForm entryMode="payment" />}
+            </div>
+          </main>
         </div>
       </div>
     </div>

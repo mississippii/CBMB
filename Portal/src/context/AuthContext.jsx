@@ -6,9 +6,10 @@ const AUTH_STORAGE_KEY = 'cbtrading-auth-v1';
 
 const DEFAULT_ADMIN = {
   id: 1,
-  email: 'admin@gmail.com',
-  fullName: 'Admin CBTrading',
+  email: 'wholesaler@gmail.com',
+  fullName: 'CBTrading Wholesaler',
   phone: '0171-XXXXXXX',
+  role: 'WHOLESALER',
 };
 
 const loadAuthState = () => {
@@ -54,7 +55,7 @@ export const AuthProvider = ({ children }) => {
 
   const login = (email, password) => {
     const normalizedEmail = email.trim().toLowerCase();
-    const allowedEmails = ['admin@gmail.com', 'admin@cbtrading.com', 'admin123'];
+    const allowedEmails = ['wholesaler@gmail.com', 'stockist@cbtrading.com', 'stockist123'];
     if (allowedEmails.includes(normalizedEmail) && password === 'Admin123') {
       setIsAuthenticated(true);
       setAdmin(DEFAULT_ADMIN);

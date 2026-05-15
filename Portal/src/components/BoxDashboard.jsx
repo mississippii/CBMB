@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useData } from '../context/DataContext';
 
 const BoxDashboard = () => {
-  const { boxInventory, addBoxes, markBoxesLost } = useData();
+  const { boxInventory, suppliers, customers, addBoxes, markBoxesLost } = useData();
   const [showAddForm, setShowAddForm] = useState(false);
   const [showLossForm, setShowLossForm] = useState(false);
   const [formData, setFormData] = useState({
@@ -44,134 +44,216 @@ const BoxDashboard = () => {
   };
 
   const boxesDue = boxInventory.boxesWithSuppliers + boxInventory.boxesWithCustomers;
-  const boxesInHand = boxInventory.totalBoxesOwned - boxesDue;
+  const boxesInHand = boxInventory.boxesInShop;
+  const activeBoxes = Math.max(boxInventory.totalBoxesOwned, 1);
+  const duePercent = Math.round((boxesDue / activeBoxes) * 100);
+  const inShopPercent = Math.round((boxInventory.boxesInShop / activeBoxes) * 100);
+  const supplierPercent = Math.round((boxInventory.boxesWithSuppliers / activeBoxes) * 100);
+  const customerPercent = Math.round((boxInventory.boxesWithCustomers / activeBoxes) * 100);
+  const lostPercent = Math.round((boxInventory.boxesLostDamaged / Math.max(boxInventory.totalBoxesOwned + boxInventory.boxesLostDamaged, 1)) * 100);
+  const boxTypes = [
+    { key: 'wooden', label: 'Wooden Boxes', shortLabel: 'Wooden', data: boxInventory.wooden },
+    { key: 'plastic', label: 'Plastic Boxes', shortLabel: 'Plastic', data: boxInventory.plastic },
+  ];
+  const topCustomerHolders = customers
+    .filter((customer) => Number(customer.totalBoxesHolding) > 0)
+    .sort((a, b) => Number(b.totalBoxesHolding) - Number(a.totalBoxesHolding))
+    .slice(0, 4);
+  const topSupplierHolders = suppliers
+    .filter((supplier) => Number(supplier.totalBoxesHolding) > 0)
+    .sort((a, b) => Number(b.totalBoxesHolding) - Number(a.totalBoxesHolding))
+    .slice(0, 4);
 
   return (
-    <div className="space-y-6">
+    <div className="box-dashboard">
       {statusMessage && (
         <div className="status-success">
-          <span>ℹ️</span>
+          <span>i</span>
           <span>{statusMessage}</span>
         </div>
       )}
-      {/* Main Stats */}
-      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-        {/* Total Boxes */}
-        <div className="card bg-gradient-to-br from-blue-50 to-blue-100 border-l-4 border-blue-600">
-          <div className="flex justify-between items-start">
+
+      <section className="box-overview">
+        <div className="box-overview-copy">
+          <span className="box-eyebrow">Box Control</span>
+          <h3>Inventory accountability</h3>
+          <p>
+            Track boxes in shop, with customers, with suppliers, and lost/damaged from one place.
+          </p>
+        </div>
+        <div className="box-action-row">
+          <button
+            onClick={() => setShowAddForm(true)}
+            className="btn-primary"
+          >
+            Add Boxes
+          </button>
+          <button
+            onClick={() => setShowLossForm(true)}
+            className="btn-danger"
+          >
+            Mark Lost/Damaged
+          </button>
+        </div>
+      </section>
+
+      <section className="box-kpi-grid">
+        <div className="box-kpi primary">
+          <span>Total Inventory</span>
+          <strong>{boxInventory.totalBoxesOwned}</strong>
+          <p>Boxes currently owned</p>
+        </div>
+        <div className="box-kpi success">
+          <span>In Shop</span>
+          <strong>{boxesInHand}</strong>
+          <p>{inShopPercent}% ready for dispatch</p>
+        </div>
+        <div className="box-kpi warning">
+          <span>Due Outside</span>
+          <strong>{boxesDue}</strong>
+          <p>{duePercent}% with parties</p>
+        </div>
+        <div className="box-kpi danger">
+          <span>Lost/Damaged</span>
+          <strong>{boxInventory.boxesLostDamaged}</strong>
+          <p>{lostPercent}% lifetime loss</p>
+        </div>
+      </section>
+
+      <section className="box-dashboard-grid">
+        <div className="box-panel allocation-panel">
+          <div className="box-panel-header">
             <div>
-              <p className="text-gray-600 text-sm font-semibold">TOTAL BOXES</p>
-              <p className="text-4xl font-bold text-blue-600 mt-2">{boxInventory.totalBoxesOwned}</p>
-              <p className="text-gray-500 text-xs mt-1">Fixed Inventory</p>
+              <h3>Current Allocation</h3>
+              <p>Where the boxes are right now.</p>
             </div>
-            <span className="text-5xl">📦</span>
+            <span>{boxInventory.totalBoxesOwned} active</span>
+          </div>
+
+          <div className="allocation-track" aria-label="Box allocation">
+            <span className="allocation-shop" style={{ width: `${inShopPercent}%` }} />
+            <span className="allocation-suppliers" style={{ width: `${supplierPercent}%` }} />
+            <span className="allocation-customers" style={{ width: `${customerPercent}%` }} />
+          </div>
+
+          <div className="allocation-list">
+            <div className="allocation-item shop">
+              <div>
+                <span />
+                <p>In Shop</p>
+              </div>
+              <strong>{boxInventory.boxesInShop}</strong>
+            </div>
+            <div className="allocation-item suppliers">
+              <div>
+                <span />
+                <p>With Suppliers</p>
+              </div>
+              <strong>{boxInventory.boxesWithSuppliers}</strong>
+            </div>
+            <div className="allocation-item customers">
+              <div>
+                <span />
+                <p>With Customers</p>
+              </div>
+              <strong>{boxInventory.boxesWithCustomers}</strong>
+            </div>
           </div>
         </div>
 
-        {/* Boxes Due */}
-        <div className="card bg-gradient-to-br from-orange-50 to-orange-100 border-l-4 border-orange-600">
-          <div className="flex justify-between items-start">
+        <div className="box-panel">
+          <div className="box-panel-header">
             <div>
-              <p className="text-gray-600 text-sm font-semibold">BOXES DUE</p>
-              <p className="text-4xl font-bold text-orange-600 mt-2">{boxesDue}</p>
-              <p className="text-gray-500 text-xs mt-1">Outstanding</p>
+              <h3>Type Breakdown</h3>
+              <p>Wooden and plastic box movement.</p>
             </div>
-            <span className="text-5xl">🔄</span>
+          </div>
+
+          <div className="box-type-list">
+            {boxTypes.map((type) => {
+              const due = type.data.withSuppliers + type.data.withCustomers;
+              const typeActive = Math.max(type.data.total, 1);
+
+              return (
+                <div key={type.key} className="box-type-card">
+                  <div className="box-type-title">
+                    <div>
+                      <h4>{type.label}</h4>
+                      <p>{due} outside</p>
+                    </div>
+                    <strong>{type.data.total}</strong>
+                  </div>
+                  <div className="box-type-meter">
+                    <span style={{ width: `${Math.round((type.data.inShop / typeActive) * 100)}%` }} />
+                  </div>
+                  <div className="box-type-stats">
+                    <span>Shop: {type.data.inShop}</span>
+                    <span>Supplier: {type.data.withSuppliers}</span>
+                    <span>Customer: {type.data.withCustomers}</span>
+                    <span>Lost: {type.data.lost}</span>
+                  </div>
+                </div>
+              );
+            })}
           </div>
         </div>
+      </section>
 
-        {/* Boxes In Hand */}
-        <div className="card bg-gradient-to-br from-green-50 to-green-100 border-l-4 border-green-600">
-          <div className="flex justify-between items-start">
+      <section className="box-holder-grid">
+        <div className="box-panel">
+          <div className="box-panel-header">
             <div>
-              <p className="text-gray-600 text-sm font-semibold">IN-HAND</p>
-              <p className="text-4xl font-bold text-green-600 mt-2">{boxesInHand}</p>
-              <p className="text-gray-500 text-xs mt-1">Available</p>
+              <h3>Customer Box Due</h3>
+              <p>Highest customer holdings.</p>
             </div>
-            <span className="text-5xl">✓</span>
           </div>
-        </div>
-      </div>
-
-      {/* Box Types Breakdown */}
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-        {/* Wooden Crates */}
-        <div className="card">
-          <h3 className="text-lg font-bold text-gray-800 mb-4">🪵 Wooden Crates</h3>
-          <div className="space-y-2">
-            <div className="flex justify-between items-center py-2 border-b">
-              <span className="text-gray-600">Total:</span>
-              <span className="font-bold text-lg">{boxInventory.wooden.total}</span>
-            </div>
-            <div className="flex justify-between items-center py-2 border-b">
-              <span className="text-gray-600">In Shop:</span>
-              <span className="font-bold text-green-600">{boxInventory.wooden.inShop}</span>
-            </div>
-            <div className="flex justify-between items-center py-2 border-b">
-              <span className="text-gray-600">With Suppliers:</span>
-              <span className="font-bold text-blue-600">{boxInventory.wooden.withSuppliers}</span>
-            </div>
-            <div className="flex justify-between items-center py-2 border-b">
-              <span className="text-gray-600">With Customers:</span>
-              <span className="font-bold text-indigo-600">{boxInventory.wooden.withCustomers}</span>
-            </div>
-            <div className="flex justify-between items-center py-2">
-              <span className="text-gray-600">Lost/Damaged:</span>
-              <span className="font-bold text-red-600">{boxInventory.wooden.lost}</span>
-            </div>
+          <div className="holder-list">
+            {topCustomerHolders.length ? (
+              topCustomerHolders.map((customer) => (
+                <div key={customer.id} className="holder-row">
+                  <div>
+                    <h4>{customer.name}</h4>
+                    <p>{customer.phone}</p>
+                  </div>
+                  <strong>{customer.totalBoxesHolding}</strong>
+                </div>
+              ))
+            ) : (
+              <div className="empty-state">No customer box due.</div>
+            )}
           </div>
         </div>
 
-        {/* Plastic Crates */}
-        <div className="card">
-          <h3 className="text-lg font-bold text-gray-800 mb-4">♻️ Plastic Crates</h3>
-          <div className="space-y-2">
-            <div className="flex justify-between items-center py-2 border-b">
-              <span className="text-gray-600">Total:</span>
-              <span className="font-bold text-lg">{boxInventory.plastic.total}</span>
-            </div>
-            <div className="flex justify-between items-center py-2 border-b">
-              <span className="text-gray-600">In Shop:</span>
-              <span className="font-bold text-green-600">{boxInventory.plastic.inShop}</span>
-            </div>
-            <div className="flex justify-between items-center py-2 border-b">
-              <span className="text-gray-600">With Suppliers:</span>
-              <span className="font-bold text-blue-600">{boxInventory.plastic.withSuppliers}</span>
-            </div>
-            <div className="flex justify-between items-center py-2 border-b">
-              <span className="text-gray-600">With Customers:</span>
-              <span className="font-bold text-indigo-600">{boxInventory.plastic.withCustomers}</span>
-            </div>
-            <div className="flex justify-between items-center py-2">
-              <span className="text-gray-600">Lost/Damaged:</span>
-              <span className="font-bold text-red-600">{boxInventory.plastic.lost}</span>
+        <div className="box-panel">
+          <div className="box-panel-header">
+            <div>
+              <h3>Supplier Box Due</h3>
+              <p>Highest supplier holdings.</p>
             </div>
           </div>
+          <div className="holder-list">
+            {topSupplierHolders.length ? (
+              topSupplierHolders.map((supplier) => (
+                <div key={supplier.id} className="holder-row">
+                  <div>
+                    <h4>{supplier.name}</h4>
+                    <p>{supplier.contact}</p>
+                  </div>
+                  <strong>{supplier.totalBoxesHolding}</strong>
+                </div>
+              ))
+            ) : (
+              <div className="empty-state">No supplier box due.</div>
+            )}
+          </div>
         </div>
-      </div>
+      </section>
 
-      {/* Action Buttons */}
-      <div className="flex gap-4">
-        <button
-          onClick={() => setShowAddForm(true)}
-          className="btn-primary flex items-center gap-2"
-        >
-          ➕ Add New Boxes
-        </button>
-        <button
-          onClick={() => setShowLossForm(true)}
-          className="bg-red-600 text-white px-4 py-2 rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2"
-        >
-          ❌ Mark Lost/Damaged
-        </button>
-      </div>
-
-      {/* Add Boxes Modal */}
       {showAddForm && (
         <div className="modal-overlay">
           <div className="modal-content" style={{ maxWidth: '42rem' }}>
             <div className="modal-header">
-              <h2>➕ Add New Boxes</h2>
+              <h2>Add New Boxes</h2>
               <button
                 onClick={() => setShowAddForm(false)}
                 className="modal-close-btn"
@@ -199,6 +281,7 @@ const BoxDashboard = () => {
                     value={formData.quantity}
                     onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
                     placeholder="0"
+                    min="1"
                     className="input-field"
                   />
                 </div>
@@ -222,12 +305,11 @@ const BoxDashboard = () => {
         </div>
       )}
 
-      {/* Mark Lost Modal */}
       {showLossForm && (
         <div className="modal-overlay">
           <div className="modal-content" style={{ maxWidth: '42rem' }}>
-            <div className="modal-header bg-gradient-to-r from-red-500 to-red-600">
-              <h2>❌ Mark Boxes Lost/Damaged</h2>
+            <div className="modal-header danger">
+              <h2>Mark Boxes Lost/Damaged</h2>
               <button
                 onClick={() => setShowLossForm(false)}
                 className="modal-close-btn"
@@ -255,6 +337,7 @@ const BoxDashboard = () => {
                     value={formData.quantity}
                     onChange={(e) => setFormData({ ...formData, quantity: e.target.value })}
                     placeholder="0"
+                    min="1"
                     className="input-field"
                   />
                 </div>
@@ -281,7 +364,7 @@ const BoxDashboard = () => {
               </button>
               <button
                 onClick={handleMarkLost}
-                className="bg-red-600 text-white px-6 py-2 rounded-lg hover:bg-red-700 transition-colors font-semibold"
+                className="btn-danger"
               >
                 Mark Lost
               </button>
