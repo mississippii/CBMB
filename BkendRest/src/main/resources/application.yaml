@@ -1,0 +1,26 @@
+spring:
+  application:
+    name: BkendRest
+  datasource:
+    url: jdbc:mysql://localhost:3306/CBM_Schema
+    username: veer
+    password: 1234
+    driver-class-name: com.mysql.cj.jdbc.Driver
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+    properties:
+      hibernate:
+        format_sql: true
+
+server:
+  port: 8080
+  address: 192.168.0.177
+
+springdoc:
+  swagger-ui:
+    path: /swagger-ui.html
+  api-docs:
+    path: /v3/api-docs

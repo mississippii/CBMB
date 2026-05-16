@@ -1,6 +1,6 @@
 import { useAuth } from '../context/AuthContext';
 
-const Navbar = ({ onHome }) => {
+const Navbar = ({ onHome, subtitle = 'Wholesaler Workspace' }) => {
   const { logout } = useAuth();
 
   return (
@@ -12,7 +12,7 @@ const Navbar = ({ onHome }) => {
             <h1 className="bg-gradient-to-r from-[#255f60] to-[#307D7E] bg-clip-text text-lg font-extrabold text-transparent md:text-xl">
               CBTrading
             </h1>
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">Wholesaler Workspace</p>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-slate-500">{subtitle}</p>
           </div>
         </button>
 

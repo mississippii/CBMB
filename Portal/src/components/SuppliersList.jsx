@@ -7,25 +7,37 @@ const SuppliersList = () => {
   const [showForm, setShowForm] = useState(false);
   const [selectedSupplierId, setSelectedSupplierId] = useState(null);
   const [phoneSearch, setPhoneSearch] = useState('');
+  const [formError, setFormError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     contact: '',
     location: '',
     bankDetails: '',
     commissionRate: 5,
+    openingDue: '',
   });
 
-  const handleAddSupplier = () => {
+  const handleAddSupplier = async () => {
     if (formData.name && formData.contact && formData.location) {
-      addSupplier(formData);
-      setFormData({
-        name: '',
-        contact: '',
-        location: '',
-        bankDetails: '',
-        commissionRate: 5,
-      });
-      setShowForm(false);
+      setIsSaving(true);
+      setFormError('');
+      try {
+        await addSupplier(formData);
+        setFormData({
+          name: '',
+          contact: '',
+          location: '',
+          bankDetails: '',
+          commissionRate: 5,
+          openingDue: '',
+        });
+        setShowForm(false);
+      } catch (error) {
+        setFormError(error.message || 'Failed to add supplier.');
+      } finally {
+        setIsSaving(false);
+      }
     }
   };
 
@@ -115,6 +127,14 @@ const SuppliersList = () => {
                   onChange={(e) => setFormData({ ...formData, commissionRate: e.target.value })}
                   className="input-field"
                 />
+                <input
+                  type="number"
+                  placeholder="Opening Due"
+                  value={formData.openingDue}
+                  onChange={(e) => setFormData({ ...formData, openingDue: e.target.value })}
+                  className="input-field"
+                />
+                {formError && <p className="text-sm font-semibold text-red-600">{formError}</p>}
               </div>
             </div>
             <div className="modal-footer">
@@ -126,9 +146,10 @@ const SuppliersList = () => {
               </button>
               <button
                 onClick={handleAddSupplier}
+                disabled={isSaving}
                 className="btn-primary"
               >
-                Add Supplier
+                {isSaving ? 'Saving...' : 'Add Supplier'}
               </button>
             </div>
           </div>

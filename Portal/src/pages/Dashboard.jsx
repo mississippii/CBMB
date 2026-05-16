@@ -7,9 +7,11 @@ import CustomersList from '../components/CustomersList';
 import TransactionForm from '../components/TransactionForm';
 import TransactionsList from '../components/TransactionsList';
 import AddProducts from '../components/AddProducts';
+import { useData } from '../context/DataContext';
 
 const Dashboard = () => {
   const { admin: wholesaler } = useAuth();
+  const { isLoading, dataError } = useData();
   const [activeTab, setActiveTab] = useState('dashboard');
   const [showTransactionModal, setShowTransactionModal] = useState(false);
 
@@ -34,7 +36,8 @@ const Dashboard = () => {
                 Welcome back, {wholesaler?.fullName || 'Wholesaler'}
               </h2>
               <p className="text-sm font-medium text-slate-600">
-                {wholesaler?.email} • {wholesaler?.phone}
+                {wholesaler?.email}
+                {wholesaler?.wholesalerId ? ` • Wholesaler #${wholesaler.wholesalerId}` : ''}
               </p>
             </div>
           </div>
@@ -63,6 +66,18 @@ const Dashboard = () => {
                 <TransactionForm entryMode="sale" onClose={() => setShowTransactionModal(false)} />
               </div>
             </div>
+          </div>
+        )}
+
+        {isLoading && (
+          <div className="mb-4 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600">
+            Loading wholesaler data...
+          </div>
+        )}
+
+        {dataError && (
+          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
+            {dataError}
           </div>
         )}
 

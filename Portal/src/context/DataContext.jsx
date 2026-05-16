@@ -1,8 +1,9 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useEffect, useState, useContext } from 'react';
+import { useAuth } from './AuthContext';
 
 const DataContext = createContext();
-const DATA_STORAGE_KEY = 'cbtrading-data-v1';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://192.168.0.177:8080';
 
 const roundMoney = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 const toPositiveNumber = (value) => {
@@ -16,267 +17,163 @@ const getNextId = (items) => {
   return Math.max(...items.map((item) => Number(item.id) || 0)) + 1;
 };
 
-const DUMMY_SUPPLIERS = [
-  {
-    id: 1,
-    name: 'Mango Farm XYZ',
-    contact: '0171-1234567',
-    location: 'Chapainawabganj',
-    bankDetails: 'Account: 12345678',
-    commissionRate: 5,
-    boxesHoldingWooden: 8,
-    boxesHoldingPlastic: 0,
-    totalBoxesHolding: 8,
-    totalSales: 50000,
-    totalCommissionEarned: 2500,
-    advancePaymentsMade: 1000,
-    amountDue: 1500,
-    lastSettlementDate: '2024-05-08',
-    balance: -1500,
-  },
-  {
-    id: 2,
-    name: 'Pineapple Co',
-    contact: '0181-7654321',
-    location: 'Kushtia',
-    bankDetails: 'Account: 87654321',
-    commissionRate: 4,
-    boxesHoldingWooden: 4,
-    boxesHoldingPlastic: 2,
-    totalBoxesHolding: 6,
-    totalSales: 30000,
-    totalCommissionEarned: 1200,
-    advancePaymentsMade: 500,
-    amountDue: 700,
-    lastSettlementDate: '2024-05-09',
-    balance: -700,
-  },
-];
-
-const DUMMY_SUPPLIER_PRODUCTS = [
-  {
-    id: 1,
-    supplierId: 1,
-    productName: 'Himsagar Mango',
-    category: 'Mango',
-    quantity: 200,
-    unit: 'pcs',
-    unitPrice: 100,
-    totalValue: 20000,
-    dateReceived: '2024-05-09',
-    status: 'in_stock',
-  },
-  {
-    id: 2,
-    supplierId: 1,
-    productName: 'Fazli Mango',
-    category: 'Mango',
-    quantity: 150,
-    unit: 'pcs',
-    unitPrice: 80,
-    totalValue: 12000,
-    dateReceived: '2024-05-08',
-    status: 'in_stock',
-  },
-  {
-    id: 3,
-    supplierId: 2,
-    productName: 'Yellow Pineapple',
-    category: 'Pineapple',
-    quantity: 100,
-    unit: 'pcs',
-    unitPrice: 150,
-    totalValue: 15000,
-    dateReceived: '2024-05-10',
-    status: 'in_stock',
-  },
-];
-
-const DUMMY_CUSTOMERS = [
-  {
-    id: 1,
-    name: 'Doly Store',
-    owner: 'Dolly Ahmed',
-    phone: '0181-1111111',
-    address: 'Dhaka',
-    type: 'Permanent',
-    totalPurchases: 5000,
-    totalPaid: 3000,
-    amountDue: 2000,
-    boxJamanot: 1000,
-    boxesHoldingWooden: 5,
-    boxesHoldingPlastic: 2,
-    totalBoxesHolding: 7,
-  },
-  {
-    id: 2,
-    name: 'Karim Shop',
-    owner: 'Karim Ahmed',
-    phone: '0171-2222222',
-    address: 'Chittagong',
-    type: 'Permanent',
-    totalPurchases: 8000,
-    totalPaid: 6000,
-    amountDue: 2000,
-    boxJamanot: 500,
-    boxesHoldingWooden: 3,
-    boxesHoldingPlastic: 2,
-    totalBoxesHolding: 5,
-  },
-  {
-    id: 3,
-    name: 'Cash Buyer',
-    owner: 'Cash Customer',
-    phone: '0191-3333333',
-    address: 'Rajshahi',
-    type: 'Cash',
-    totalPurchases: 2000,
-    totalPaid: 2000,
-    amountDue: 0,
-    boxJamanot: 0,
-    boxesHoldingWooden: 2,
-    boxesHoldingPlastic: 1,
-    totalBoxesHolding: 3,
-  },
-];
-
-const DUMMY_TRANSACTIONS = [
-  {
-    id: 1,
-    date: '2024-05-10',
-    customer: 'Doly Store',
-    supplier: 'Mango Farm XYZ',
-    product: 'Himsagar Mango',
-    quantity: 50,
-    unitPrice: 100,
-    totalAmount: 5000,
-    paymentType: 'Credit',
-    paymentAmount: 0,
-    customerPreviousDue: 2000,
-    customerNewDue: 7000,
-    commissionRate: 5,
-    commissionAmount: 250,
-  },
-  {
-    id: 2,
-    date: '2024-05-09',
-    customer: 'Karim Shop',
-    supplier: 'Pineapple Co',
-    product: 'Yellow Pineapple',
-    quantity: 30,
-    unitPrice: 200,
-    totalAmount: 6000,
-    paymentType: 'Partial',
-    paymentAmount: 4000,
-    customerPreviousDue: 2000,
-    customerNewDue: 4000,
-    commissionRate: 4,
-    commissionAmount: 240,
-  },
-  {
-    id: 3,
-    date: '2024-05-09',
-    customer: 'Cash Buyer',
-    supplier: 'Mango Farm XYZ',
-    product: 'Fazli Mango',
-    quantity: 20,
-    unitPrice: 80,
-    totalAmount: 1600,
-    paymentType: 'Cash',
-    paymentAmount: 1600,
-    customerPreviousDue: 0,
-    customerNewDue: 0,
-    commissionRate: 5,
-    commissionAmount: 80,
-  },
-];
-
-const DUMMY_BOX_INVENTORY = {
-  totalBoxesOwned: 300,
-  boxesInShop: 85,
-  boxesWithSuppliers: 14,
-  boxesWithCustomers: 201,
+const EMPTY_BOX_INVENTORY = {
+  totalBoxesOwned: 0,
+  boxesInShop: 0,
+  boxesWithSuppliers: 0,
+  boxesWithCustomers: 0,
   boxesLostDamaged: 0,
   wooden: {
-    total: 200,
-    inShop: 50,
-    withSuppliers: 8,
-    withCustomers: 140,
-    lost: 2,
+    total: 0,
+    inShop: 0,
+    withSuppliers: 0,
+    withCustomers: 0,
+    lost: 0,
   },
   plastic: {
-    total: 100,
-    inShop: 35,
-    withSuppliers: 6,
-    withCustomers: 61,
+    total: 0,
+    inShop: 0,
+    withSuppliers: 0,
+    withCustomers: 0,
     lost: 0,
   },
 };
 
 const createDefaultState = () => ({
-  suppliers: DUMMY_SUPPLIERS,
-  customers: DUMMY_CUSTOMERS,
-  transactions: DUMMY_TRANSACTIONS,
-  supplierProducts: DUMMY_SUPPLIER_PRODUCTS,
-  boxInventory: DUMMY_BOX_INVENTORY,
+  suppliers: [],
+  customers: [],
+  transactions: [],
+  supplierProducts: [],
+  boxInventory: EMPTY_BOX_INVENTORY,
 });
 
-const loadInitialState = () => {
-  if (typeof window === 'undefined') {
-    return createDefaultState();
-  }
+const mapSupplierAccount = (account) => ({
+  id: account.id,
+  supplierId: account.supplierId,
+  wholesalerId: account.wholesalerId,
+  name: account.name,
+  contact: account.phone,
+  phone: account.phone,
+  location: account.address || '',
+  address: account.address || '',
+  bankDetails: '',
+  commissionRate: Number(account.commissionRate) || 0,
+  totalSales: 0,
+  totalCommissionEarned: 0,
+  advancePaymentsMade: 0,
+  amountDue: roundMoney(Number(account.openingDue) || 0),
+  lastSettlementDate: account.createdAt?.split('T')[0] || getDateOnly(),
+  balance: -roundMoney(Number(account.openingDue) || 0),
+  boxesHoldingWooden: 0,
+  boxesHoldingPlastic: 0,
+  totalBoxesHolding: 0,
+});
 
-  const rawState = window.localStorage.getItem(DATA_STORAGE_KEY);
-  if (!rawState) {
-    return createDefaultState();
-  }
+const mapCustomerAccount = (account) => ({
+  id: account.id,
+  customerId: account.customerId,
+  wholesalerId: account.wholesalerId,
+  name: account.name,
+  owner: account.ownerName || '',
+  phone: account.phone,
+  address: account.address || '',
+  type: 'Permanent',
+  totalPurchases: 0,
+  totalPaid: 0,
+  amountDue: roundMoney(Number(account.openingDue) || 0),
+  boxJamanot: roundMoney(Number(account.jamanotBalance) || 0),
+  boxesHoldingWooden: 0,
+  boxesHoldingPlastic: 0,
+  totalBoxesHolding: 0,
+});
 
-  try {
-    return { ...createDefaultState(), ...JSON.parse(rawState) };
-  } catch (error) {
-    console.error('Failed to parse data state from localStorage:', error);
-    return createDefaultState();
+const fetchJson = async (url, options) => {
+  const response = await fetch(url, options);
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) {
+    throw new Error(payload?.message || 'Request failed.');
   }
+  return payload;
 };
 
 export const DataProvider = ({ children }) => {
-  const initialState = loadInitialState();
+  const { admin, isAuthenticated } = useAuth();
+  const initialState = createDefaultState();
   const [suppliers, setSuppliers] = useState(initialState.suppliers);
   const [customers, setCustomers] = useState(initialState.customers);
   const [transactions, setTransactions] = useState(initialState.transactions);
   const [supplierProducts, setSupplierProducts] = useState(initialState.supplierProducts);
   const [boxInventory, setBoxInventory] = useState(initialState.boxInventory);
+  const [isLoading, setIsLoading] = useState(false);
+  const [dataError, setDataError] = useState('');
 
   useEffect(() => {
-    if (typeof window === 'undefined') return;
+    if (!isAuthenticated || admin?.role !== 'WHOLESALER' || !admin?.wholesalerId) {
+      Promise.resolve().then(() => {
+        setSuppliers([]);
+        setCustomers([]);
+        setTransactions([]);
+        setSupplierProducts([]);
+        setBoxInventory(createDefaultState().boxInventory);
+        setDataError('');
+        setIsLoading(false);
+      });
+      return;
+    }
 
-    window.localStorage.setItem(
-      DATA_STORAGE_KEY,
-      JSON.stringify({
-        suppliers,
-        customers,
-        transactions,
-        supplierProducts,
-        boxInventory,
-      }),
-    );
-  }, [suppliers, customers, transactions, supplierProducts, boxInventory]);
+    let isActive = true;
+    const loadWholesalerData = async () => {
+      setIsLoading(true);
+      setDataError('');
+      try {
+        const [supplierAccounts, customerAccounts] = await Promise.all([
+          fetchJson(`${API_BASE_URL}/wholesalers/${admin.wholesalerId}/suppliers`),
+          fetchJson(`${API_BASE_URL}/wholesalers/${admin.wholesalerId}/customers`),
+        ]);
 
-  const addSupplier = (supplierData) => {
-    const newSupplier = {
-      id: getNextId(suppliers),
-      ...supplierData,
-      commissionRate: Number(supplierData.commissionRate) || 5,
-      totalSales: 0,
-      totalCommissionEarned: 0,
-      advancePaymentsMade: 0,
-      amountDue: 0,
-      lastSettlementDate: getDateOnly(),
-      balance: 0,
-      boxesHoldingWooden: 0,
-      boxesHoldingPlastic: 0,
-      totalBoxesHolding: 0,
+        if (!isActive) return;
+        setSuppliers(supplierAccounts.map(mapSupplierAccount));
+        setCustomers(customerAccounts.map(mapCustomerAccount));
+        setTransactions([]);
+        setSupplierProducts([]);
+        setBoxInventory(createDefaultState().boxInventory);
+      } catch (error) {
+        if (isActive) {
+          setDataError(error.message || 'Failed to load wholesaler data.');
+        }
+      } finally {
+        if (isActive) {
+          setIsLoading(false);
+        }
+      }
     };
+
+    loadWholesalerData();
+
+    return () => {
+      isActive = false;
+    };
+  }, [admin?.role, admin?.wholesalerId, isAuthenticated]);
+
+  const addSupplier = async (supplierData) => {
+    if (!admin?.wholesalerId) {
+      throw new Error('Wholesaler profile not found for this user.');
+    }
+
+    const payload = {
+      name: supplierData.name,
+      phone: supplierData.contact || supplierData.phone,
+      address: supplierData.location || supplierData.address,
+      commissionRate: Number(supplierData.commissionRate) || 0,
+      openingDue: Number(supplierData.openingDue) || 0,
+    };
+
+    const account = await fetchJson(`${API_BASE_URL}/wholesalers/${admin.wholesalerId}/suppliers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const newSupplier = mapSupplierAccount(account);
     setSuppliers((prev) => [...prev, newSupplier]);
     return newSupplier;
   };
@@ -362,19 +259,26 @@ export const DataProvider = ({ children }) => {
     return productAfterDelivery;
   };
 
-  const addCustomer = (customerData) => {
-    const newCustomer = {
-      id: getNextId(customers),
-      ...customerData,
-      type: 'Permanent',
-      totalPurchases: 0,
-      totalPaid: 0,
-      amountDue: 0,
-      boxJamanot: roundMoney(Number(customerData.boxJamanot) || 0),
-      boxesHoldingWooden: 0,
-      boxesHoldingPlastic: 0,
-      totalBoxesHolding: 0,
+  const addCustomer = async (customerData) => {
+    if (!admin?.wholesalerId) {
+      throw new Error('Wholesaler profile not found for this user.');
+    }
+
+    const payload = {
+      name: customerData.name,
+      ownerName: customerData.owner || customerData.ownerName,
+      phone: customerData.phone,
+      address: customerData.address,
+      openingDue: Number(customerData.openingDue) || 0,
+      jamanotBalance: Number(customerData.boxJamanot) || 0,
     };
+
+    const account = await fetchJson(`${API_BASE_URL}/wholesalers/${admin.wholesalerId}/customers`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload),
+    });
+    const newCustomer = mapCustomerAccount(account);
     setCustomers((prev) => [...prev, newCustomer]);
     return newCustomer;
   };
@@ -902,6 +806,8 @@ export const DataProvider = ({ children }) => {
         transactions,
         supplierProducts,
         boxInventory,
+        isLoading,
+        dataError,
         addSupplier,
         addCustomer,
         addTransaction: recordSale,

@@ -3,14 +3,7 @@ import { createContext, useEffect, useState, useContext } from 'react';
 
 const AuthContext = createContext();
 const AUTH_STORAGE_KEY = 'cbtrading-auth-v1';
-
-const DEFAULT_ADMIN = {
-  id: 1,
-  email: 'wholesaler@gmail.com',
-  fullName: 'CBTrading Wholesaler',
-  phone: '0171-XXXXXXX',
-  role: 'WHOLESALER',
-};
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://192.168.0.177:8080';
 
 const loadAuthState = () => {
   if (typeof window === 'undefined') {
@@ -24,9 +17,14 @@ const loadAuthState = () => {
 
   try {
     const parsed = JSON.parse(raw);
+    const savedAdmin = parsed.admin || null;
+    if (savedAdmin?.role === 'WHOLESALER' && !savedAdmin.wholesalerId) {
+      window.localStorage.removeItem(AUTH_STORAGE_KEY);
+      return { isAuthenticated: false, admin: null };
+    }
     return {
       isAuthenticated: Boolean(parsed.isAuthenticated),
-      admin: parsed.admin || null,
+      admin: savedAdmin,
     };
   } catch (error) {
     console.error('Failed to parse auth state from localStorage:', error);
@@ -53,15 +51,25 @@ export const AuthProvider = ({ children }) => {
     );
   }, [isAuthenticated, admin]);
 
-  const login = (email, password) => {
-    const normalizedEmail = email.trim().toLowerCase();
-    const allowedEmails = ['wholesaler@gmail.com', 'stockist@cbtrading.com', 'stockist123'];
-    if (allowedEmails.includes(normalizedEmail) && password === 'Admin123') {
-      setIsAuthenticated(true);
-      setAdmin(DEFAULT_ADMIN);
-      return true;
+  const login = async (email, password) => {
+    const response = await fetch(`${API_BASE_URL}/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password }),
+    });
+    const payload = await response.json().catch(() => null);
+
+    if (!response.ok) {
+      throw new Error(payload?.message || 'Invalid email or password.');
     }
-    return false;
+
+    if (payload?.role === 'WHOLESALER' && !payload.wholesalerId) {
+      throw new Error('Wholesaler profile not found. Ask admin to create the wholesaler profile again.');
+    }
+
+    setIsAuthenticated(true);
+    setAdmin(payload);
+    return payload;
   };
 
   const logout = () => {

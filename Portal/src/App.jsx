@@ -3,15 +3,20 @@ import { AuthProvider, useAuth } from './context/AuthContext';
 import { DataProvider } from './context/DataContext';
 import Login from './pages/Login';
 import Dashboard from './pages/Dashboard';
+import AdminDashboard from './pages/AdminDashboard';
 import './index.css';
 
-const ProtectedRoute = ({ children }) => {
-  const { isAuthenticated } = useAuth();
-  return isAuthenticated ? children : <Navigate to="/login" />;
+const getHomePath = (admin) => (admin?.role === 'ADMIN' ? '/admin' : '/dashboard');
+
+const ProtectedRoute = ({ children, role }) => {
+  const { isAuthenticated, admin } = useAuth();
+  if (!isAuthenticated) return <Navigate to="/login" />;
+  if (role && admin?.role !== role) return <Navigate to={getHomePath(admin)} />;
+  return children;
 };
 
 function AppContent() {
-  const { isAuthenticated } = useAuth();
+  const { isAuthenticated, admin } = useAuth();
 
   return (
     <Routes>
@@ -19,12 +24,20 @@ function AppContent() {
       <Route
         path="/dashboard"
         element={
-          <ProtectedRoute>
+          <ProtectedRoute role="WHOLESALER">
             <Dashboard />
           </ProtectedRoute>
         }
       />
-      <Route path="/" element={isAuthenticated ? <Navigate to="/dashboard" /> : <Navigate to="/login" />} />
+      <Route
+        path="/admin"
+        element={
+          <ProtectedRoute role="ADMIN">
+            <AdminDashboard />
+          </ProtectedRoute>
+        }
+      />
+      <Route path="/" element={isAuthenticated ? <Navigate to={getHomePath(admin)} /> : <Navigate to="/login" />} />
     </Routes>
   );
 }

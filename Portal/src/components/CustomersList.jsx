@@ -7,25 +7,37 @@ const CustomersList = () => {
   const [showForm, setShowForm] = useState(false);
   const [selectedCustomerId, setSelectedCustomerId] = useState(null);
   const [phoneSearch, setPhoneSearch] = useState('');
+  const [formError, setFormError] = useState('');
+  const [isSaving, setIsSaving] = useState(false);
   const [formData, setFormData] = useState({
     name: '',
     owner: '',
     phone: '',
     address: '',
+    openingDue: '',
     boxJamanot: '',
   });
 
-  const handleAddCustomer = () => {
+  const handleAddCustomer = async () => {
     if (formData.name && formData.owner && formData.phone) {
-      addCustomer(formData);
-      setFormData({
-        name: '',
-        owner: '',
-        phone: '',
-        address: '',
-        boxJamanot: '',
-      });
-      setShowForm(false);
+      setIsSaving(true);
+      setFormError('');
+      try {
+        await addCustomer(formData);
+        setFormData({
+          name: '',
+          owner: '',
+          phone: '',
+          address: '',
+          openingDue: '',
+          boxJamanot: '',
+        });
+        setShowForm(false);
+      } catch (error) {
+        setFormError(error.message || 'Failed to add customer.');
+      } finally {
+        setIsSaving(false);
+      }
     }
   };
 
@@ -110,11 +122,19 @@ const CustomersList = () => {
                 />
                 <input
                   type="number"
+                  placeholder="Opening Due"
+                  value={formData.openingDue}
+                  onChange={(e) => setFormData({ ...formData, openingDue: e.target.value })}
+                  className="input-field"
+                />
+                <input
+                  type="number"
                   placeholder="Box জামানত"
                   value={formData.boxJamanot}
                   onChange={(e) => setFormData({ ...formData, boxJamanot: e.target.value })}
                   className="input-field"
                 />
+                {formError && <p className="text-sm font-semibold text-red-600 md:col-span-2">{formError}</p>}
               </div>
             </div>
             <div className="modal-footer">
@@ -126,9 +146,10 @@ const CustomersList = () => {
               </button>
               <button
                 onClick={handleAddCustomer}
+                disabled={isSaving}
                 className="btn-primary"
               >
-                Add Customer
+                {isSaving ? 'Saving...' : 'Add Customer'}
               </button>
             </div>
           </div>
