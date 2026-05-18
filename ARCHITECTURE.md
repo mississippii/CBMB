@@ -356,6 +356,576 @@ wholesaler_suppliers and wholesaler_customers are the actual business accounts.
 All future due, stock, payment, box, and transaction rows should reference the account link ids.
 ```
 
+### Product And Sales Scope
+
+This section finalizes the first two implementation areas after the foundation tables:
+
+```text
+1. Product structure
+2. Sales structure
+```
+
+#### Product Structure
+
+The business uses two product tables:
+
+```text
+products
+categories
+```
+
+Relationship:
+
+```text
+wholesaler_suppliers 1:N products
+products 1:N categories
+```
+
+Interpretation:
+
+```text
+Product: Mango
+Categories: Lengra, Fazli, Khirsa, Himsagar
+
+Product: Pineapple
+Categories: Honey Queen, Giant Kew
+```
+
+`products` has the supplier-account relation. `categories` does not directly relate
+to wholesaler or supplier; it belongs to a product.
+
+```text
+products:
+  id PK
+  wholesaler_id FK
+  wholesaler_supplier_id FK
+  name
+  unit
+  status
+  created_at
+  updated_at
+```
+
+```text
+categories:
+  id PK
+  product_id FK
+  name
+  grade
+  status
+  created_at
+  updated_at
+```
+
+#### Stock Support For Product Receiving
+
+Stock must be tracked at category level, because Mango/Lengra and Mango/Fazli have
+different quantities. Product price is not fixed here; sale-time price belongs in
+`sale_items.unit_price`.
+
+```text
+inventory:
+  id PK
+  wholesaler_id FK
+  wholesaler_supplier_id FK
+  product_id FK
+  category_id FK
+  quantity_on_hand
+  unit
+  status
+  created_at
+  updated_at
+```
+
+```text
+stock_ledger:
+  id PK
+  wholesaler_id FK
+  wholesaler_supplier_id FK
+  product_id FK
+  category_id FK
+  reference_type
+  reference_id
+  direction
+  quantity
+  note
+  created_at
+```
+
+```text
+supplier_deliveries:
+  id PK
+  wholesaler_id FK
+  wholesaler_supplier_id FK
+  delivery_date
+  total_quantity
+  note
+  status
+  created_at
+  updated_at
+```
+
+```text
+supplier_delivery_items:
+  id PK
+  wholesaler_id FK
+  delivery_id FK
+  product_id FK
+  category_id FK
+  quantity
+  unit
+  note
+  created_at
+```
+
+#### Sales Structure
+
+A sale belongs to one wholesaler-customer account. Sale items identify which
+supplier account, product, and category were sold.
+
+```text
+wholesaler_customers 1:N sales
+sales 1:N sale_items
+wholesaler_suppliers 1:N sale_items
+products 1:N sale_items
+categories 1:N sale_items
+```
+
+```text
+sales:
+  id PK
+  wholesaler_id FK
+  wholesaler_customer_id FK
+  sale_date
+  sale_type
+  gross_amount
+  discount_amount
+  net_amount
+  paid_amount
+  due_amount
+  boxes_given
+  jamanot_amount
+  note
+  status
+  created_at
+  updated_at
+```
+
+```text
+sale_items:
+  id PK
+  wholesaler_id FK
+  sale_id FK
+  wholesaler_supplier_id FK
+  product_id FK
+  category_id FK
+  quantity
+  unit_price
+  line_total
+  commission_rate
+  commission_amount
+  created_at
+```
+
+Service-level validation required for product and sales writes:
+
+```text
+products.wholesaler_supplier_id must belong to products.wholesaler_id.
+categories.product_id must belong to the current wholesaler through products.wholesaler_id.
+inventory.category_id must belong to inventory.product_id.
+supplier_delivery_items.category_id must belong to supplier_delivery_items.product_id.
+sales.wholesaler_customer_id must belong to sales.wholesaler_id.
+sale_items.sale_id must belong to sale_items.wholesaler_id.
+sale_items.product_id must belong to sale_items.wholesaler_id.
+sale_items.category_id must belong to sale_items.product_id.
+sale_items.wholesaler_supplier_id must match the product's wholesaler_supplier_id.
+```
+
+### Box Scope
+
+The business currently has two box types:
+
+```text
+Bangla
+China
+```
+
+The wholesaler owns boxes. Boxes can be:
+
+```text
+in_hand
+with_customers
+with_suppliers
+lost_damaged
+```
+
+Boxes are not sold as products. When a customer buys product in boxes, the customer
+takes the boxes and may keep jamanot with the wholesaler. When the customer returns
+boxes, payment flow clears or adjusts that jamanot.
+
+Required box tables:
+
+```text
+box_types
+box_inventory
+box_ledger
+box_balances
+```
+
+```text
+box_types:
+  id PK
+  wholesaler_id FK
+  name
+  status
+  created_at
+  updated_at
+```
+
+Seed rows per wholesaler:
+
+```text
+Bangla
+China
+```
+
+```text
+box_inventory:
+  id PK
+  wholesaler_id FK
+  box_type_id FK
+  total_owned
+  in_hand
+  with_customers
+  with_suppliers
+  lost_damaged
+  updated_at
+```
+
+```text
+box_ledger:
+  id PK
+  wholesaler_id FK
+  box_type_id FK
+  party_type
+  party_account_id
+  movement_type
+  quantity
+  reference_type
+  reference_id
+  note
+  created_at
+```
+
+```text
+box_balances:
+  id PK
+  wholesaler_id FK
+  party_type
+  party_account_id
+  box_type_id FK
+  boxes_due
+  updated_at
+```
+
+Box movement types:
+
+```text
+PURCHASE
+GIVEN_TO_CUSTOMER
+RETURNED_FROM_CUSTOMER
+GIVEN_TO_SUPPLIER
+RETURNED_FROM_SUPPLIER
+LOST
+DAMAGED
+ADJUSTMENT
+```
+
+Box formulas:
+
+```text
+total_owned = in_hand + with_customers + with_suppliers + lost_damaged
+boxes_due for a party = boxes_given - boxes_returned - boxes_lost_or_damaged_adjusted
+```
+
+Service-level validation required for box writes:
+
+```text
+box_types.name must be unique per wholesaler.
+box_inventory must have one row per wholesaler and box type.
+GIVEN_TO_CUSTOMER decreases box_inventory.in_hand and increases with_customers.
+RETURNED_FROM_CUSTOMER increases box_inventory.in_hand and decreases with_customers.
+GIVEN_TO_SUPPLIER decreases box_inventory.in_hand and increases with_suppliers.
+RETURNED_FROM_SUPPLIER increases box_inventory.in_hand and decreases with_suppliers.
+LOST/DAMAGED reduces the relevant location and increases lost_damaged.
+box_balances must update with row locking when a party receives or returns boxes.
+```
+
+### Payment And Transaction Scope
+
+Sales and payments both appear in the transaction dashboard.
+
+```text
+sales 1:0..1 transactions
+payments 1:0..1 transactions
+```
+
+Payments are for later account settlement:
+
+```text
+Customer pays previous due.
+Customer returns due boxes.
+Customer pays due and returns boxes together.
+Box return clears or adjusts jamanot.
+```
+
+```text
+payments:
+  id PK
+  wholesaler_id FK
+  wholesaler_customer_id FK
+  payment_type
+  cash_amount
+  boxes_returned
+  jamanot_amount
+  previous_due
+  due_after_payment
+  previous_jamanot
+  jamanot_after_payment
+  payment_method
+  note
+  created_at PK
+```
+
+Payment types:
+
+```text
+CASH_RECEIVE
+BOX_RETURN
+CASH_AND_BOX_RETURN
+```
+
+```text
+transactions:
+  id PK
+  wholesaler_id FK
+  transaction_type
+  sale_id
+  payment_id
+  wholesaler_supplier_id
+  wholesaler_customer_id
+  sale_amount
+  payment_amount
+  due_amount
+  description
+  created_at PK
+```
+
+Transaction types:
+
+```text
+SALE
+PAYMENT
+```
+
+Partition rule:
+
+```text
+transactions and payments are partitioned by created_at.
+Primary key must include created_at in MySQL 8 partitioned tables.
+Do not use foreign keys in partitioned transactions/payments; validate in service.
+```
+
+### Account Ledger And Balance Scope
+
+Ledger is the financial source of truth. Balance tables are fast summaries.
+
+```text
+account_ledger:
+  id PK
+  wholesaler_id FK
+  party_type
+  party_account_id
+  reference_type
+  reference_id
+  debit
+  credit
+  note
+  created_at
+```
+
+```text
+account_balances:
+  id PK
+  wholesaler_id FK
+  party_type
+  party_account_id
+  balance
+  updated_at
+```
+
+Party types:
+
+```text
+WHOLESALER_CUSTOMER
+WHOLESALER_SUPPLIER
+```
+
+Reference types:
+
+```text
+SALE
+PAYMENT
+SUPPLIER_COMMISSION
+SUPPLIER_EXPENSE
+SUPPLIER_SETTLEMENT
+DUE_ADJUSTMENT
+OPENING_DUE
+```
+
+Balance meaning:
+
+```text
+Customer balance > 0 means customer owes wholesaler.
+Supplier balance > 0 means wholesaler owes supplier or has payable settlement.
+```
+
+### Supplier Expense And Other Due Scope
+
+Supplier may give money for labor, transport, or other operational cost. These are
+tracked separately from product sale but still belong to the wholesaler-supplier
+account.
+
+```text
+expense_categories:
+  id PK
+  wholesaler_id FK
+  name
+  status
+  created_at
+  updated_at
+```
+
+Common categories:
+
+```text
+Labor
+Transport
+Packaging
+Loading
+Other
+```
+
+```text
+supplier_expenses:
+  id PK
+  wholesaler_id FK
+  wholesaler_supplier_id FK
+  category_id FK
+  amount
+  paid_amount
+  due_amount
+  note
+  expense_date
+  created_at
+  updated_at
+```
+
+```text
+other_due_balances:
+  id PK
+  wholesaler_id FK
+  wholesaler_supplier_id FK
+  category_id FK
+  due_amount
+  updated_at
+```
+
+Expense rule:
+
+```text
+supplier_expenses records each expense event.
+other_due_balances stores current due by supplier and expense category.
+Supplier settlement can reduce supplier expense due.
+```
+
+### Supplier Settlement Scope
+
+Supplier settlement records money paid by the wholesaler to a supplier account.
+This is separate from customer `payments`.
+
+```text
+supplier_settlements:
+  id PK
+  wholesaler_id FK
+  wholesaler_supplier_id FK
+  settlement_date
+  settlement_type
+  amount
+  previous_due
+  due_after_settlement
+  payment_method
+  note
+  created_at
+  updated_at
+```
+
+Settlement types:
+
+```text
+COMMISSION_PAYOUT
+EXPENSE_PAYOUT
+ADVANCE_PAYMENT
+ADJUSTMENT
+```
+
+Settlement rule:
+
+```text
+supplier_settlements records payout/adjustment events for suppliers.
+Every supplier settlement should create account_ledger rows.
+Supplier expense settlement should also reduce supplier_expenses or other_due_balances.
+```
+
+### Complete Table Set
+
+Current complete production schema:
+
+```text
+users
+wholesalers
+
+suppliers
+wholesaler_suppliers
+customers
+wholesaler_customers
+
+products
+categories
+inventory
+stock_ledger
+supplier_deliveries
+supplier_delivery_items
+
+sales
+sale_items
+payments
+transactions
+
+account_ledger
+account_balances
+
+box_types
+box_inventory
+box_ledger
+box_balances
+
+expense_categories
+supplier_expenses
+other_due_balances
+supplier_settlements
+```
+
 ### Role-Based Multi-Wholesaler ERD
 
 ```mermaid
@@ -430,32 +1000,45 @@ erDiagram
         BIGINT wholesaler_id FK
         BIGINT wholesaler_supplier_id FK
         VARCHAR name
-        VARCHAR category
         ENUM unit "PCS, KG, DOZEN, BOX"
-        DECIMAL default_unit_price
-        ENUM status "IN_STOCK, STOCK_OUT, DISABLED"
+        ENUM status "ACTIVE, DISABLED"
         DATETIME created_at
         DATETIME updated_at
     }
 
-    PRODUCT_STOCKS {
+    CATEGORIES {
+        BIGINT id PK
+        BIGINT product_id FK
+        VARCHAR name
+        VARCHAR grade
+        ENUM status "ACTIVE, DISABLED"
+        DATETIME created_at
+        DATETIME updated_at
+    }
+
+    INVENTORY {
         BIGINT id PK
         BIGINT wholesaler_id FK
+        BIGINT wholesaler_supplier_id FK
         BIGINT product_id FK
-        DECIMAL quantity
-        DECIMAL average_cost
+        BIGINT category_id FK
+        DECIMAL quantity_on_hand
+        ENUM unit "PCS, KG, DOZEN, BOX"
+        ENUM status "ACTIVE, STOCK_OUT, DISABLED"
+        DATETIME created_at
         DATETIME updated_at
     }
 
     STOCK_LEDGER {
         BIGINT id PK
         BIGINT wholesaler_id FK
+        BIGINT wholesaler_supplier_id FK
         BIGINT product_id FK
+        BIGINT category_id FK
         ENUM reference_type "SUPPLIER_DELIVERY, SALE, ADJUSTMENT"
         BIGINT reference_id
         ENUM direction "IN, OUT"
         DECIMAL quantity
-        DECIMAL unit_price
         TEXT note
         DATETIME created_at
     }
@@ -465,9 +1048,11 @@ erDiagram
         BIGINT wholesaler_id FK
         BIGINT wholesaler_supplier_id FK
         DATETIME delivery_date
-        DECIMAL total_value
+        DECIMAL total_quantity
         TEXT note
+        ENUM status "POSTED, CANCELLED"
         DATETIME created_at
+        DATETIME updated_at
     }
 
     SUPPLIER_DELIVERY_ITEMS {
@@ -475,9 +1060,11 @@ erDiagram
         BIGINT wholesaler_id FK
         BIGINT delivery_id FK
         BIGINT product_id FK
+        BIGINT category_id FK
         DECIMAL quantity
-        DECIMAL unit_price
-        DECIMAL line_total
+        ENUM unit "PCS, KG, DOZEN, BOX"
+        TEXT note
+        DATETIME created_at
     }
 
     SALES {
@@ -485,14 +1072,18 @@ erDiagram
         BIGINT wholesaler_id FK
         BIGINT wholesaler_customer_id FK
         DATETIME sale_date
+        ENUM sale_type "PAY_INSTANT, PAY_LATER"
         DECIMAL gross_amount
+        DECIMAL discount_amount
+        DECIMAL net_amount
         DECIMAL paid_amount
         DECIMAL due_amount
-        INT wooden_boxes_given
-        INT plastic_boxes_given
-        DECIMAL jamanot_charged
+        INT boxes_given
+        DECIMAL jamanot_amount
+        TEXT note
         ENUM status "POSTED, CANCELLED"
         DATETIME created_at
+        DATETIME updated_at
     }
 
     SALE_ITEMS {
@@ -501,11 +1092,13 @@ erDiagram
         BIGINT wholesaler_id FK
         BIGINT wholesaler_supplier_id FK
         BIGINT product_id FK
+        BIGINT category_id FK
         DECIMAL quantity
         DECIMAL unit_price
         DECIMAL line_total
         DECIMAL commission_rate
         DECIMAL commission_amount
+        DATETIME created_at
     }
 
     TRANSACTIONS {
@@ -518,6 +1111,7 @@ erDiagram
         BIGINT wholesaler_customer_id FK
         DECIMAL sale_amount
         DECIMAL payment_amount
+        DECIMAL due_amount
         TEXT description
         DATETIME created_at PK
     }
@@ -525,14 +1119,15 @@ erDiagram
     PAYMENTS {
         BIGINT id PK
         BIGINT wholesaler_id FK
-        ENUM party_type "WHOLESALER_CUSTOMER, WHOLESALER_SUPPLIER"
-        BIGINT party_account_id
-        ENUM payment_mode "CASH_RECEIVE, BOX_RECEIVE, CASH_AND_BOX_RECEIVE, CASH_PAY"
-        ENUM cash_direction "IN, OUT, NONE"
+        BIGINT wholesaler_customer_id FK
+        ENUM payment_type "CASH_RECEIVE, BOX_RETURN, CASH_AND_BOX_RETURN"
         DECIMAL cash_amount
-        INT wooden_boxes_received
-        INT plastic_boxes_received
+        INT boxes_returned
         DECIMAL jamanot_amount
+        DECIMAL previous_due
+        DECIMAL due_after_payment
+        DECIMAL previous_jamanot
+        DECIMAL jamanot_after_payment
         ENUM payment_method "CASH, BANK, BKASH, NAGAD, OTHER, NONE"
         TEXT note
         DATETIME created_at PK
@@ -543,7 +1138,7 @@ erDiagram
         BIGINT wholesaler_id FK
         ENUM party_type "WHOLESALER_CUSTOMER, WHOLESALER_SUPPLIER"
         BIGINT party_account_id
-        ENUM reference_type "SALE, PAYMENT, SUPPLIER_COMMISSION, EXPENSE, DUE_ADJUSTMENT"
+        ENUM reference_type "SALE, PAYMENT, SUPPLIER_COMMISSION, SUPPLIER_EXPENSE, SUPPLIER_SETTLEMENT, DUE_ADJUSTMENT, OPENING_DUE"
         BIGINT reference_id
         DECIMAL debit
         DECIMAL credit
@@ -578,6 +1173,21 @@ erDiagram
         TEXT note
         DATETIME expense_date
         DATETIME created_at
+    }
+
+    SUPPLIER_SETTLEMENTS {
+        BIGINT id PK
+        BIGINT wholesaler_id FK
+        BIGINT wholesaler_supplier_id FK
+        DATETIME settlement_date
+        ENUM settlement_type "COMMISSION_PAYOUT, EXPENSE_PAYOUT, ADVANCE_PAYMENT, ADJUSTMENT"
+        DECIMAL amount
+        DECIMAL previous_due
+        DECIMAL due_after_settlement
+        ENUM payment_method "CASH, BANK, BKASH, NAGAD, OTHER"
+        TEXT note
+        DATETIME created_at
+        DATETIME updated_at
     }
 
     OTHER_DUE_BALANCES {
@@ -644,6 +1254,7 @@ erDiagram
     WHOLESALERS ||--o{ ACCOUNT_BALANCES : "summarizes"
     WHOLESALERS ||--o{ EXPENSE_CATEGORIES : "defines"
     WHOLESALERS ||--o{ SUPPLIER_EXPENSES : "records"
+    WHOLESALERS ||--o{ SUPPLIER_SETTLEMENTS : "records"
     WHOLESALERS ||--o{ OTHER_DUE_BALANCES : "summarizes"
     WHOLESALERS ||--o{ BOX_TYPES : "defines"
     WHOLESALERS ||--o{ BOX_INVENTORY : "tracks"
@@ -653,15 +1264,22 @@ erDiagram
     SUPPLIERS ||--o{ WHOLESALER_SUPPLIERS : "connects to wholesalers"
     CUSTOMERS ||--o{ WHOLESALER_CUSTOMERS : "connects to wholesalers"
     WHOLESALER_SUPPLIERS ||--o{ PRODUCTS : "supplies"
+    PRODUCTS ||--o{ CATEGORIES : "has varieties/categories"
     WHOLESALER_SUPPLIERS ||--o{ SUPPLIER_DELIVERIES : "sends"
     SUPPLIER_DELIVERIES ||--o{ SUPPLIER_DELIVERY_ITEMS : "contains"
     WHOLESALER_SUPPLIERS ||--o{ SALE_ITEMS : "earns commission from"
     WHOLESALER_SUPPLIERS ||--o{ SUPPLIER_EXPENSES : "may owe expenses"
+    WHOLESALER_SUPPLIERS ||--o{ SUPPLIER_SETTLEMENTS : "receives payouts"
     WHOLESALER_CUSTOMERS ||--o{ SALES : "buys"
-    PRODUCTS ||--|| PRODUCT_STOCKS : "current stock"
+    WHOLESALER_SUPPLIERS ||--o{ INVENTORY : "stock from supplier"
+    PRODUCTS ||--o{ INVENTORY : "current stock"
     PRODUCTS ||--o{ STOCK_LEDGER : "stock movements"
     PRODUCTS ||--o{ SUPPLIER_DELIVERY_ITEMS : "received as"
     PRODUCTS ||--o{ SALE_ITEMS : "sold as"
+    CATEGORIES ||--o{ INVENTORY : "stock by category"
+    CATEGORIES ||--o{ STOCK_LEDGER : "movement by category"
+    CATEGORIES ||--o{ SUPPLIER_DELIVERY_ITEMS : "received category"
+    CATEGORIES ||--o{ SALE_ITEMS : "sold category"
     SALES ||--o{ SALE_ITEMS : "contains"
     SALES ||--o{ TRANSACTIONS : "appears as sale"
     SALES ||--o{ STOCK_LEDGER : "reduces stock"
@@ -670,6 +1288,7 @@ erDiagram
     PAYMENTS ||--o{ ACCOUNT_LEDGER : "settles due"
     PAYMENTS ||--o{ BOX_LEDGER : "may include box return"
     EXPENSE_CATEGORIES ||--o{ SUPPLIER_EXPENSES : "classifies"
+    SUPPLIER_SETTLEMENTS ||--o{ ACCOUNT_LEDGER : "settles supplier due"
     BOX_TYPES ||--o{ BOX_INVENTORY : "inventory by type"
     BOX_TYPES ||--o{ BOX_LEDGER : "movements by type"
     BOX_TYPES ||--o{ BOX_BALANCES : "due by type"
@@ -698,20 +1317,28 @@ flowchart LR
     WHOLESALERS -- "1:N" --> TRANSACTIONS[TRANSACTIONS]
 
     WHOLESALER_SUPPLIERS -- "1:N" --> PRODUCTS
+    PRODUCTS -- "1:N" --> CATEGORIES[CATEGORIES]
     WHOLESALER_SUPPLIERS -- "1:N" --> SUPPLIER_DELIVERIES[SUPPLIER_DELIVERIES]
     SUPPLIER_DELIVERIES -- "1:N" --> SUPPLIER_DELIVERY_ITEMS[SUPPLIER_DELIVERY_ITEMS]
-    PRODUCTS -- "1:0..1" --> PRODUCT_STOCKS[PRODUCT_STOCKS]
+    WHOLESALER_SUPPLIERS -- "1:N" --> INVENTORY[INVENTORY]
+    PRODUCTS -- "1:N" --> INVENTORY
     PRODUCTS -- "1:N" --> STOCK_LEDGER[STOCK_LEDGER]
+    CATEGORIES -- "1:0..1" --> INVENTORY
+    CATEGORIES -- "1:N" --> STOCK_LEDGER
+    CATEGORIES -- "1:N" --> SUPPLIER_DELIVERY_ITEMS
 
     WHOLESALER_CUSTOMERS -- "1:N" --> SALES
+    WHOLESALER_CUSTOMERS -- "1:N" --> PAYMENTS
     SALES -- "1:N" --> SALE_ITEMS[SALE_ITEMS]
     WHOLESALER_SUPPLIERS -- "1:N" --> SALE_ITEMS
     PRODUCTS -- "1:N" --> SALE_ITEMS
+    CATEGORIES -- "1:N" --> SALE_ITEMS
 
     SALES -- "1:0..1" --> TXN_SALE[TRANSACTIONS]
     PAYMENTS -- "1:0..1" --> TXN_PAYMENT[TRANSACTIONS]
 
     WHOLESALER_SUPPLIERS -- "1:N" --> SUPPLIER_EXPENSES[SUPPLIER_EXPENSES]
+    WHOLESALER_SUPPLIERS -- "1:N" --> SUPPLIER_SETTLEMENTS[SUPPLIER_SETTLEMENTS]
     EXPENSE_CATEGORIES[EXPENSE_CATEGORIES] -- "1:N" --> SUPPLIER_EXPENSES
     WHOLESALER_SUPPLIERS -- "1:N" --> OTHER_DUE_BALANCES[OTHER_DUE_BALANCES]
     EXPENSE_CATEGORIES -- "1:N" --> OTHER_DUE_BALANCES
@@ -737,21 +1364,29 @@ erDiagram
     WHOLESALERS ||--o{ BOX_TYPES : "1 wholesaler defines 0..many box types"
 
     WHOLESALER_SUPPLIERS ||--o{ PRODUCTS : "1 supplier account can supply 0..many products"
+    PRODUCTS ||--|{ CATEGORIES : "1 product has 1..many categories/types"
     WHOLESALER_SUPPLIERS ||--o{ SUPPLIER_DELIVERIES : "1 supplier account sends 0..many deliveries"
     SUPPLIER_DELIVERIES ||--|{ SUPPLIER_DELIVERY_ITEMS : "1 delivery has 1..many items"
-    PRODUCTS ||--o| PRODUCT_STOCKS : "1 product has 0..1 stock summary"
+    WHOLESALER_SUPPLIERS ||--o{ INVENTORY : "1 supplier account has 0..many stock rows"
+    PRODUCTS ||--o{ INVENTORY : "1 product has 0..many category stock summaries"
     PRODUCTS ||--o{ STOCK_LEDGER : "1 product has 0..many stock movements"
     PRODUCTS ||--o{ SUPPLIER_DELIVERY_ITEMS : "1 product can appear in 0..many delivery items"
+    CATEGORIES ||--o| INVENTORY : "1 category has 0..1 stock summary per supplier account"
+    CATEGORIES ||--o{ STOCK_LEDGER : "1 category has 0..many stock movements"
+    CATEGORIES ||--o{ SUPPLIER_DELIVERY_ITEMS : "1 category can appear in 0..many delivery items"
 
     WHOLESALER_CUSTOMERS ||--o{ SALES : "1 customer account has 0..many sales"
+    WHOLESALER_CUSTOMERS ||--o{ PAYMENTS : "1 customer account has 0..many payments"
     SALES ||--|{ SALE_ITEMS : "1 sale has 1..many sale items"
     WHOLESALER_SUPPLIERS ||--o{ SALE_ITEMS : "1 supplier account can appear in 0..many sale items"
     PRODUCTS ||--o{ SALE_ITEMS : "1 product can appear in 0..many sale items"
+    CATEGORIES ||--o{ SALE_ITEMS : "1 category can appear in 0..many sale items"
 
     SALES ||--o| TRANSACTIONS : "1 sale creates 0..1 transaction entry"
     PAYMENTS ||--o| TRANSACTIONS : "1 payment creates 0..1 transaction entry"
 
     WHOLESALER_SUPPLIERS ||--o{ SUPPLIER_EXPENSES : "1 supplier account has 0..many expense rows"
+    WHOLESALER_SUPPLIERS ||--o{ SUPPLIER_SETTLEMENTS : "1 supplier account has 0..many settlement rows"
     EXPENSE_CATEGORIES ||--o{ SUPPLIER_EXPENSES : "1 category has 0..many expenses"
     WHOLESALER_SUPPLIERS ||--o{ OTHER_DUE_BALANCES : "1 supplier account has 0..many other due balances"
     EXPENSE_CATEGORIES ||--o{ OTHER_DUE_BALANCES : "1 category has 0..many due balances"
@@ -764,9 +1399,8 @@ erDiagram
 Polymorphic cardinality rules:
 
 ```text
-PAYMENTS.party_type + party_account_id:
+PAYMENTS.wholesaler_customer_id:
   WHOLESALER_CUSTOMER 1 -> 0..many PAYMENTS
-  WHOLESALER_SUPPLIER 1 -> 0..many PAYMENTS
 
 ACCOUNT_LEDGER.party_type + party_account_id:
   WHOLESALER_CUSTOMER 1 -> 0..many ACCOUNT_LEDGER rows
@@ -831,54 +1465,38 @@ service transaction. Do not depend on database foreign keys inside the partition
 
 Recommended structure:
 
-```sql
-CREATE TABLE transactions (
-  id BIGINT NOT NULL AUTO_INCREMENT,
-  wholesaler_id BIGINT NOT NULL,
-  transaction_type ENUM('SALE','PAYMENT') NOT NULL,
-  sale_id BIGINT NULL,
-  payment_id BIGINT NULL,
-  wholesaler_supplier_id BIGINT NULL,
-  wholesaler_customer_id BIGINT NULL,
-  sale_amount DECIMAL(14,2) NOT NULL DEFAULT 0,
-  payment_amount DECIMAL(14,2) NOT NULL DEFAULT 0,
-  description TEXT NULL,
-  created_at DATETIME NOT NULL,
-  PRIMARY KEY (id, created_at),
-  KEY idx_txn_wh_date (wholesaler_id, created_at),
-  KEY idx_txn_wh_type_date (wholesaler_id, transaction_type, created_at),
-  KEY idx_txn_wh_supplier_date (wholesaler_id, wholesaler_supplier_id, created_at),
-  KEY idx_txn_wh_customer_date (wholesaler_id, wholesaler_customer_id, created_at)
-)
-PARTITION BY RANGE COLUMNS(created_at) (
-  PARTITION p202605 VALUES LESS THAN ('2026-06-01'),
-  PARTITION p202606 VALUES LESS THAN ('2026-07-01'),
-  PARTITION pmax VALUES LESS THAN (MAXVALUE)
-);
+```text
+transactions:
+  id PK
+  wholesaler_id FK
+  transaction_type
+  sale_id
+  payment_id
+  wholesaler_supplier_id
+  wholesaler_customer_id
+  sale_amount
+  payment_amount
+  due_amount
+  description
+  created_at PK
+```
 
-CREATE TABLE payments (
-  id BIGINT NOT NULL AUTO_INCREMENT,
-  wholesaler_id BIGINT NOT NULL,
-  party_type ENUM('WHOLESALER_CUSTOMER','WHOLESALER_SUPPLIER') NOT NULL,
-  party_account_id BIGINT NOT NULL,
-  payment_mode ENUM('CASH_RECEIVE','BOX_RECEIVE','CASH_AND_BOX_RECEIVE','CASH_PAY') NOT NULL,
-  cash_direction ENUM('IN','OUT','NONE') NOT NULL DEFAULT 'NONE',
-  cash_amount DECIMAL(14,2) NOT NULL DEFAULT 0,
-  wooden_boxes_received INT NOT NULL DEFAULT 0,
-  plastic_boxes_received INT NOT NULL DEFAULT 0,
-  jamanot_amount DECIMAL(14,2) NOT NULL DEFAULT 0,
-  payment_method ENUM('CASH','BANK','BKASH','NAGAD','OTHER','NONE') NOT NULL DEFAULT 'CASH',
-  note TEXT NULL,
-  created_at DATETIME NOT NULL,
-  PRIMARY KEY (id, created_at),
-  KEY idx_pay_wh_party_date (wholesaler_id, party_type, party_account_id, created_at),
-  KEY idx_pay_wh_date (wholesaler_id, created_at)
-)
-PARTITION BY RANGE COLUMNS(created_at) (
-  PARTITION p202605 VALUES LESS THAN ('2026-06-01'),
-  PARTITION p202606 VALUES LESS THAN ('2026-07-01'),
-  PARTITION pmax VALUES LESS THAN (MAXVALUE)
-);
+```text
+payments:
+  id PK
+  wholesaler_id FK
+  wholesaler_customer_id FK
+  payment_type
+  cash_amount
+  boxes_returned
+  jamanot_amount
+  previous_due
+  due_after_payment
+  previous_jamanot
+  jamanot_after_payment
+  payment_method
+  note
+  created_at PK
 ```
 
 Partition maintenance:
@@ -893,10 +1511,10 @@ Never update created_at after insert.
 ### Accuracy Rules For High Volume
 
 1. A wholesaler user can only read/write rows where `wholesaler_id` matches their `wholesalers.id`.
-2. Supplier product receiving must use `wholesaler_suppliers.id` and create `supplier_deliveries`, `supplier_delivery_items`, `stock_ledger`, `product_stocks`, and optional `box_ledger` rows in one database transaction.
-3. A sale must use `wholesaler_customers.id` and `wholesaler_suppliers.id`, then create `sales`, `sale_items`, `stock_ledger`, customer `account_ledger`, supplier commission `account_ledger`, `account_balances`, optional `box_ledger`, `box_balances`, `box_inventory`, and one partitioned `transactions` row in one database transaction.
+2. Supplier product receiving must use `wholesaler_suppliers.id`, `products.id`, and `categories.id`, then create `supplier_deliveries`, `supplier_delivery_items`, `stock_ledger`, `inventory`, and optional `box_ledger` rows in one database transaction.
+3. A sale must use `wholesaler_customers.id`, `wholesaler_suppliers.id`, `products.id`, and `categories.id`, then create `sales`, `sale_items`, `stock_ledger`, customer `account_ledger`, supplier commission `account_ledger`, `account_balances`, optional `box_ledger`, `box_balances`, `box_inventory`, and one partitioned `transactions` row in one database transaction.
 4. A customer payment may include cash, box return, and jamanot in one request. It must create one partitioned `payments` row, one partitioned `transactions` row, account ledger updates, box ledger updates, jamanot update, and balance updates atomically.
-5. A supplier payment may settle commission due and/or supplier expense due. It must update `payments`, `account_ledger`, `account_balances`, `supplier_expenses` or `other_due_balances` when applicable.
+5. A supplier settlement may settle commission due and/or supplier expense due. It must update `supplier_settlements`, `account_ledger`, `account_balances`, `supplier_expenses` or `other_due_balances` when applicable.
 6. Balance rows must be updated with row locking, for example `SELECT ... FOR UPDATE`, before changing due, stock, jamanot, or box balances.
 7. The transaction dashboard should query the partitioned `transactions` table by `wholesaler_id`, date range, type, `wholesaler_supplier_id`, and `wholesaler_customer_id`.
 8. Phone number search should first resolve `customers.phone` or `suppliers.phone`, then resolve the matching link-table row for the current wholesaler before querying `transactions`.
@@ -912,17 +1530,19 @@ suppliers:          UNIQUE (phone), (status)
 wholesaler_suppliers: UNIQUE (wholesaler_id, supplier_id), (supplier_id), (wholesaler_id, status)
 customers:          UNIQUE (phone), (status)
 wholesaler_customers: UNIQUE (wholesaler_id, customer_id), (customer_id), (wholesaler_id, status)
-products:           (wholesaler_id, wholesaler_supplier_id), (wholesaler_id, status)
-product_stocks:     UNIQUE (wholesaler_id, product_id)
-stock_ledger:       (wholesaler_id, product_id, created_at)
+products:           UNIQUE (wholesaler_supplier_id, name, unit), (wholesaler_id, wholesaler_supplier_id), (wholesaler_id, status)
+categories:         UNIQUE (product_id, name, grade), (product_id, status)
+inventory:          UNIQUE (wholesaler_id, wholesaler_supplier_id, category_id), (wholesaler_id, product_id), (wholesaler_id, status)
+stock_ledger:       (wholesaler_id, wholesaler_supplier_id, created_at), (wholesaler_id, category_id, created_at), (wholesaler_id, product_id, created_at)
 supplier_deliveries:(wholesaler_id, wholesaler_supplier_id, delivery_date)
 sales:              (wholesaler_id, sale_date), (wholesaler_id, wholesaler_customer_id, sale_date)
-sale_items:         (wholesaler_id, wholesaler_supplier_id), (wholesaler_id, product_id)
+sale_items:         (wholesaler_id, wholesaler_supplier_id), (wholesaler_id, product_id), (wholesaler_id, category_id)
 transactions:       (wholesaler_id, created_at), (wholesaler_id, transaction_type, created_at), (wholesaler_id, wholesaler_supplier_id, created_at), (wholesaler_id, wholesaler_customer_id, created_at)
-payments:           (wholesaler_id, party_type, party_account_id, created_at), (wholesaler_id, created_at)
+payments:           (wholesaler_id, wholesaler_customer_id, created_at), (wholesaler_id, payment_type, created_at), (wholesaler_id, created_at)
 account_ledger:     (wholesaler_id, party_type, party_account_id, created_at)
 account_balances:   UNIQUE (wholesaler_id, party_type, party_account_id)
 supplier_expenses:  (wholesaler_id, wholesaler_supplier_id, expense_date), (wholesaler_id, category_id, expense_date)
+supplier_settlements: (wholesaler_id, wholesaler_supplier_id, settlement_date)
 other_due_balances: UNIQUE (wholesaler_id, wholesaler_supplier_id, category_id)
 box_ledger:         (wholesaler_id, party_type, party_account_id, created_at)
 box_balances:       UNIQUE (wholesaler_id, party_type, party_account_id, box_type_id)
