@@ -8,7 +8,7 @@ import org.example.dto.CustomerAccountResponse;
 import org.example.dto.SupplierAccountResponse;
 import org.example.exception.BadRequestException;
 import org.example.model.Customer;
-import org.example.model.DomainEnums.RecordStatus;
+import org.example.model.enums.RecordStatus;
 import org.example.model.Supplier;
 import org.example.model.Wholesaler;
 import org.example.model.WholesalerCustomer;

@@ -3,7 +3,7 @@ package org.example.service;
 import org.example.dto.LoginRequest;
 import org.example.dto.LoginResponse;
 import org.example.exception.BadRequestException;
-import org.example.model.DomainEnums.RecordStatus;
+import org.example.model.enums.RecordStatus;
 import org.example.model.User;
 import org.example.repository.UserRepository;
 import org.example.repository.WholesalerRepository;

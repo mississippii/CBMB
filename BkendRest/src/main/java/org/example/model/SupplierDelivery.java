@@ -13,7 +13,7 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import org.example.model.DomainEnums.PostStatus;
+import org.example.model.enums.PostStatus;
 import lombok.Getter;
 import lombok.Setter;
 

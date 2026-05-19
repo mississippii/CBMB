@@ -12,9 +12,9 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
-import org.example.model.DomainEnums.BoxLedgerPartyType;
-import org.example.model.DomainEnums.BoxMovementType;
-import org.example.model.DomainEnums.BoxReferenceType;
+import org.example.model.enums.BoxLedgerPartyType;
+import org.example.model.enums.BoxMovementType;
+import org.example.model.enums.BoxReferenceType;
 import lombok.Getter;
 import lombok.Setter;
 

@@ -13,8 +13,8 @@ import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import org.example.model.DomainEnums.InventoryStatus;
-import org.example.model.DomainEnums.UnitType;
+import org.example.model.enums.InventoryStatus;
+import org.example.model.enums.UnitType;
 import lombok.Getter;
 import lombok.Setter;
 

@@ -154,7 +154,7 @@ DROP TABLE IF EXISTS `box_types`;
 CREATE TABLE `box_types` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `wholesaler_id` bigint unsigned NOT NULL,
-  `name` enum('BANGLA','CHINA') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
+  `name` varchar(80) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `status` enum('ACTIVE','DISABLED') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'ACTIVE',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -175,7 +175,7 @@ CREATE TABLE `categories` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `product_id` bigint unsigned NOT NULL,
   `name` varchar(120) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
-  `grade` varchar(80) COLLATE utf8mb4_bin NOT NULL DEFAULT '',
+  `grade` varchar(80) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT '',
   `status` enum('ACTIVE','DISABLED') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'ACTIVE',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -183,7 +183,7 @@ CREATE TABLE `categories` (
   UNIQUE KEY `uk_categories_product_name_grade` (`product_id`,`name`,`grade`),
   KEY `idx_categories_product_status` (`product_id`,`status`),
   CONSTRAINT `fk_categories_product` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -311,7 +311,7 @@ CREATE TABLE `payments` (
   KEY `idx_payments_customer_date` (`wholesaler_id`,`wholesaler_customer_id`,`created_at`),
   KEY `idx_payments_type_date` (`wholesaler_id`,`payment_type`,`created_at`),
   CONSTRAINT `chk_payments_nonnegative` CHECK (((`cash_amount` >= 0) and (`boxes_returned` >= 0) and (`jamanot_amount` >= 0) and (`previous_due` >= 0) and (`due_after_payment` >= 0) and (`previous_jamanot` >= 0) and (`jamanot_after_payment` >= 0))),
-  CONSTRAINT `chk_payments_type_values` CHECK ((((`payment_type` = _utf8mb4'CASH_RECEIVE') and (`cash_amount` > 0) and (`boxes_returned` = 0) and (`jamanot_amount` = 0)) or ((`payment_type` = _utf8mb4'BOX_RETURN') and (`cash_amount` = 0) and (`boxes_returned` > 0) and (`jamanot_amount` > 0)) or ((`payment_type` = _utf8mb4'CASH_AND_BOX_RETURN') and (`cash_amount` > 0) and (`boxes_returned` > 0) and (`jamanot_amount` > 0))))
+  CONSTRAINT `chk_payments_type_values` CHECK ((((`payment_type` = _utf8mb4'CASH_RECEIVE') and (`cash_amount` > 0) and (`boxes_returned` = 0) and (`jamanot_amount` = 0)) or ((`payment_type` = _utf8mb4'BOX_RETURN') and (`cash_amount` = 0) and (`boxes_returned` > 0) and (`jamanot_amount` >= 0)) or ((`payment_type` = _utf8mb4'CASH_AND_BOX_RETURN') and (`cash_amount` > 0) and (`boxes_returned` > 0) and (`jamanot_amount` >= 0))))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 /*!50500 PARTITION BY RANGE  COLUMNS(created_at)
 (PARTITION p202605 VALUES LESS THAN ('2026-06-01') ENGINE = InnoDB,
@@ -341,7 +341,7 @@ CREATE TABLE `products` (
   KEY `idx_products_supplier` (`wholesaler_supplier_id`),
   CONSTRAINT `fk_products_wholesaler` FOREIGN KEY (`wholesaler_id`) REFERENCES `wholesalers` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `fk_products_wholesaler_supplier` FOREIGN KEY (`wholesaler_supplier_id`) REFERENCES `wholesaler_suppliers` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_bin;
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -410,6 +410,7 @@ CREATE TABLE `sales` (
   PRIMARY KEY (`id`),
   KEY `idx_sales_wholesaler_date` (`wholesaler_id`,`sale_date`),
   KEY `idx_sales_customer_date` (`wholesaler_customer_id`,`sale_date`),
+  KEY `idx_sales_wh_customer_date` (`wholesaler_id`,`wholesaler_customer_id`,`sale_date`),
   CONSTRAINT `fk_sales_wholesaler` FOREIGN KEY (`wholesaler_id`) REFERENCES `wholesalers` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `fk_sales_wholesaler_customer` FOREIGN KEY (`wholesaler_customer_id`) REFERENCES `wholesaler_customers` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `chk_sales_amounts_nonnegative` CHECK (((`gross_amount` >= 0) and (`discount_amount` >= 0) and (`net_amount` >= 0) and (`paid_amount` >= 0) and (`due_amount` >= 0) and (`boxes_given` >= 0) and (`jamanot_amount` >= 0)))
@@ -533,7 +534,8 @@ CREATE TABLE `supplier_expenses` (
   KEY `fk_supplier_expenses_category` (`category_id`),
   CONSTRAINT `fk_supplier_expenses_category` FOREIGN KEY (`category_id`) REFERENCES `expense_categories` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `fk_supplier_expenses_wholesaler` FOREIGN KEY (`wholesaler_id`) REFERENCES `wholesalers` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT `fk_supplier_expenses_ws` FOREIGN KEY (`wholesaler_supplier_id`) REFERENCES `wholesaler_suppliers` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
+  CONSTRAINT `fk_supplier_expenses_ws` FOREIGN KEY (`wholesaler_supplier_id`) REFERENCES `wholesaler_suppliers` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `chk_supplier_expenses_amounts` CHECK (((`amount` >= 0) and (`paid_amount` >= 0) and (`due_amount` >= 0) and (`paid_amount` <= `amount`)))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -561,7 +563,8 @@ CREATE TABLE `supplier_settlements` (
   KEY `idx_supplier_settlement_supplier_date` (`wholesaler_id`,`wholesaler_supplier_id`,`settlement_date`),
   KEY `fk_supplier_settlements_ws` (`wholesaler_supplier_id`),
   CONSTRAINT `fk_supplier_settlements_wholesaler` FOREIGN KEY (`wholesaler_id`) REFERENCES `wholesalers` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT `fk_supplier_settlements_ws` FOREIGN KEY (`wholesaler_supplier_id`) REFERENCES `wholesaler_suppliers` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
+  CONSTRAINT `fk_supplier_settlements_ws` FOREIGN KEY (`wholesaler_supplier_id`) REFERENCES `wholesaler_suppliers` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `chk_supplier_settlements_amount_positive` CHECK ((`amount` > 0))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -610,7 +613,8 @@ CREATE TABLE `transactions` (
   KEY `idx_transactions_type_date` (`wholesaler_id`,`transaction_type`,`created_at`),
   KEY `idx_transactions_customer_date` (`wholesaler_id`,`wholesaler_customer_id`,`created_at`),
   KEY `idx_transactions_supplier_date` (`wholesaler_id`,`wholesaler_supplier_id`,`created_at`),
-  KEY `idx_transactions_sale` (`sale_id`)
+  KEY `idx_transactions_sale` (`sale_id`),
+  KEY `idx_transactions_payment` (`payment_id`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 /*!50500 PARTITION BY RANGE  COLUMNS(created_at)
 (PARTITION p202605 VALUES LESS THAN ('2026-06-01') ENGINE = InnoDB,
@@ -722,4 +726,4 @@ CREATE TABLE `wholesalers` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-05-19  3:45:09
+-- Dump completed on 2026-05-19  6:49:21

@@ -12,7 +12,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.OneToOne;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
-import org.example.model.DomainEnums.RecordStatus;
+import org.example.model.enums.RecordStatus;
 
 @Entity
 @Table(name = "wholesalers")

@@ -11,7 +11,7 @@ import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
-import org.example.model.DomainEnums.TransactionType;
+import org.example.model.enums.TransactionType;
 import lombok.Getter;
 import lombok.Setter;
 
