@@ -1,34 +1,44 @@
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { useData } from '../context/DataContext';
 
 const initialForm = {
   supplierId: '',
-  productName: '',
-  category: '',
+  productId: '',
+  categoryId: '',
   quantity: '',
-  unit: 'pcs',
-  unitPrice: '',
   note: '',
 };
 
 const AddProducts = () => {
-  const { suppliers, addSupplierProduct } = useData();
+  const { suppliers, catalogProducts, addSupplierProduct } = useData();
   const [formData, setFormData] = useState(initialForm);
   const [feedback, setFeedback] = useState({ type: '', message: '' });
+
+  const selectedProduct = useMemo(
+    () => catalogProducts.find((product) => Number(product.id) === Number(formData.productId)),
+    [catalogProducts, formData.productId],
+  );
+
+  const categories = useMemo(() => selectedProduct?.categories || [], [selectedProduct]);
+
+  const selectedCategory = useMemo(
+    () => categories.find((category) => Number(category.id) === Number(formData.categoryId)),
+    [categories, formData.categoryId],
+  );
 
   const resetForm = () => {
     setFormData(initialForm);
   };
 
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
     setFeedback({ type: '', message: '' });
 
     try {
-      const product = addSupplierProduct(formData);
+      const product = await addSupplierProduct(formData);
       setFeedback({
         type: 'success',
-        message: `${product.productName} added to stock. Quantity: ${product.quantity} ${product.unit}.`,
+        message: `${product.productName} ${product.category} added. Quantity: ${product.quantity} ${product.unit}.`,
       });
       resetForm();
     } catch (error) {
@@ -69,42 +79,52 @@ const AddProducts = () => {
             </select>
           </div>
           <div>
-            <label>Product Name</label>
-            <input
-              type="text"
-              value={formData.productName}
-              onChange={(event) => setFormData((prev) => ({ ...prev, productName: event.target.value }))}
-              placeholder="Himsagar Mango"
+            <label>Product</label>
+            <select
+              value={formData.productId}
+              onChange={(event) =>
+                setFormData((prev) => ({ ...prev, productId: event.target.value, categoryId: '' }))
+              }
               className="input-field"
               required
-            />
+            >
+              <option value="">Choose product...</option>
+              {catalogProducts.map((product) => (
+                <option key={product.id} value={product.id}>
+                  {product.name} ({String(product.defaultUnit || '').toUpperCase()})
+                </option>
+              ))}
+            </select>
           </div>
         </div>
 
         <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
           <div>
             <label>Category</label>
-            <input
-              type="text"
-              value={formData.category}
-              onChange={(event) => setFormData((prev) => ({ ...prev, category: event.target.value }))}
-              placeholder="Mango"
+            <select
+              value={formData.categoryId}
+              onChange={(event) => setFormData((prev) => ({ ...prev, categoryId: event.target.value }))}
               className="input-field"
+              disabled={!selectedProduct}
               required
-            />
+            >
+              <option value="">{selectedProduct ? 'Choose category...' : 'Select product first'}</option>
+              {categories.map((category) => (
+                <option key={category.id} value={category.id}>
+                  {category.name}{category.grade ? ` - ${category.grade}` : ''}
+                </option>
+              ))}
+            </select>
           </div>
           <div>
             <label>Unit</label>
-            <select
-              value={formData.unit}
-              onChange={(event) => setFormData((prev) => ({ ...prev, unit: event.target.value }))}
+            <input
+              type="text"
+              value={selectedProduct?.defaultUnit || ''}
+              placeholder="Auto selected"
               className="input-field"
-            >
-              <option value="pcs">Pieces</option>
-              <option value="kg">KG</option>
-              <option value="dozen">Dozen</option>
-              <option value="box">Box</option>
-            </select>
+              readOnly
+            />
           </div>
         </div>
 
@@ -114,7 +134,7 @@ const AddProducts = () => {
             <input
               type="number"
               min="0"
-              step="0.01"
+              step="0.001"
               value={formData.quantity}
               onChange={(event) => setFormData((prev) => ({ ...prev, quantity: event.target.value }))}
               className="input-field"
@@ -122,15 +142,13 @@ const AddProducts = () => {
             />
           </div>
           <div>
-            <label>Unit Price</label>
+            <label>Selected Item</label>
             <input
-              type="number"
-              min="0"
-              step="0.01"
-              value={formData.unitPrice}
-              onChange={(event) => setFormData((prev) => ({ ...prev, unitPrice: event.target.value }))}
+              type="text"
+              value={selectedProduct && selectedCategory ? `${selectedProduct.name} / ${selectedCategory.name}` : ''}
+              placeholder="Product and category"
               className="input-field"
-              required
+              readOnly
             />
           </div>
         </div>

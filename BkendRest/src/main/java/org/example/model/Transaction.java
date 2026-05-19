@@ -7,11 +7,14 @@ import jakarta.persistence.Enumerated;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.IdClass;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import jakarta.persistence.TableGenerator;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import org.example.model.enums.TransactionType;
+import org.example.model.id.TransactionId;
 import lombok.Getter;
 import lombok.Setter;
 
@@ -19,10 +22,12 @@ import lombok.Setter;
 @Setter
 @Entity
 @Table(name = "transactions")
+@IdClass(TransactionId.class)
 public class Transaction {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @TableGenerator(name = "transactions_id_gen", table = "jpa_id_generators", pkColumnName = "sequence_name", valueColumnName = "next_val", pkColumnValue = "transactions", allocationSize = 1)
+    @GeneratedValue(strategy = GenerationType.TABLE, generator = "transactions_id_gen")
     private Long id;
 
     @Column(name = "wholesaler_id", nullable = false)
@@ -56,6 +61,7 @@ public class Transaction {
     @Column(columnDefinition = "TEXT")
     private String description;
 
+    @Id
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 

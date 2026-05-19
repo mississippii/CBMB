@@ -261,6 +261,20 @@ CREATE TABLE `inventory` (
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
+-- Table structure for table `jpa_id_generators`
+--
+
+DROP TABLE IF EXISTS `jpa_id_generators`;
+/*!40101 SET @saved_cs_client     = @@character_set_client */;
+/*!50503 SET character_set_client = utf8mb4 */;
+CREATE TABLE `jpa_id_generators` (
+  `sequence_name` varchar(255) COLLATE utf8mb4_unicode_ci NOT NULL,
+  `next_val` bigint NOT NULL,
+  PRIMARY KEY (`sequence_name`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+/*!40101 SET character_set_client = @saved_cs_client */;
+
+--
 -- Table structure for table `other_due_balances`
 --
 
@@ -328,19 +342,16 @@ DROP TABLE IF EXISTS `products`;
 /*!50503 SET character_set_client = utf8mb4 */;
 CREATE TABLE `products` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
-  `wholesaler_id` bigint unsigned NOT NULL,
-  `wholesaler_supplier_id` bigint unsigned NOT NULL,
   `name` varchar(160) CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
-  `unit` enum('PCS','KG','DOZEN','BOX','BAG','MOUND') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'PCS',
+  `default_unit` enum('PCS','KG','DOZEN','BOX','BAG','MOUND') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'PCS',
+  `unit_type` enum('COUNT','WEIGHT') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'COUNT',
   `status` enum('ACTIVE','DISABLED') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL DEFAULT 'ACTIVE',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_products_supplier_name_unit` (`wholesaler_supplier_id`,`name`,`unit`),
-  KEY `idx_products_wholesaler_status` (`wholesaler_id`,`status`),
-  KEY `idx_products_supplier` (`wholesaler_supplier_id`),
-  CONSTRAINT `fk_products_wholesaler` FOREIGN KEY (`wholesaler_id`) REFERENCES `wholesalers` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT `fk_products_wholesaler_supplier` FOREIGN KEY (`wholesaler_supplier_id`) REFERENCES `wholesaler_suppliers` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE
+  UNIQUE KEY `uk_products_name` (`name`),
+  KEY `idx_products_status_name` (`status`,`name`),
+  CONSTRAINT `chk_products_unit_type` CHECK ((((`unit_type` = _utf8mb4'WEIGHT') and (`default_unit` in (_utf8mb4'KG',_utf8mb4'MOUND'))) or ((`unit_type` = _utf8mb4'COUNT') and (`default_unit` in (_utf8mb4'PCS',_utf8mb4'DOZEN',_utf8mb4'BOX',_utf8mb4'BAG')))))
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
@@ -726,4 +737,4 @@ CREATE TABLE `wholesalers` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-05-19  6:49:21
+-- Dump completed on 2026-05-19 18:37:57

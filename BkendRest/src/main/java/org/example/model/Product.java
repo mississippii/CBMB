@@ -4,14 +4,12 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
-import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
-import jakarta.persistence.JoinColumn;
-import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
+import org.example.model.enums.ProductUnitType;
 import org.example.model.enums.RecordStatus;
 import org.example.model.enums.UnitType;
 import lombok.Getter;
@@ -27,20 +25,16 @@ public class Product {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "wholesaler_id", nullable = false)
-    private Wholesaler wholesaler;
-
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "wholesaler_supplier_id", nullable = false)
-    private WholesalerSupplier wholesalerSupplier;
-
     @Column(nullable = false, length = 160)
     private String name;
 
     @Enumerated(EnumType.STRING)
-    @Column(nullable = false)
-    private UnitType unit = UnitType.PCS;
+    @Column(name = "default_unit", nullable = false)
+    private UnitType defaultUnit = UnitType.PCS;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "unit_type", nullable = false)
+    private ProductUnitType unitType = ProductUnitType.COUNT;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)

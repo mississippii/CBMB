@@ -44,6 +44,7 @@ const createDefaultState = () => ({
   customers: [],
   transactions: [],
   supplierProducts: [],
+  catalogProducts: [],
   boxInventory: EMPTY_BOX_INVENTORY,
 });
 
@@ -103,6 +104,7 @@ export const DataProvider = ({ children }) => {
   const [customers, setCustomers] = useState(initialState.customers);
   const [transactions, setTransactions] = useState(initialState.transactions);
   const [supplierProducts, setSupplierProducts] = useState(initialState.supplierProducts);
+  const [catalogProducts, setCatalogProducts] = useState(initialState.catalogProducts);
   const [boxInventory, setBoxInventory] = useState(initialState.boxInventory);
   const [isLoading, setIsLoading] = useState(false);
   const [dataError, setDataError] = useState('');
@@ -114,6 +116,7 @@ export const DataProvider = ({ children }) => {
         setCustomers([]);
         setTransactions([]);
         setSupplierProducts([]);
+        setCatalogProducts([]);
         setBoxInventory(createDefaultState().boxInventory);
         setDataError('');
         setIsLoading(false);
@@ -126,9 +129,10 @@ export const DataProvider = ({ children }) => {
       setIsLoading(true);
       setDataError('');
       try {
-        const [supplierAccounts, customerAccounts] = await Promise.all([
+        const [supplierAccounts, customerAccounts, productCatalog] = await Promise.all([
           fetchJson(`${API_BASE_URL}/wholesalers/${admin.wholesalerId}/suppliers`),
           fetchJson(`${API_BASE_URL}/wholesalers/${admin.wholesalerId}/customers`),
+          fetchJson(`${API_BASE_URL}/products`),
         ]);
 
         if (!isActive) return;
@@ -136,6 +140,7 @@ export const DataProvider = ({ children }) => {
         setCustomers(customerAccounts.map(mapCustomerAccount));
         setTransactions([]);
         setSupplierProducts([]);
+        setCatalogProducts(productCatalog);
         setBoxInventory(createDefaultState().boxInventory);
       } catch (error) {
         if (isActive) {
@@ -178,59 +183,86 @@ export const DataProvider = ({ children }) => {
     return newSupplier;
   };
 
-  const addSupplierProduct = (productData) => {
+  const addSupplierProduct = async (productData) => {
+    if (!admin?.wholesalerId) {
+      throw new Error('Wholesaler profile not found for this user.');
+    }
+
     const supplierId = Number(productData.supplierId);
+    const productId = Number(productData.productId);
+    const categoryId = Number(productData.categoryId);
     const quantity = toPositiveNumber(productData.quantity);
-    const unitPrice = toPositiveNumber(productData.unitPrice);
     const supplier = suppliers.find((item) => item.id === supplierId);
+    const catalogProduct = catalogProducts.find((item) => Number(item.id) === productId);
+    const category = catalogProduct?.categories?.find((item) => Number(item.id) === categoryId);
 
     if (!supplier) {
       throw new Error('Supplier not found.');
     }
-    if (!productData.productName?.trim() || !productData.category?.trim()) {
-      throw new Error('Please provide product name and category.');
+    if (!catalogProduct) {
+      throw new Error('Please select a valid product.');
     }
-    if (!quantity || !unitPrice) {
-      throw new Error('Please provide valid quantity and unit price.');
+    if (!category) {
+      throw new Error('Please select a valid category.');
+    }
+    if (!quantity) {
+      throw new Error('Please provide valid quantity.');
     }
 
-    const productName = productData.productName.trim();
-    const category = productData.category.trim();
-    const unit = productData.unit || 'pcs';
+    const unit = String(catalogProduct.defaultUnit || 'PCS').toLowerCase();
+    const delivery = await fetchJson(API_BASE_URL + '/wholesalers/' + admin.wholesalerId + '/supplier-deliveries', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        wholesalerSupplierId: supplierId,
+        note: productData.note?.trim() || '',
+        items: [
+          {
+            productId,
+            categoryId,
+            quantity,
+            note: productData.note?.trim() || '',
+          },
+        ],
+      }),
+    });
+
+    const deliveryItem = delivery.items?.[0];
+    const inventoryQuantity = roundMoney(Number(deliveryItem?.inventoryQuantityOnHand) || quantity);
+    const productName = deliveryItem?.productName || catalogProduct.name;
+    const categoryName = deliveryItem?.categoryName || category.name;
     const existingProduct = supplierProducts.find(
       (product) =>
         product.supplierId === supplierId &&
-        product.productName.trim().toLowerCase() === productName.toLowerCase() &&
-        product.category.trim().toLowerCase() === category.toLowerCase() &&
-        (product.unit || 'pcs') === unit,
+        Number(product.productId) === productId &&
+        Number(product.categoryId) === categoryId,
     );
 
     const productAfterDelivery = existingProduct
       ? {
           ...existingProduct,
-          quantity: roundMoney((Number(existingProduct.quantity) || 0) + quantity),
-          unitPrice,
-          totalValue: roundMoney(
-            ((Number(existingProduct.quantity) || 0) + quantity) * unitPrice,
-          ),
-          dateReceived: getDateOnly(),
+          deliveryItemId: deliveryItem?.id || existingProduct.deliveryItemId,
+          quantity: inventoryQuantity,
+          totalValue: 0,
+          dateReceived: delivery.deliveryDate?.split('T')[0] || getDateOnly(),
           status: 'in_stock',
         }
       : {
-          id: getNextId(supplierProducts),
-          ...productData,
+          id: deliveryItem?.inventoryId || getNextId(supplierProducts),
+          deliveryItemId: deliveryItem?.id,
+          productId,
+          categoryId,
           supplierId,
           productName,
-          category,
+          category: categoryName,
           unit,
-          quantity,
-          unitPrice,
-          totalValue: roundMoney(quantity * unitPrice),
-          dateReceived: getDateOnly(),
+          quantity: inventoryQuantity,
+          unitPrice: 0,
+          totalValue: 0,
+          dateReceived: delivery.deliveryDate?.split('T')[0] || getDateOnly(),
           status: 'in_stock',
         };
 
-    const deliveryValue = roundMoney(quantity * unitPrice);
     const newTransaction = {
       id: getNextId(transactions),
       date: getDateOnly(),
@@ -242,9 +274,9 @@ export const DataProvider = ({ children }) => {
       productId: productAfterDelivery.id,
       category: productAfterDelivery.category,
       quantity,
-      unitPrice,
+      unitPrice: 0,
       unit: productAfterDelivery.unit,
-      totalAmount: deliveryValue,
+      totalAmount: 0,
       note: productData.note?.trim() || '',
     };
 
@@ -806,6 +838,7 @@ export const DataProvider = ({ children }) => {
         transactions,
         supplierProducts,
         boxInventory,
+        catalogProducts,
         isLoading,
         dataError,
         addSupplier,

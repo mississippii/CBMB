@@ -6,7 +6,9 @@ import java.util.List;
 import org.example.dto.CreateCustomerRequest;
 import org.example.dto.CreateSupplierRequest;
 import org.example.dto.CustomerAccountResponse;
+import org.example.dto.ReceiveSupplierDeliveryRequest;
 import org.example.dto.SupplierAccountResponse;
+import org.example.dto.SupplierDeliveryResponse;
 import org.example.service.WholesalerService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.CrossOrigin;
@@ -60,5 +62,15 @@ public class WholesalerController {
             @RequestBody CreateCustomerRequest request
     ) {
         return wholesalerService.createCustomer(wholesalerId, request);
+    }
+
+    @Operation(summary = "Receive supplier shipment and update product inventory")
+    @PostMapping("/supplier-deliveries")
+    @ResponseStatus(HttpStatus.CREATED)
+    public SupplierDeliveryResponse receiveSupplierDelivery(
+            @PathVariable Long wholesalerId,
+            @RequestBody ReceiveSupplierDeliveryRequest request
+    ) {
+        return wholesalerService.receiveSupplierDelivery(wholesalerId, request);
     }
 }

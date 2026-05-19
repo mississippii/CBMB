@@ -7,12 +7,13 @@ import CustomersList from '../components/CustomersList';
 import TransactionForm from '../components/TransactionForm';
 import TransactionsList from '../components/TransactionsList';
 import AddProducts from '../components/AddProducts';
+import StoreInventory from '../components/StoreInventory';
 import { useData } from '../context/DataContext';
 
 const Dashboard = () => {
   const { admin: wholesaler } = useAuth();
   const { isLoading, dataError } = useData();
-  const [activeTab, setActiveTab] = useState('dashboard');
+  const [activeTab, setActiveTab] = useState('inventory');
   const [showTransactionModal, setShowTransactionModal] = useState(false);
 
   const tabs = [
@@ -26,7 +27,7 @@ const Dashboard = () => {
 
   return (
     <div className="min-h-screen">
-      <Navbar onHome={() => setActiveTab('dashboard')} />
+      <Navbar onHome={() => setActiveTab('inventory')} />
 
       <div className="container-main">
         <div className="mb-5 welcome-banner">
@@ -108,6 +109,7 @@ const Dashboard = () => {
 
           <main className="workspace-content">
             <div className="animate-fadeIn">
+              {activeTab === 'inventory' && <StoreInventory onAddProducts={() => setActiveTab('add-products')} />}
               {activeTab === 'dashboard' && <BoxDashboard />}
               {activeTab === 'add-products' && <AddProducts />}
               {activeTab === 'suppliers' && <SuppliersList />}

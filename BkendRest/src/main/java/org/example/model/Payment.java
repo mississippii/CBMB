@@ -4,15 +4,17 @@ import jakarta.persistence.Column;
 import jakarta.persistence.Entity;
 import jakarta.persistence.EnumType;
 import jakarta.persistence.Enumerated;
-import jakarta.persistence.FetchType;
 import jakarta.persistence.GeneratedValue;
 import jakarta.persistence.GenerationType;
 import jakarta.persistence.Id;
+import jakarta.persistence.IdClass;
 import jakarta.persistence.PrePersist;
 import jakarta.persistence.Table;
+import jakarta.persistence.TableGenerator;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import org.example.model.enums.PaymentMethod;
+import org.example.model.id.PaymentId;
 import org.example.model.enums.PaymentType;
 import lombok.Getter;
 import lombok.Setter;
@@ -21,10 +23,12 @@ import lombok.Setter;
 @Setter
 @Entity
 @Table(name = "payments")
+@IdClass(PaymentId.class)
 public class Payment {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @TableGenerator(name = "payments_id_gen", table = "jpa_id_generators", pkColumnName = "sequence_name", valueColumnName = "next_val", pkColumnValue = "payments", allocationSize = 1)
+    @GeneratedValue(strategy = GenerationType.TABLE, generator = "payments_id_gen")
     private Long id;
 
     @Column(name = "wholesaler_id", nullable = false)
@@ -65,6 +69,7 @@ public class Payment {
     @Column(columnDefinition = "TEXT")
     private String note;
 
+    @Id
     @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
 
