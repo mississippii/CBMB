@@ -3,11 +3,13 @@ package org.example.service;
 import java.util.List;
 import org.example.dto.TransactionResponse;
 import org.example.exception.BadRequestException;
+import org.example.model.Payment;
 import org.example.model.Sale;
 import org.example.model.SaleItem;
 import org.example.model.Transaction;
 import org.example.model.WholesalerCustomer;
 import org.example.model.WholesalerSupplier;
+import org.example.repository.PaymentRepository;
 import org.example.repository.SaleItemRepository;
 import org.example.repository.SaleRepository;
 import org.example.repository.TransactionRepository;
@@ -26,6 +28,7 @@ public class TransactionService {
     private final WholesalerSupplierRepository wholesalerSupplierRepository;
     private final SaleRepository saleRepository;
     private final SaleItemRepository saleItemRepository;
+    private final PaymentRepository paymentRepository;
 
     public TransactionService(
             WholesalerRepository wholesalerRepository,
@@ -33,7 +36,8 @@ public class TransactionService {
             WholesalerCustomerRepository wholesalerCustomerRepository,
             WholesalerSupplierRepository wholesalerSupplierRepository,
             SaleRepository saleRepository,
-            SaleItemRepository saleItemRepository
+            SaleItemRepository saleItemRepository,
+            PaymentRepository paymentRepository
     ) {
         this.wholesalerRepository = wholesalerRepository;
         this.transactionRepository = transactionRepository;
@@ -41,6 +45,7 @@ public class TransactionService {
         this.wholesalerSupplierRepository = wholesalerSupplierRepository;
         this.saleRepository = saleRepository;
         this.saleItemRepository = saleItemRepository;
+        this.paymentRepository = paymentRepository;
     }
 
     @Transactional(readOnly = true)
@@ -54,8 +59,36 @@ public class TransactionService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
+    public List<TransactionResponse> listCustomerTransactions(Long wholesalerId, Long wholesalerCustomerId) {
+        if (wholesalerId == null || !wholesalerRepository.existsById(wholesalerId)) {
+            throw new BadRequestException("Wholesaler not found.");
+        }
+        return transactionRepository.findByWholesalerIdAndWholesalerCustomerIdOrderByCreatedAtDesc(wholesalerId, wholesalerCustomerId)
+                .stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<TransactionResponse> listSupplierTransactions(Long wholesalerId, Long wholesalerSupplierId) {
+        if (wholesalerId == null || !wholesalerRepository.existsById(wholesalerId)) {
+            throw new BadRequestException("Wholesaler not found.");
+        }
+        return transactionRepository.findByWholesalerIdAndWholesalerSupplierIdOrderByCreatedAtDesc(wholesalerId, wholesalerSupplierId)
+                .stream()
+                .map(this::toResponse)
+                .toList();
+    }
+
     private TransactionResponse toResponse(Transaction transaction) {
         PartySnapshot party = resolveParty(transaction);
+        SaleItem item = transaction.getSaleId() == null
+                ? null
+                : saleItemRepository.findFirstBySale_Id(transaction.getSaleId()).orElse(null);
+        Payment payment = transaction.getPaymentId() == null
+                ? null
+                : paymentRepository.findFirstByWholesalerIdAndId(transaction.getWholesalerId(), transaction.getPaymentId()).orElse(null);
         return new TransactionResponse(
                 transaction.getId(),
                 transaction.getTransactionType().name(),
@@ -67,9 +100,19 @@ public class TransactionService {
                 transaction.getWholesalerSupplierId(),
                 party.supplierName(),
                 party.supplierPhone(),
+                item == null ? null : item.getProduct().getId(),
+                item == null ? null : item.getProduct().getName(),
+                item == null || item.getCategory() == null ? null : item.getCategory().getId(),
+                item == null || item.getCategory() == null ? null : item.getCategory().getName(),
+                item == null ? null : item.getQuantity(),
+                item == null ? null : item.getUnit().name(),
+                item == null ? null : item.getUnitPrice(),
                 transaction.getSaleAmount(),
                 transaction.getPaymentAmount(),
                 transaction.getDueAmount(),
+                payment == null ? 0 : payment.getBoxesReturned(),
+                payment == null ? java.math.BigDecimal.ZERO : payment.getJamanotAmount(),
+                payment == null ? null : payment.getPaymentType().name(),
                 transaction.getDescription(),
                 transaction.getCreatedAt()
         );

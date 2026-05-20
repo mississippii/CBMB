@@ -58,7 +58,7 @@ CREATE TABLE `account_ledger` (
   KEY `idx_account_ledger_reference` (`reference_type`,`reference_id`),
   CONSTRAINT `fk_account_ledger_wholesaler` FOREIGN KEY (`wholesaler_id`) REFERENCES `wholesalers` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `chk_account_ledger_debit_credit` CHECK ((((`debit` > 0) and (`credit` = 0)) or ((`credit` > 0) and (`debit` = 0))))
-) ENGINE=InnoDB AUTO_INCREMENT=16 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=17 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -391,7 +391,7 @@ CREATE TABLE `sale_items` (
   CONSTRAINT `fk_sale_items_wholesaler_supplier` FOREIGN KEY (`wholesaler_supplier_id`) REFERENCES `wholesaler_suppliers` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `chk_sale_items_amounts_nonnegative` CHECK (((`unit_price` >= 0) and (`line_total` >= 0) and (`commission_rate` >= 0) and (`commission_amount` >= 0))),
   CONSTRAINT `chk_sale_items_quantity_positive` CHECK ((`quantity` > 0))
-) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -430,7 +430,7 @@ CREATE TABLE `sales` (
   CONSTRAINT `fk_sales_wholesaler_customer` FOREIGN KEY (`wholesaler_customer_id`) REFERENCES `wholesaler_customers` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `chk_sales_amounts_nonnegative` CHECK (((`gross_amount` >= 0) and (`discount_amount` >= 0) and (`net_amount` >= 0) and (`paid_amount` >= 0) and (`due_amount` >= 0) and (`boxes_given` >= 0) and (`jamanot_amount` >= 0))),
   CONSTRAINT `chk_sales_customer_type` CHECK ((`customer_type` in (_utf8mb4'PERMANENT',_utf8mb4'ONE_TIME')))
-) ENGINE=InnoDB AUTO_INCREMENT=6 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -464,7 +464,7 @@ CREATE TABLE `stock_ledger` (
   CONSTRAINT `fk_stock_ledger_wholesaler` FOREIGN KEY (`wholesaler_id`) REFERENCES `wholesalers` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `fk_stock_ledger_ws` FOREIGN KEY (`wholesaler_supplier_id`) REFERENCES `wholesaler_suppliers` (`id`) ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `chk_stock_ledger_quantity_positive` CHECK ((`quantity` > 0))
-) ENGINE=InnoDB AUTO_INCREMENT=14 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+) ENGINE=InnoDB AUTO_INCREMENT=15 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 /*!40101 SET character_set_client = @saved_cs_client */;
 
 --
@@ -567,7 +567,7 @@ CREATE TABLE `supplier_settlements` (
   `wholesaler_id` bigint unsigned NOT NULL,
   `wholesaler_supplier_id` bigint unsigned NOT NULL,
   `settlement_date` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `settlement_type` enum('PRODUCT_PAYMENT','COMMISSION_RECEIVE','EXPENSE_RECEIVE','ADVANCE_PAYMENT','ADJUSTMENT') COLLATE utf8mb4_unicode_ci NOT NULL,
+  `settlement_type` enum('PRODUCT_PAYMENT','COMMISSION_RECEIVE','EXPENSE_RECEIVE','ADVANCE_PAYMENT','ADJUSTMENT') CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci NOT NULL,
   `amount` decimal(14,2) NOT NULL DEFAULT '0.00',
   `previous_due` decimal(14,2) NOT NULL DEFAULT '0.00',
   `due_after_settlement` decimal(14,2) NOT NULL DEFAULT '0.00',
@@ -631,7 +631,7 @@ CREATE TABLE `transactions` (
   KEY `idx_transactions_supplier_date` (`wholesaler_id`,`wholesaler_supplier_id`,`created_at`),
   KEY `idx_transactions_sale` (`sale_id`),
   KEY `idx_transactions_payment` (`payment_id`)
-) ENGINE=InnoDB AUTO_INCREMENT=7 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
+) ENGINE=InnoDB AUTO_INCREMENT=8 DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
 /*!50500 PARTITION BY RANGE  COLUMNS(created_at)
 (PARTITION p202605 VALUES LESS THAN ('2026-06-01') ENGINE = InnoDB,
  PARTITION p202606 VALUES LESS THAN ('2026-07-01') ENGINE = InnoDB,
@@ -742,4 +742,4 @@ CREATE TABLE `wholesalers` (
 /*!40101 SET COLLATION_CONNECTION=@OLD_COLLATION_CONNECTION */;
 /*!40111 SET SQL_NOTES=@OLD_SQL_NOTES */;
 
--- Dump completed on 2026-05-20  5:12:53
+-- Dump completed on 2026-05-20 17:19:03

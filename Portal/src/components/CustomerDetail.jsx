@@ -1,51 +1,79 @@
+import { useEffect, useState } from 'react'
 import { useData } from '../context/DataContext'
+
 const formatCurrency = (value) => '৳ ' + (Number(value) || 0).toLocaleString()
-const formatSignedCurrency = (value) => (Number(value) > 0 ? '+' : Number(value) < 0 ? '-' : '') + '৳ ' + Math.abs(Number(value) || 0).toLocaleString()
-const getDateOnly = (value) => new Date(value).toISOString().split('T')[0]
+const formatAmount = (transaction) => {
+  if (transaction.transactionType === 'Payment') {
+    return formatCurrency(transaction.paymentAmount || transaction.totalAmount)
+  }
+  return formatCurrency(transaction.totalAmount)
+}
+
+const renderCustomerTransactionDetails = (transaction) => {
+  if (transaction.transactionType === 'Payment') {
+    const parts = []
+    if (Number(transaction.paymentAmount) > 0) parts.push('Cash received')
+    if (Number(transaction.boxesReturned) > 0) parts.push('Crates returned: ' + transaction.boxesReturned)
+    if (Number(transaction.boxJamanotChange) !== 0) {
+      parts.push('Jamanot: ' + formatCurrency(Math.abs(Number(transaction.boxJamanotChange))))
+    }
+    return parts.length ? parts.join(' • ') : (transaction.note || 'Payment recorded')
+  }
+
+  return [transaction.product, transaction.category && transaction.category !== 'No Category' ? transaction.category : null]
+    .filter(Boolean)
+    .join(' / ') || 'Sale recorded'
+}
 
 const CustomerDetail = ({ customerId, onBack }) => {
-  const { customers, transactions } = useData()
-  const customer = customers.find((item) => item.id === customerId)
+  const { customers, transactions, getCustomerProfile } = useData()
+  const [profile, setProfile] = useState(null)
+  const [isProfileLoading, setIsProfileLoading] = useState(false)
+
+  useEffect(() => {
+    let isActive = true
+    setProfile(null)
+
+    if (!customerId || !getCustomerProfile) return undefined
+
+    setIsProfileLoading(true)
+    getCustomerProfile(customerId)
+      .then((result) => {
+        if (isActive) setProfile(result)
+      })
+      .catch(() => {
+        if (isActive) setProfile(null)
+      })
+      .finally(() => {
+        if (isActive) setIsProfileLoading(false)
+      })
+
+    return () => {
+      isActive = false
+    }
+  }, [customerId, getCustomerProfile])
+
+  const fallbackCustomer = customers.find((item) => item.id === customerId)
+  const customer = profile?.account || fallbackCustomer
 
   if (!customer) {
     return <div className="text-gray-600">Customer not found</div>
   }
 
-  const today = getDateOnly(new Date())
   const initials = customer.name
     .split(' ')
     .map((name) => name[0])
     .join('')
 
-  const todaySales = transactions.filter(
-    (transaction) =>
-      transaction.transactionType === 'Sale' &&
-      (transaction.customerId === customer.id || transaction.customer === customer.name) &&
-      getDateOnly(transaction.createdAt || transaction.date) === today,
-  )
-
-  const todayPayments = transactions.filter(
-    (transaction) =>
-      transaction.transactionType === 'Payment' &&
-      transaction.partyType === 'Customer' &&
-      (transaction.partyId === customer.id || transaction.partyName === customer.name) &&
-      transaction.paymentType === 'Cash' &&
-      getDateOnly(transaction.createdAt || transaction.date) === today,
-  )
-
-  const todayPurchaseAmount = todaySales.reduce(
-    (sum, transaction) => sum + (Number(transaction.totalAmount) || 0),
-    0,
-  )
-  const todayPaidAmount =
-    todaySales.reduce((sum, transaction) => sum + (Number(transaction.paymentAmount) || 0), 0) +
-    todayPayments.reduce((sum, transaction) => sum + (Number(transaction.paymentAmount) || 0), 0)
-  const todayDueMovement = todayPurchaseAmount - todayPaidAmount
-  const previousDue = Math.max((Number(customer.amountDue) || 0) - todayDueMovement, 0)
-  const dueRatio =
-    customer.totalPurchases > 0
-      ? Math.min(Math.round((customer.amountDue / customer.totalPurchases) * 100), 100)
-      : 0
+  const fallbackTransactions = transactions
+    .filter((transaction) => (
+      transaction.customerId === customer.id ||
+      transaction.customer === customer.name ||
+      transaction.customerPhone === customer.phone
+    ))
+    .slice()
+    .sort((a, b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date))
+  const customerTransactions = profile?.transactions || fallbackTransactions
 
   return (
     <div className="space-y-5">
@@ -77,23 +105,7 @@ const CustomerDetail = ({ customerId, onBack }) => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
-        <div className="metric-tile">
-          <p>Today Purchases</p>
-          <strong>{formatCurrency(todayPurchaseAmount)}</strong>
-        </div>
-        <div className="metric-tile">
-          <p>Today Paid</p>
-          <strong>{formatCurrency(todayPaidAmount)}</strong>
-        </div>
-        <div className="metric-tile">
-          <p>Total Purchases</p>
-          <strong>{formatCurrency(customer.totalPurchases)}</strong>
-        </div>
-        <div className="metric-tile">
-          <p>Total Paid</p>
-          <strong>{formatCurrency(customer.totalPaid)}</strong>
-        </div>
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
         <div className="metric-tile danger">
           <p>Current Due</p>
           <strong>{formatCurrency(customer.amountDue)}</strong>
@@ -104,61 +116,72 @@ const CustomerDetail = ({ customerId, onBack }) => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_20rem]">
+      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
         <div className="supplier-panel">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
             <div>
-              <h3>Due Summary</h3>
-              <p>Current due is separated from today's customer activity.</p>
+              <h3>Payment Summary</h3>
+              <p>All sale and payment transactions for this customer.</p>
             </div>
-            <div className="rounded-lg bg-slate-50 px-3 py-2 text-right">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Payment Risk</p>
-              <p className="text-lg font-extrabold text-slate-900">{dueRatio}%</p>
-            </div>
+            <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-[#307D7E]">
+              {isProfileLoading ? 'Loading' : customerTransactions.length + ' entries'}
+            </span>
           </div>
 
-          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-            <div className="rounded-xl bg-slate-50 p-4">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Previous Due</p>
-              <p className="mt-1 text-xl font-extrabold text-slate-900">{formatCurrency(previousDue)}</p>
-            </div>
-            <div className="rounded-xl bg-emerald-50 p-4">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Today Net Change</p>
-              <p className="mt-1 text-xl font-extrabold text-emerald-800">{formatSignedCurrency(todayDueMovement)}</p>
-            </div>
-            <div className="rounded-xl bg-rose-50 p-4">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-rose-700">Current Due</p>
-              <p className="mt-1 text-xl font-extrabold text-rose-800">{formatCurrency(customer.amountDue)}</p>
-            </div>
-          </div>
-
-          <div className="mt-5">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Risk Level</p>
-            <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
-              <div
-                className={`h-full rounded-full ${
-                  dueRatio > 60 ? 'bg-rose-500' : dueRatio > 30 ? 'bg-amber-500' : 'bg-emerald-500'
-                }`}
-                style={{ width: `${dueRatio}%` }}
-              />
-            </div>
+          <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200">
+            {customerTransactions.length === 0 ? (
+              <div className="empty-state">No customer transactions found.</div>
+            ) : (
+              <table className="w-full min-w-[640px] text-sm">
+                <thead>
+                  <tr>
+                    <th>Date</th>
+                    <th>Type</th>
+                    <th>Details</th>
+                    <th className="text-right">Amount</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {customerTransactions.map((transaction) => (
+                    <tr key={transaction.id}>
+                      <td className="font-semibold text-slate-900">{transaction.date}</td>
+                      <td>
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${
+                          transaction.transactionType === 'Payment'
+                            ? 'bg-blue-100 text-blue-700'
+                            : 'bg-green-100 text-green-700'
+                        }`}>
+                          {transaction.transactionType === 'Payment' ? 'Payment' : 'Sale'}
+                        </span>
+                      </td>
+                      <td className="text-slate-600">
+                        {renderCustomerTransactionDetails(transaction)}
+                      </td>
+                      <td className="text-right font-extrabold text-slate-900">{formatAmount(transaction)}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
           </div>
         </div>
 
         <div className="supplier-panel">
           <h3>Crate Accountability</h3>
+          <p>Crates currently due from this customer.</p>
+
           <div className="mt-4 space-y-3">
             <div className="box-row">
               <span>Bangla</span>
-              <strong>{customer.boxesHoldingWooden}</strong>
+              <strong>{customer.boxesHoldingWooden || 0}</strong>
             </div>
             <div className="box-row">
               <span>China</span>
-              <strong>{customer.boxesHoldingPlastic}</strong>
+              <strong>{customer.boxesHoldingPlastic || 0}</strong>
             </div>
             <div className="box-row total">
               <span>Total Crates Due</span>
-              <strong>{customer.totalBoxesHolding}</strong>
+              <strong>{customer.totalBoxesHolding || 0}</strong>
             </div>
           </div>
 
@@ -167,26 +190,6 @@ const CustomerDetail = ({ customerId, onBack }) => {
             <p className="mt-1 text-xl font-extrabold text-[#255f60]">
               {formatCurrency(customer.boxJamanot || 0)}
             </p>
-          </div>
-        </div>
-      </div>
-
-      <div className="supplier-panel">
-        <h3 className="mb-4 text-lg font-bold text-slate-900">Lifetime Summary</h3>
-        <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-          <div className="rounded-xl bg-emerald-50 p-4">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Total Purchases</p>
-            <p className="mt-1 text-xl font-extrabold text-emerald-800">
-              {formatCurrency(customer.totalPurchases)}
-            </p>
-          </div>
-          <div className="rounded-xl bg-sky-50 p-4">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-sky-700">Total Paid</p>
-            <p className="mt-1 text-xl font-extrabold text-sky-800">{formatCurrency(customer.totalPaid)}</p>
-          </div>
-          <div className="rounded-xl bg-rose-50 p-4">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-rose-700">Payment Due</p>
-            <p className="mt-1 text-xl font-extrabold text-rose-800">{formatCurrency(customer.amountDue)}</p>
           </div>
         </div>
       </div>

@@ -17,6 +17,16 @@ const getNextId = (items) => {
   return Math.max(...items.map((item) => Number(item.id) || 0)) + 1;
 };
 
+const loadSection = async (label, request, fallback) => {
+  try {
+    return { label, data: await request(), error: null };
+  } catch (error) {
+    return { label, data: fallback, error };
+  }
+};
+
+const asArray = (value) => (Array.isArray(value) ? value : []);
+
 const EMPTY_BOX_INVENTORY = {
   totalBoxesOwned: 0,
   boxesInShop: 0,
@@ -44,6 +54,7 @@ const createDefaultState = () => ({
   customers: [],
   transactions: [],
   supplierProducts: [],
+  shipments: [],
   catalogProducts: [],
   boxInventory: EMPTY_BOX_INVENTORY,
 });
@@ -143,6 +154,30 @@ const mapCustomerAccount = (account) => ({
   totalBoxesHolding: Number(account.totalCratesDue) || 0,
 });
 
+
+const mapShipment = (shipment) => ({
+  id: shipment.id,
+  wholesalerId: shipment.wholesalerId,
+  supplierId: shipment.wholesalerSupplierId,
+  deliveryDate: shipment.deliveryDate,
+  date: shipment.deliveryDate?.split('T')[0] || getDateOnly(),
+  totalQuantity: roundMoney(Number(shipment.totalQuantity) || 0),
+  status: shipment.status || 'POSTED',
+  note: shipment.note || '',
+  items: (shipment.items || []).map((item) => ({
+    id: item.id,
+    inventoryId: item.inventoryId,
+    productId: item.productId,
+    productName: item.productName,
+    categoryId: item.categoryId || null,
+    categoryName: item.categoryName || 'No Category',
+    grade: item.grade || '',
+    quantity: roundMoney(Number(item.quantity) || 0),
+    unit: String(item.unit || '').toLowerCase(),
+    note: item.note || '',
+  })),
+});
+
 const mapTransaction = (transaction) => ({
   id: transaction.id,
   date: transaction.createdAt?.split('T')[0] || getDateOnly(),
@@ -154,10 +189,40 @@ const mapTransaction = (transaction) => ({
   supplierId: transaction.wholesalerSupplierId,
   supplier: transaction.supplierName || null,
   supplierPhone: transaction.supplierPhone || null,
+  productId: transaction.productId || null,
+  product: transaction.productName || null,
+  categoryId: transaction.categoryId || null,
+  category: transaction.categoryName || null,
+  quantity: Number(transaction.quantity) || 0,
+  unit: String(transaction.unit || '').toLowerCase(),
+  unitPrice: Number(transaction.unitPrice) || 0,
   totalAmount: Number(transaction.saleAmount) || 0,
   paymentAmount: Number(transaction.paymentAmount) || 0,
   customerNewDue: Number(transaction.dueAmount) || 0,
+  boxesReturned: Number(transaction.boxesReturned) || 0,
+  boxJamanotChange: Number(transaction.jamanotAmount) ? -Number(transaction.jamanotAmount) : 0,
+  paymentOperationType: transaction.paymentType || '',
+  paymentType: transaction.paymentType || transaction.description || '',
   note: transaction.description || '',
+});
+
+const mapCustomerProfile = (profile) => ({
+  account: mapCustomerAccount(profile.account || {}),
+  transactions: asArray(profile.transactions).map(mapTransaction),
+});
+
+const mapSupplierProfile = (profile) => ({
+  account: {
+    ...mapSupplierAccount(profile.account || {}),
+    todaySale: roundMoney(Number(profile.todaySale) || 0),
+    todayCommission: roundMoney(Number(profile.todayCommission) || 0),
+    totalSales: roundMoney(Number(profile.totalSale ?? profile.account?.totalSales) || 0),
+    totalCommissionEarned: roundMoney(Number(profile.totalCommission ?? profile.account?.totalCommissionEarned) || 0),
+    commissionDue: roundMoney(Number(profile.commissionDue) || 0),
+    amountDue: roundMoney(Number(profile.supplierDue ?? profile.account?.currentDue) || 0),
+    otherExpense: roundMoney(Number(profile.otherExpense) || 0),
+  },
+  transactions: asArray(profile.transactions).map(mapTransaction),
 });
 
 export const DataProvider = ({ children }) => {
@@ -167,6 +232,7 @@ export const DataProvider = ({ children }) => {
   const [customers, setCustomers] = useState(initialState.customers);
   const [transactions, setTransactions] = useState(initialState.transactions);
   const [supplierProducts, setSupplierProducts] = useState(initialState.supplierProducts);
+  const [shipments, setShipments] = useState(initialState.shipments);
   const [catalogProducts, setCatalogProducts] = useState(initialState.catalogProducts);
   const [boxInventory, setBoxInventory] = useState(initialState.boxInventory);
   const [isLoading, setIsLoading] = useState(false);
@@ -179,6 +245,7 @@ export const DataProvider = ({ children }) => {
         setCustomers([]);
         setTransactions([]);
         setSupplierProducts([]);
+        setShipments([]);
         setCatalogProducts([]);
         setBoxInventory(createDefaultState().boxInventory);
         setDataError('');
@@ -192,22 +259,29 @@ export const DataProvider = ({ children }) => {
       setIsLoading(true);
       setDataError('');
       try {
-        const [supplierAccounts, customerAccounts, productCatalog, inventoryItems, boxDashboard, transactionItems] = await Promise.all([
-          postJson(apiPaths.wholesalerSuppliersList(admin.wholesalerId)),
-          postJson(apiPaths.wholesalerCustomersList(admin.wholesalerId)),
-          postJson(apiPaths.productsList),
-          postJson(apiPaths.inventoryList(admin.wholesalerId)),
-          postJson(apiPaths.boxesDashboard(admin.wholesalerId)),
-          postJson(apiPaths.transactionsList(admin.wholesalerId)),
+        const [supplierAccounts, customerAccounts, productCatalog, inventoryItems, boxDashboard, transactionItems, shipmentItems] = await Promise.all([
+          loadSection('Suppliers', () => postJson(apiPaths.wholesalerSuppliersList(admin.wholesalerId)), []),
+          loadSection('Customers', () => postJson(apiPaths.wholesalerCustomersList(admin.wholesalerId)), []),
+          loadSection('Products', () => postJson(apiPaths.productsList), []),
+          loadSection('Inventory', () => postJson(apiPaths.inventoryList(admin.wholesalerId)), []),
+          loadSection('Crates', () => postJson(apiPaths.boxesDashboard(admin.wholesalerId)), EMPTY_BOX_INVENTORY),
+          loadSection('Transactions', () => postJson(apiPaths.transactionsList(admin.wholesalerId)), []),
+          loadSection('Shipments', () => postJson(apiPaths.supplierDeliveriesList(admin.wholesalerId)), []),
         ]);
 
         if (!isActive) return;
-        setSuppliers(supplierAccounts.map(mapSupplierAccount));
-        setCustomers(customerAccounts.map(mapCustomerAccount));
-        setTransactions(transactionItems.map(mapTransaction));
-        setSupplierProducts(inventoryItems.map(mapInventoryItem));
-        setCatalogProducts(productCatalog);
-        setBoxInventory(mapBoxDashboard(boxDashboard));
+        setSuppliers(asArray(supplierAccounts.data).map(mapSupplierAccount));
+        setCustomers(asArray(customerAccounts.data).map(mapCustomerAccount));
+        setTransactions(asArray(transactionItems.data).map(mapTransaction));
+        setSupplierProducts(asArray(inventoryItems.data).map(mapInventoryItem));
+        setShipments(asArray(shipmentItems.data).map(mapShipment));
+        setCatalogProducts(asArray(productCatalog.data));
+        setBoxInventory(mapBoxDashboard(boxDashboard.data));
+
+        const failedSections = [supplierAccounts, customerAccounts, productCatalog, inventoryItems, boxDashboard, transactionItems, shipmentItems]
+          .filter((section) => section.error)
+          .map((section) => section.label);
+        setDataError(failedSections.length ? 'Unable to load: ' + failedSections.join(', ') + '.' : '');
       } catch (error) {
         if (isActive) {
           setDataError(error.message || 'Failed to load wholesaler data.');
@@ -323,6 +397,9 @@ export const DataProvider = ({ children }) => {
           dateReceived: delivery.deliveryDate?.split('T')[0] || getDateOnly(),
           status: 'in_stock',
         };
+
+    const newShipment = mapShipment(delivery);
+    setShipments((prev) => [newShipment, ...prev]);
 
     const newTransaction = {
       id: getNextId(transactions),
@@ -834,6 +911,26 @@ export const DataProvider = ({ children }) => {
     return newTransaction;
   };
 
+  const getCustomerProfile = async (customerId) => {
+    if (!admin?.wholesalerId) {
+      throw new Error('Wholesaler profile not found for this user.');
+    }
+    const profile = await postJson(apiPaths.wholesalerCustomersProfile(admin.wholesalerId), {
+      accountId: Number(customerId),
+    });
+    return mapCustomerProfile(profile);
+  };
+
+  const getSupplierProfile = async (supplierId) => {
+    if (!admin?.wholesalerId) {
+      throw new Error('Wholesaler profile not found for this user.');
+    }
+    const profile = await postJson(apiPaths.wholesalerSuppliersProfile(admin.wholesalerId), {
+      accountId: Number(supplierId),
+    });
+    return mapSupplierProfile(profile);
+  };
+
   const updateBoxInventory = (updates) => {
     setBoxInventory((prev) => ({ ...prev, ...updates }));
   };
@@ -880,6 +977,7 @@ export const DataProvider = ({ children }) => {
         customers,
         transactions,
         supplierProducts,
+        shipments,
         boxInventory,
         catalogProducts,
         isLoading,
@@ -897,6 +995,8 @@ export const DataProvider = ({ children }) => {
         updateBoxInventory,
         addBoxes,
         markBoxesLost,
+        getCustomerProfile,
+        getSupplierProfile,
       }}
     >
       {children}

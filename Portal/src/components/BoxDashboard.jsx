@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useData } from '../context/DataContext';
 
 const BoxDashboard = () => {
@@ -11,12 +11,18 @@ const BoxDashboard = () => {
     reason: 'lost',
     description: '',
   });
-  const [statusMessage, setStatusMessage] = useState('');
+  const [statusMessage, setStatusMessage] = useState({ type: '', message: '' });
+
+  useEffect(() => {
+    if (statusMessage.type !== 'success') return undefined;
+    const timer = window.setTimeout(() => setStatusMessage({ type: '', message: '' }), 1500);
+    return () => window.clearTimeout(timer);
+  }, [statusMessage.type]);
 
   const handleAddBoxes = async () => {
     const quantity = Number(formData.quantity) || 0;
     if (quantity <= 0) {
-      setStatusMessage('Please enter a valid crate quantity to add.');
+      setStatusMessage({ type: 'error', message: 'Please enter a valid crate quantity to add.' });
       return;
     }
 
@@ -24,16 +30,16 @@ const BoxDashboard = () => {
       await addBoxes(formData.boxType, quantity);
       setFormData({ boxType: 'BANGLA', quantity: 0, reason: 'lost', description: '' });
       setShowAddForm(false);
-      setStatusMessage(`Added ${quantity} ${formData.boxType} crate(s) to inventory.`);
+      setStatusMessage({ type: 'success', message: '' });
     } catch (error) {
-      setStatusMessage(error.message || 'Unable to add crates.');
+      setStatusMessage({ type: 'error', message: error.message || 'Unable to add crates.' });
     }
   };
 
   const handleMarkLost = async () => {
     const quantity = Number(formData.quantity) || 0;
     if (quantity <= 0) {
-      setStatusMessage('Please enter a valid crate quantity to mark as lost/damaged.');
+      setStatusMessage({ type: 'error', message: 'Please enter a valid crate quantity to mark as lost/damaged.' });
       return;
     }
 
@@ -41,9 +47,9 @@ const BoxDashboard = () => {
       await markBoxesLost(formData.boxType, quantity, formData.reason);
       setFormData({ boxType: 'BANGLA', quantity: 0, reason: 'lost', description: '' });
       setShowLossForm(false);
-      setStatusMessage(`Marked ${quantity} ${formData.boxType} crate(s) as lost/damaged.`);
+      setStatusMessage({ type: 'success', message: '' });
     } catch (error) {
-      setStatusMessage(error.message || 'Unable to mark crates as lost/damaged.');
+      setStatusMessage({ type: 'error', message: error.message || 'Unable to mark crates as lost/damaged.' });
     }
   };
 
@@ -70,10 +76,16 @@ const BoxDashboard = () => {
 
   return (
     <div className="box-dashboard">
-      {statusMessage && (
-        <div className="status-success">
-          <span>i</span>
-          <span>{statusMessage}</span>
+      {statusMessage.type === 'success' && (
+        <div className="success-splash" role="status" aria-label="Saved">
+          <span>✓</span>
+        </div>
+      )}
+
+      {statusMessage.type === 'error' && statusMessage.message && (
+        <div className="status-error">
+          <span>!</span>
+          <span>{statusMessage.message}</span>
         </div>
       )}
 
@@ -103,9 +115,9 @@ const BoxDashboard = () => {
 
       <section className="box-kpi-grid">
         <div className="box-kpi primary">
-          <span>Total Inventory</span>
+          <span>Active Inventory</span>
           <strong>{boxInventory.totalBoxesOwned}</strong>
-          <p>Crates currently owned</p>
+          <p>Usable crates excluding lost/damaged</p>
         </div>
         <div className="box-kpi success">
           <span>In Shop</span>
@@ -131,7 +143,7 @@ const BoxDashboard = () => {
               <h3>Current Allocation</h3>
               <p>Where the crates are right now.</p>
             </div>
-            <span>{boxInventory.totalBoxesOwned} active</span>
+            <span>{boxInventory.totalBoxesOwned} usable</span>
           </div>
 
           <div className="allocation-track" aria-label="Crate allocation">
@@ -215,11 +227,17 @@ const BoxDashboard = () => {
             {topCustomerHolders.length ? (
               topCustomerHolders.map((customer) => (
                 <div key={customer.id} className="holder-row">
-                  <div>
+                  <div className="holder-main">
                     <h4>{customer.name}</h4>
                     <p>{customer.phone}</p>
                   </div>
-                  <strong>{customer.totalBoxesHolding}</strong>
+                  <div className="holder-crate-summary">
+                    <strong>{customer.totalBoxesHolding}</strong>
+                    <div className="holder-crate-breakdown">
+                      <span>Bangla: {customer.boxesHoldingWooden || 0}</span>
+                      <span>China: {customer.boxesHoldingPlastic || 0}</span>
+                    </div>
+                  </div>
                 </div>
               ))
             ) : (
@@ -239,11 +257,17 @@ const BoxDashboard = () => {
             {topSupplierHolders.length ? (
               topSupplierHolders.map((supplier) => (
                 <div key={supplier.id} className="holder-row">
-                  <div>
+                  <div className="holder-main">
                     <h4>{supplier.name}</h4>
                     <p>{supplier.contact}</p>
                   </div>
-                  <strong>{supplier.totalBoxesHolding}</strong>
+                  <div className="holder-crate-summary">
+                    <strong>{supplier.totalBoxesHolding}</strong>
+                    <div className="holder-crate-breakdown">
+                      <span>Bangla: {supplier.boxesHoldingWooden || 0}</span>
+                      <span>China: {supplier.boxesHoldingPlastic || 0}</span>
+                    </div>
+                  </div>
                 </div>
               ))
             ) : (

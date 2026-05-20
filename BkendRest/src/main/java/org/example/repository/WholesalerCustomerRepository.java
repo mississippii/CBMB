@@ -14,5 +14,7 @@ public interface WholesalerCustomerRepository extends JpaRepository<WholesalerCu
 
     List<WholesalerCustomer> findByWholesaler_IdAndStatusOrderByCreatedAtDesc(Long wholesalerId, RecordStatus status);
 
+    Optional<WholesalerCustomer> findByWholesaler_IdAndId(Long wholesalerId, Long id);
+
     List<WholesalerCustomer> findByWholesaler_IdOrderByCreatedAtDesc(Long wholesalerId);
 }

@@ -108,13 +108,17 @@ public class BoxService {
                 .findByWholesaler_IdAndBoxType_Id(wholesalerId, boxType.getId())
                 .orElse(null);
 
+        int inHand = value(inventory, BoxInventory::getInHand);
+        int withCustomers = value(inventory, BoxInventory::getWithCustomers);
+        int withSuppliers = value(inventory, BoxInventory::getWithSuppliers);
+
         return new BoxInventoryTypeResponse(
                 boxType.getId(),
                 boxType.getName(),
-                value(inventory, BoxInventory::getTotalOwned),
-                value(inventory, BoxInventory::getInHand),
-                value(inventory, BoxInventory::getWithCustomers),
-                value(inventory, BoxInventory::getWithSuppliers),
+                inHand + withCustomers + withSuppliers,
+                inHand,
+                withCustomers,
+                withSuppliers,
                 value(inventory, BoxInventory::getLostDamaged)
         );
     }

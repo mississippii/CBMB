@@ -1,11 +1,15 @@
 package org.example.service;
 
 import java.math.BigDecimal;
+import java.time.LocalDate;
+import java.time.LocalDateTime;
 import java.util.List;
 import org.example.dto.CreateCustomerRequest;
 import org.example.dto.CreateSupplierRequest;
 import org.example.dto.CustomerAccountResponse;
+import org.example.dto.CustomerProfileResponse;
 import org.example.dto.SupplierAccountResponse;
+import org.example.dto.SupplierProfileResponse;
 import org.example.exception.BadRequestException;
 import java.util.Locale;
 import org.example.model.AccountBalance;
@@ -17,6 +21,7 @@ import org.example.model.WholesalerCustomer;
 import org.example.model.WholesalerSupplier;
 import org.example.model.enums.PartyType;
 import org.example.model.enums.RecordStatus;
+import org.example.model.enums.SettlementType;
 import org.example.repository.AccountBalanceRepository;
 import org.example.repository.BoxBalanceRepository;
 import org.example.repository.CustomerRepository;
@@ -24,6 +29,7 @@ import org.example.repository.PaymentRepository;
 import org.example.repository.SaleItemRepository;
 import org.example.repository.SaleRepository;
 import org.example.repository.SupplierRepository;
+import org.example.repository.SupplierSettlementRepository;
 import org.example.repository.WholesalerCustomerRepository;
 import org.example.repository.WholesalerRepository;
 import org.example.repository.WholesalerSupplierRepository;
@@ -43,6 +49,8 @@ public class WholesalerService {
     private final SaleItemRepository saleItemRepository;
     private final SaleRepository saleRepository;
     private final PaymentRepository paymentRepository;
+    private final SupplierSettlementRepository supplierSettlementRepository;
+    private final TransactionService transactionService;
 
     public WholesalerService(
             WholesalerRepository wholesalerRepository,
@@ -54,7 +62,9 @@ public class WholesalerService {
             BoxBalanceRepository boxBalanceRepository,
             SaleItemRepository saleItemRepository,
             SaleRepository saleRepository,
-            PaymentRepository paymentRepository
+            PaymentRepository paymentRepository,
+            SupplierSettlementRepository supplierSettlementRepository,
+            TransactionService transactionService
     ) {
         this.wholesalerRepository = wholesalerRepository;
         this.supplierRepository = supplierRepository;
@@ -66,6 +76,8 @@ public class WholesalerService {
         this.saleItemRepository = saleItemRepository;
         this.saleRepository = saleRepository;
         this.paymentRepository = paymentRepository;
+        this.supplierSettlementRepository = supplierSettlementRepository;
+        this.transactionService = transactionService;
     }
 
     @Transactional
@@ -154,6 +166,50 @@ public class WholesalerService {
                 .toList();
     }
 
+    @Transactional(readOnly = true)
+    public CustomerProfileResponse getCustomerProfile(Long wholesalerId, Long wholesalerCustomerId) {
+        findWholesaler(wholesalerId);
+        if (wholesalerCustomerId == null) {
+            throw new BadRequestException("Customer account id is required.");
+        }
+        WholesalerCustomer account = wholesalerCustomerRepository.findByWholesaler_IdAndId(wholesalerId, wholesalerCustomerId)
+                .orElseThrow(() -> new BadRequestException("Customer profile not found."));
+        return new CustomerProfileResponse(
+                toCustomerResponse(account),
+                transactionService.listCustomerTransactions(wholesalerId, wholesalerCustomerId)
+        );
+    }
+
+    @Transactional(readOnly = true)
+    public SupplierProfileResponse getSupplierProfile(Long wholesalerId, Long wholesalerSupplierId) {
+        findWholesaler(wholesalerId);
+        if (wholesalerSupplierId == null) {
+            throw new BadRequestException("Supplier account id is required.");
+        }
+        WholesalerSupplier account = wholesalerSupplierRepository.findByWholesaler_IdAndId(wholesalerId, wholesalerSupplierId)
+                .orElseThrow(() -> new BadRequestException("Supplier profile not found."));
+        SupplierAccountResponse supplier = toSupplierResponse(account);
+        LocalDateTime todayStart = LocalDate.now().atStartOfDay();
+        LocalDateTime tomorrowStart = todayStart.plusDays(1);
+        BigDecimal todaySale = saleItemRepository.sumLineTotalBySupplierBetween(wholesalerId, wholesalerSupplierId, todayStart, tomorrowStart);
+        BigDecimal todayCommission = saleItemRepository.sumCommissionBySupplierBetween(wholesalerId, wholesalerSupplierId, todayStart, tomorrowStart);
+        BigDecimal commissionReceived = supplierSettlementRepository.sumAmountBySupplierAndType(wholesalerId, wholesalerSupplierId, SettlementType.COMMISSION_RECEIVE);
+        BigDecimal otherExpense = supplierSettlementRepository.sumAmountBySupplierAndType(wholesalerId, wholesalerSupplierId, SettlementType.EXPENSE_RECEIVE);
+        BigDecimal totalCommission = zeroIfNull(supplier.totalCommissionEarned());
+
+        return new SupplierProfileResponse(
+                supplier,
+                zeroIfNull(todaySale),
+                zeroIfNull(todayCommission),
+                zeroIfNull(supplier.totalSales()),
+                totalCommission,
+                positive(totalCommission.subtract(zeroIfNull(commissionReceived))),
+                zeroIfNull(supplier.currentDue()),
+                zeroIfNull(otherExpense),
+                transactionService.listSupplierTransactions(wholesalerId, wholesalerSupplierId)
+        );
+    }
+
     private Wholesaler findWholesaler(Long wholesalerId) {
         if (wholesalerId == null) {
             throw new BadRequestException("Wholesaler id is required.");
@@ -239,6 +295,15 @@ public class WholesalerService {
         Integer total() {
             return bangla + china;
         }
+    }
+
+    private BigDecimal positive(BigDecimal value) {
+        BigDecimal normalized = zeroIfNull(value);
+        return normalized.signum() < 0 ? BigDecimal.ZERO : normalized;
+    }
+
+    private BigDecimal zeroIfNull(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value;
     }
 
     private BigDecimal nonNegative(BigDecimal value, String message) {

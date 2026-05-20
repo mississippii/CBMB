@@ -159,17 +159,15 @@ const TransactionsList = () => {
   const paymentsForReport = filteredTransactions.filter((transaction) => transaction.transactionType === 'Payment');
 
   const getSupplierName = (transaction) => {
-    if (transaction.transactionType === 'Payment') {
-      return transaction.partyType === 'Supplier' ? transaction.partyName : '-';
-    }
-    return transaction.supplier || '-';
+    if (transaction.supplier) return transaction.supplier;
+    if (transaction.partyType === 'Supplier') return transaction.partyName || '-';
+    return '-';
   };
 
   const getCustomerName = (transaction) => {
-    if (transaction.transactionType === 'Payment') {
-      return transaction.partyType === 'Customer' ? transaction.partyName : '-';
-    }
-    return transaction.customer || '-';
+    if (transaction.customer) return transaction.customer;
+    if (transaction.partyType === 'Customer') return transaction.partyName || '-';
+    return '-';
   };
 
   const renderAmount = (transaction) => {
@@ -179,27 +177,44 @@ const TransactionsList = () => {
     return formatCurrency(transaction.totalAmount);
   };
 
+  const getPaymentOperationLabel = (transaction) => {
+    const value = String(transaction.paymentType || transaction.note || '').toUpperCase();
+    if (value.includes('PRODUCT_PAYMENT')) return 'Supplier due paid';
+    if (value.includes('COMMISSION_RECEIVE')) return 'Commission received';
+    if (value.includes('EXPENSE_RECEIVE')) return 'Extra expenses received';
+    if (value.includes('SUPPLIER_CRATE_GIVE')) return 'Crates borrowed by supplier';
+    if (value.includes('SUPPLIER_CRATE_RETURN')) return 'Crates received from supplier';
+    if (value.includes('CASH_AND_BOX_RETURN')) return 'Customer cash and crates received';
+    if (value.includes('BOX_RETURN')) return 'Customer crates received';
+    if (value.includes('CASH_RECEIVE')) return 'Customer cash received';
+    return transaction.transactionType === 'Payment' ? 'Payment recorded' : 'Sale recorded';
+  };
+
   const renderDetails = (transaction) => {
     if (transaction.transactionType === 'Payment') {
-      const boxes = (Number(transaction.boxReturnWooden) || 0) + (Number(transaction.boxReturnPlastic) || 0);
-      return [
-        transaction.paymentType,
-        transaction.dueAmountChange ? `Due +${formatCurrency(transaction.dueAmountChange)}` : null,
-        transaction.boxJamanotChange ? `Jamanot ${formatCurrency(transaction.boxJamanotChange)}` : null,
-        boxes ? `Boxes returned ${boxes}` : null,
-        transaction.note || null,
-      ]
-        .filter(Boolean)
-        .join(' • ');
+      const bangla = Number(transaction.boxReturnWooden || transaction.banglaCrates || 0);
+      const china = Number(transaction.boxReturnPlastic || transaction.chinaCrates || 0);
+      const parts = [getPaymentOperationLabel(transaction)];
+      if (bangla > 0 || china > 0) parts.push('Crates B:' + bangla + ' C:' + china);
+      if (Number(transaction.boxJamanotChange) !== 0) parts.push('Jamanot ' + formatCurrency(transaction.boxJamanotChange));
+      if (Number(transaction.customerNewDue) > 0) parts.push('Due ' + formatCurrency(transaction.customerNewDue));
+      return parts.join(' • ');
     }
 
-    return [
-      transaction.product,
-      `${transaction.quantity} x ${formatCurrency(transaction.unitPrice)}`,
-      `Paid ${formatCurrency(transaction.paymentAmount)}`,
-      `Due after ${formatCurrency(transaction.customerNewDue)}`,
-    ].join(' • ');
+    const productLabel = [transaction.product, transaction.category && transaction.category !== 'No Category' ? transaction.category : null]
+      .filter(Boolean)
+      .join(' / ');
+    const quantity = Number(transaction.quantity) > 0
+      ? (transaction.quantity + ' ' + String(transaction.unit || '').toUpperCase()).trim()
+      : '';
+    const parts = [productLabel || 'Sale', quantity].filter(Boolean);
+    if (Number(transaction.paymentAmount) > 0) parts.push('Paid ' + formatCurrency(transaction.paymentAmount));
+    return parts.join(' • ');
   };
+
+  const renderDetailText = (transaction) => (
+    <span className="transaction-detail-text">{renderDetails(transaction)}</span>
+  );
 
   const exportPdf = () => {
     const escapeHtml = (value) =>
@@ -225,6 +240,11 @@ const TransactionsList = () => {
         )
         .join('');
 
+    const saleTotal = salesForReport.reduce((sum, transaction) => sum + (Number(transaction.totalAmount) || 0), 0);
+    const paymentTotal = paymentsForReport.reduce((sum, transaction) => sum + (Number(transaction.paymentAmount || transaction.totalAmount) || 0), 0);
+    const saleTotalRow = '<tr class="total-row"><td colspan="3">Total Sales</td><td class="right">' + escapeHtml(formatCurrency(saleTotal)) + '</td><td></td></tr>';
+    const paymentTotalRow = '<tr class="total-row"><td colspan="3">Total Payments</td><td class="right">' + escapeHtml(formatCurrency(paymentTotal)) + '</td><td></td></tr>';
+
     const reportWindow = window.open('', '_blank');
     if (!reportWindow) return;
 
@@ -232,45 +252,54 @@ const TransactionsList = () => {
       <!doctype html>
       <html>
         <head>
-          <title>CBTrading Transactions</title>
+          <title></title>
           <style>
-            body { font-family: Arial, sans-serif; color: #0f172a; padding: 24px; }
-            h1 { margin: 0 0 4px; font-size: 24px; }
-            h2 { margin: 28px 0 10px; font-size: 17px; }
-            p { margin: 0; color: #475569; font-size: 12px; }
-            table { width: 100%; border-collapse: collapse; margin-top: 10px; font-size: 11px; }
-            th, td { border: 1px solid #cbd5e1; padding: 7px; text-align: left; vertical-align: top; }
-            th { background: #f1f5f9; text-transform: uppercase; font-size: 10px; }
-            .summary { display: grid; grid-template-columns: repeat(4, 1fr); gap: 10px; margin-top: 18px; }
-            .box { border: 1px solid #cbd5e1; padding: 10px; border-radius: 8px; }
-            .box strong { display: block; margin-top: 4px; font-size: 15px; }
-            .right { text-align: right; }
-            @media print { body { padding: 0; } }
+            * { box-sizing: border-box; }
+            body { margin: 0; color: #0f172a; font-family: Arial, Helvetica, sans-serif; padding: 24px 24px 52px; background: #ffffff; }
+            .page { max-width: 1120px; margin: 0 auto; }
+            .header { border-bottom: 3px solid #307d7e; padding-bottom: 14px; margin-bottom: 20px; text-align: center; }
+            .logo { width: 48px; height: 48px; display: grid; place-items: center; margin: 0 auto 8px; border-radius: 14px; color: #fff; background: linear-gradient(135deg, #255f60, #307d7e); font-size: 18px; font-weight: 900; }
+            h1 { margin: 0; font-size: 21px; }
+            .solution { margin-top: 5px; color: #255f60; font-size: 11px; font-weight: 800; }
+            h2 { margin: 22px 0 8px; font-size: 15px; color: #0f172a; }
+            table { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 16px; }
+            th { background: #e9f4f4; color: #255f60; text-align: left; padding: 8px; border: 1px solid #cbd5e1; font-size: 10px; text-transform: uppercase; }
+            td { padding: 8px; border: 1px solid #e2e8f0; vertical-align: top; color: #334155; line-height: 1.35; }
+            tbody tr:nth-child(even) td { background: #f8fafc; }
+            .right { text-align: right; white-space: nowrap; }
+            .total-row td { background: #f1f5f9 !important; color: #0f172a; font-weight: 900; }
+            .print-footer { position: fixed; left: 0; right: 0; bottom: 12px; color: #64748b; font-size: 10px; }
+            .page-number { position: absolute; left: 50%; transform: translateX(-50%); }
+            .page-number::after { content: counter(page); }
+            .generated-at { position: absolute; right: 24px; }
+            @page { size: A4 landscape; margin: 12mm; }
+            @media print { body { padding: 0 0 38px; } .generated-at { right: 0; } }
           </style>
         </head>
         <body>
-          <h1>CBTrading Transaction Report</h1>
-          <p>Generated: ${escapeHtml(new Date().toLocaleString())}</p>
-          <p>Filter: ${escapeHtml(typeFilter)} ${startDate ? ` | From ${escapeHtml(startDate)}` : ''}${endDate ? ` | To ${escapeHtml(endDate)}` : ''}${search ? ` | Search ${escapeHtml(search)}` : ''}</p>
+          <div class="page">
+            <div class="header">
+              <div class="logo">CB</div>
+              <h1>CBTrading Transaction Invoice</h1>
+              <div class="solution">Digital solution by CBTrading Software Team</div>
+            </div>
 
-          <div class="summary">
-            <div class="box"><p>Sale Entries</p><strong>${summary.salesCount}</strong></div>
-            <div class="box"><p>Payment Entries</p><strong>${summary.paymentsCount}</strong></div>
-            <div class="box"><p>Total Sales</p><strong>${escapeHtml(formatCurrency(summary.totalSales))}</strong></div>
-            <div class="box"><p>Customer Cash In</p><strong>${escapeHtml(formatCurrency(summary.customerCashIn))}</strong></div>
+            <h2>Sales</h2>
+            <table>
+              <thead><tr><th>Date</th><th>Supplier</th><th>Customer</th><th class="right">Amount</th><th>Details</th></tr></thead>
+              <tbody>${renderRows(salesForReport) || '<tr><td colspan="5">No sales found.</td></tr>'}${saleTotalRow}</tbody>
+            </table>
+
+            <h2>Payments</h2>
+            <table>
+              <thead><tr><th>Date</th><th>Supplier</th><th>Customer</th><th class="right">Amount</th><th>Details</th></tr></thead>
+              <tbody>${renderRows(paymentsForReport) || '<tr><td colspan="5">No payments found.</td></tr>'}${paymentTotalRow}</tbody>
+            </table>
           </div>
-
-          <h2>Sales</h2>
-          <table>
-            <thead><tr><th>Date</th><th>Supplier</th><th>Customer</th><th class="right">Amount</th><th>Details</th></tr></thead>
-            <tbody>${renderRows(salesForReport) || '<tr><td colspan="5">No sales found.</td></tr>'}</tbody>
-          </table>
-
-          <h2>Payments</h2>
-          <table>
-            <thead><tr><th>Date</th><th>Supplier</th><th>Customer</th><th class="right">Amount</th><th>Details</th></tr></thead>
-            <tbody>${renderRows(paymentsForReport) || '<tr><td colspan="5">No payments found.</td></tr>'}</tbody>
-          </table>
+          <div class="print-footer">
+            <span class="page-number">Page </span>
+            <span class="generated-at">${escapeHtml(new Date().toLocaleString())}</span>
+          </div>
         </body>
       </html>
     `);
@@ -382,13 +411,13 @@ const TransactionsList = () => {
                     </span>
                   </div>
                   <p className="text-lg font-extrabold text-slate-900">{renderAmount(transaction)}</p>
-                  <p className="mt-1 text-xs font-medium text-slate-500">{renderDetails(transaction)}</p>
+                  {renderDetailText(transaction)}
                 </div>
               ))}
             </div>
 
             <div className="hidden overflow-x-auto rounded-xl border border-slate-200 lg:block">
-              <table className="w-full min-w-[960px] text-sm">
+              <table className="transaction-ledger-table w-full min-w-[960px] text-sm">
                 <thead>
                   <tr>
                     <th>Date</th>
@@ -417,7 +446,7 @@ const TransactionsList = () => {
                       <td className="font-medium text-slate-700">{getSupplierName(transaction)}</td>
                       <td className="font-medium text-slate-700">{getCustomerName(transaction)}</td>
                       <td className="text-right font-extrabold text-slate-900">{renderAmount(transaction)}</td>
-                      <td className="text-slate-600">{renderDetails(transaction)}</td>
+                      <td className="transaction-details-cell">{renderDetailText(transaction)}</td>
                     </tr>
                   ))}
                 </tbody>

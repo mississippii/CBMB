@@ -4,8 +4,11 @@ import java.util.List;
 import org.example.dto.CreateCustomerRequest;
 import org.example.dto.CreateSupplierRequest;
 import org.example.dto.CustomerAccountResponse;
+import org.example.dto.CustomerProfileResponse;
+import org.example.dto.ProfileRequest;
 import org.example.dto.ReceiveSupplierDeliveryRequest;
 import org.example.dto.SupplierAccountResponse;
+import org.example.dto.SupplierProfileResponse;
 import org.example.dto.SupplierDeliveryResponse;
 import org.example.service.SupplierDeliveryService;
 import org.example.service.WholesalerService;
@@ -48,6 +51,14 @@ public class WholesalerController {
         return wholesalerService.createSupplier(wholesalerId, request);
     }
 
+    @PostMapping("/suppliers/profile")
+    public SupplierProfileResponse supplierProfile(
+            @PathVariable Long wholesalerId,
+            @RequestBody ProfileRequest request
+    ) {
+        return wholesalerService.getSupplierProfile(wholesalerId, request == null ? null : request.accountId());
+    }
+
     @PostMapping("/customers/list")
     public List<CustomerAccountResponse> listCustomers(@PathVariable Long wholesalerId) {
         return wholesalerService.listCustomers(wholesalerId);
@@ -60,6 +71,19 @@ public class WholesalerController {
             @RequestBody CreateCustomerRequest request
     ) {
         return wholesalerService.createCustomer(wholesalerId, request);
+    }
+
+    @PostMapping("/customers/profile")
+    public CustomerProfileResponse customerProfile(
+            @PathVariable Long wholesalerId,
+            @RequestBody ProfileRequest request
+    ) {
+        return wholesalerService.getCustomerProfile(wholesalerId, request == null ? null : request.accountId());
+    }
+
+    @PostMapping("/supplier-deliveries/list")
+    public List<SupplierDeliveryResponse> listSupplierDeliveries(@PathVariable Long wholesalerId) {
+        return supplierDeliveryService.listSupplierDeliveries(wholesalerId);
     }
 
     @PostMapping("/supplier-deliveries/create")

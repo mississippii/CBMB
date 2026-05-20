@@ -67,6 +67,16 @@ public class SupplierDeliveryService {
         this.stockLedgerRepository = stockLedgerRepository;
     }
 
+
+    @Transactional(readOnly = true)
+    public List<SupplierDeliveryResponse> listSupplierDeliveries(Long wholesalerId) {
+        findWholesaler(wholesalerId);
+        return supplierDeliveryRepository.findByWholesaler_IdOrderByDeliveryDateDesc(wholesalerId)
+                .stream()
+                .map(this::toDeliveryResponse)
+                .toList();
+    }
+
     @Transactional
     public SupplierDeliveryResponse receiveSupplierDelivery(Long wholesalerId, ReceiveSupplierDeliveryRequest request) {
         Wholesaler wholesaler = findWholesaler(wholesalerId);
@@ -107,10 +117,23 @@ public class SupplierDeliveryService {
         delivery.setTotalQuantity(totalQuantity);
         delivery = supplierDeliveryRepository.save(delivery);
 
+        return toDeliveryResponse(delivery, itemResponses);
+    }
+
+
+    private SupplierDeliveryResponse toDeliveryResponse(SupplierDelivery delivery) {
+        List<SupplierDeliveryItemResponse> itemResponses = supplierDeliveryItemRepository.findByDelivery_IdOrderByIdAsc(delivery.getId())
+                .stream()
+                .map((item) -> toDeliveryItemResponse(item, null))
+                .toList();
+        return toDeliveryResponse(delivery, itemResponses);
+    }
+
+    private SupplierDeliveryResponse toDeliveryResponse(SupplierDelivery delivery, List<SupplierDeliveryItemResponse> itemResponses) {
         return new SupplierDeliveryResponse(
                 delivery.getId(),
-                wholesaler.getId(),
-                wholesalerSupplier.getId(),
+                delivery.getWholesaler().getId(),
+                delivery.getWholesalerSupplier().getId(),
                 delivery.getDeliveryDate(),
                 delivery.getTotalQuantity(),
                 delivery.getStatus().name(),
@@ -155,7 +178,7 @@ public class SupplierDeliveryService {
                     newInventory.setUnit(unit);
                     return newInventory;
                 });
-        inventory.setQuantityOnHand(inventory.getQuantityOnHand().add(quantity));
+        inventory.setQuantityOnHand((inventory.getQuantityOnHand() == null ? BigDecimal.ZERO : inventory.getQuantityOnHand()).add(quantity));
         inventory.setStatus(InventoryStatus.ACTIVE);
         inventory = inventoryRepository.save(inventory);
 
@@ -251,7 +274,7 @@ public class SupplierDeliveryService {
         Product product = deliveryItem.getProduct();
         return new SupplierDeliveryItemResponse(
                 deliveryItem.getId(),
-                inventory.getId(),
+                inventory == null ? null : inventory.getId(),
                 product.getId(),
                 product.getName(),
                 category == null ? null : category.getId(),
@@ -259,7 +282,7 @@ public class SupplierDeliveryService {
                 category == null ? null : category.getGrade(),
                 deliveryItem.getQuantity(),
                 deliveryItem.getUnit().name(),
-                inventory.getQuantityOnHand(),
+                inventory == null ? deliveryItem.getQuantity() : inventory.getQuantityOnHand(),
                 deliveryItem.getNote()
         );
     }

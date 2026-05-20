@@ -34,44 +34,6 @@ const Login = () => {
   return (
     <div className="auth-shell">
       <div className="auth-layout">
-        <section className="auth-hero">
-          <div className="auth-brand-lockup">
-            <div className="auth-brand-mark">CB</div>
-            <div>
-              <p>CBTrading</p>
-              <span>Wholesaler Workspace</span>
-            </div>
-          </div>
-
-          <div className="auth-hero-copy">
-            <span className="auth-eyebrow">Stockist Portal</span>
-            <h1>Control stock, due, payment, and box movement from one workspace.</h1>
-            <p>
-              A focused operating screen for wholesalers handling supplier products,
-              permanent customer due, jamanot, and daily transaction reports.
-            </p>
-          </div>
-
-          <div className="auth-feature-grid">
-            <div>
-              <strong>Box</strong>
-              <span>Track in shop, customer, supplier, and lost boxes.</span>
-            </div>
-            <div>
-              <strong>Due</strong>
-              <span>Maintain customer and supplier balances automatically.</span>
-            </div>
-            <div>
-              <strong>Payment</strong>
-              <span>Receive cash, boxes, or both in one entry.</span>
-            </div>
-            <div>
-              <strong>Report</strong>
-              <span>Export sale and payment ledgers by date.</span>
-            </div>
-          </div>
-        </section>
-
         <section className="auth-card">
           <div className="auth-card-header">
             <div className="auth-card-logo">

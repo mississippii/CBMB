@@ -23,6 +23,12 @@ const AdminDashboard = () => {
   const [error, setError] = useState('');
 
   useEffect(() => {
+    if (!notice) return undefined;
+    const timer = window.setTimeout(() => setNotice(''), 1500);
+    return () => window.clearTimeout(timer);
+  }, [notice]);
+
+  useEffect(() => {
     let isMounted = true;
 
     postJson(apiPaths.adminWholesalersList)
@@ -57,7 +63,7 @@ const AdminDashboard = () => {
       setWholesalers((prev) => [payload, ...prev]);
       setFormData(emptyForm);
       setShowForm(false);
-      setNotice('Wholesaler created successfully.');
+      setNotice('success');
     } catch (err) {
       setError(err.message || 'Unable to create wholesaler.');
     } finally {
@@ -91,9 +97,8 @@ const AdminDashboard = () => {
           </div>
 
           {notice && (
-            <div className="status-success">
-              <span>i</span>
-              <span>{notice}</span>
+            <div className="success-splash" role="status" aria-label="Saved">
+              <span>✓</span>
             </div>
           )}
 

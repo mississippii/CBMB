@@ -2,7 +2,7 @@ spring:
   application:
     name: BkendRest
   datasource:
-    url: jdbc:mysql://localhost:3306/CBM_Schema
+    url: jdbc:mysql://localhost:3306/business_cbm
     username: veer
     password: 1234
     driver-class-name: com.mysql.cj.jdbc.Driver

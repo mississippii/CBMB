@@ -1,43 +1,80 @@
+import { useEffect, useState } from 'react'
 import { useData } from '../context/DataContext'
 
 const formatCurrency = (value) => `৳ ${(Number(value) || 0).toLocaleString()}`
 const getDateOnly = (value) => new Date(value).toISOString().split('T')[0]
 
 const SupplierDetail = ({ supplierId, onBack }) => {
-  const { suppliers, supplierProducts, transactions } = useData()
+  const { suppliers, supplierProducts, transactions, getSupplierProfile } = useData()
+  const [profile, setProfile] = useState(null)
 
-  const supplier = suppliers.find((item) => item.id === supplierId)
+  useEffect(() => {
+    let isActive = true
+    setProfile(null)
+
+    if (!supplierId || !getSupplierProfile) return undefined
+
+    getSupplierProfile(supplierId)
+      .then((result) => {
+        if (isActive) setProfile(result)
+      })
+      .catch(() => {
+        if (isActive) setProfile(null)
+      })
+
+    return () => {
+      isActive = false
+    }
+  }, [supplierId, getSupplierProfile])
+
+  const fallbackSupplier = suppliers.find((item) => item.id === supplierId)
+  const supplier = profile?.account || fallbackSupplier
   const products = supplierProducts.filter((product) => product.supplierId === supplierId)
 
   if (!supplier) {
     return <div className="text-gray-600">Supplier not found</div>
   }
 
-  const totalStockQuantity = products.reduce((sum, product) => sum + (Number(product.quantity) || 0), 0)
   const today = getDateOnly(new Date())
-  const todaySales = transactions.filter(
+  const supplierTransactions = profile?.transactions || transactions.filter((transaction) => (
+    transaction.supplierId === supplier.id ||
+    transaction.supplier === supplier.name ||
+    transaction.supplierPhone === supplier.contact
+  ))
+  const todaySales = supplierTransactions.filter(
     (transaction) =>
       transaction.transactionType === 'Sale' &&
-      transaction.supplierId === supplier.id &&
       getDateOnly(transaction.createdAt || transaction.date) === today,
   )
-  const todaySalesAmount = todaySales.reduce(
+  const fallbackTodaySalesAmount = todaySales.reduce(
     (sum, transaction) => sum + (Number(transaction.totalAmount) || 0),
     0,
   )
-  const todayCommission = todaySales.reduce(
-    (sum, transaction) => sum + (Number(transaction.commissionAmount) || 0),
-    0,
-  )
-  const previousPayable = Math.max((Number(supplier.amountDue) || 0) - todaySalesAmount, 0)
+  const fallbackTodayCommission = todaySales.reduce((sum, transaction) => {
+    const explicitCommission = Number(transaction.commissionAmount) || 0
+    if (explicitCommission > 0) return sum + explicitCommission
+    return sum + ((Number(transaction.totalAmount) || 0) * (Number(supplier.commissionRate) || 0)) / 100
+  }, 0)
+  const commissionReceived = supplierTransactions
+    .filter((transaction) => (
+      transaction.transactionType === 'Payment' &&
+      String(transaction.note || transaction.paymentType || '').toLowerCase().includes('commission')
+    ))
+    .reduce((sum, transaction) => sum + (Number(transaction.paymentAmount) || 0), 0)
+  const fallbackOtherExpense = supplierTransactions
+    .filter((transaction) => (
+      transaction.transactionType === 'Payment' &&
+      String(transaction.note || transaction.paymentType || '').toLowerCase().includes('expense')
+    ))
+    .reduce((sum, transaction) => sum + (Number(transaction.paymentAmount) || 0), 0)
+  const todaySalesAmount = Number(supplier.todaySale ?? fallbackTodaySalesAmount) || 0
+  const todayCommission = Number(supplier.todayCommission ?? fallbackTodayCommission) || 0
+  const commissionDue = Number(supplier.commissionDue ?? Math.max((Number(supplier.totalCommissionEarned) || 0) - commissionReceived, 0)) || 0
+  const otherExpense = Number(supplier.otherExpense ?? fallbackOtherExpense) || 0
   const initials = supplier.name
     .split(' ')
     .map((name) => name[0])
     .join('')
-  const payableRatio =
-    supplier.totalSales > 0
-      ? Math.min(Math.round((supplier.amountDue / supplier.totalSales) * 100), 100)
-      : 0
 
   return (
     <div className="space-y-5">
@@ -73,7 +110,7 @@ const SupplierDetail = ({ supplierId, onBack }) => {
 
       <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
         <div className="metric-tile">
-          <p>Today Sales</p>
+          <p>Today Sale</p>
           <strong>{formatCurrency(todaySalesAmount)}</strong>
         </div>
         <div className="metric-tile">
@@ -81,20 +118,20 @@ const SupplierDetail = ({ supplierId, onBack }) => {
           <strong>{formatCurrency(todayCommission)}</strong>
         </div>
         <div className="metric-tile">
-          <p>Total Sales</p>
+          <p>Total Sale</p>
           <strong>{formatCurrency(supplier.totalSales)}</strong>
         </div>
         <div className="metric-tile">
-          <p>Total Commission</p>
-          <strong>{formatCurrency(supplier.totalCommissionEarned)}</strong>
+          <p>Commission Due</p>
+          <strong>{formatCurrency(commissionDue)}</strong>
         </div>
         <div className="metric-tile danger">
-          <p>Sale Payable</p>
+          <p>Supplier Due</p>
           <strong>{formatCurrency(supplier.amountDue)}</strong>
         </div>
         <div className="metric-tile">
-          <p>Stock Quantity</p>
-          <strong>{totalStockQuantity.toLocaleString()}</strong>
+          <p>Other Expense</p>
+          <strong>{formatCurrency(otherExpense)}</strong>
         </div>
       </div>
 
@@ -103,24 +140,24 @@ const SupplierDetail = ({ supplierId, onBack }) => {
           <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
             <div>
               <h3>Supplier Balance</h3>
-              <p>Sale payable is based on product sale value; commission is tracked separately.</p>
+              <p>Sales, commission, due, and expense movement for this supplier.</p>
             </div>
             <div className="rounded-lg bg-slate-50 px-3 py-2 text-right">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Total Quantity</p>
-              <p className="text-lg font-extrabold text-slate-900">{totalStockQuantity.toLocaleString()}</p>
+              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Transactions</p>
+              <p className="text-lg font-extrabold text-slate-900">{supplierTransactions.length.toLocaleString()}</p>
             </div>
           </div>
           <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-            <div className="rounded-xl bg-slate-50 p-4">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Previous Payable</p>
-              <p className="mt-1 text-xl font-extrabold text-slate-900">{formatCurrency(previousPayable)}</p>
-            </div>
             <div className="rounded-xl bg-emerald-50 p-4">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Today Sale Added</p>
-              <p className="mt-1 text-xl font-extrabold text-emerald-800">{formatCurrency(todaySalesAmount)}</p>
+              <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Total Sale</p>
+              <p className="mt-1 text-xl font-extrabold text-emerald-800">{formatCurrency(supplier.totalSales)}</p>
+            </div>
+            <div className="rounded-xl bg-amber-50 p-4">
+              <p className="text-[11px] font-bold uppercase tracking-wider text-amber-700">Commission Due</p>
+              <p className="mt-1 text-xl font-extrabold text-amber-800">{formatCurrency(commissionDue)}</p>
             </div>
             <div className="rounded-xl bg-rose-50 p-4">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-rose-700">Sale Payable</p>
+              <p className="text-[11px] font-bold uppercase tracking-wider text-rose-700">Supplier Due</p>
               <p className="mt-1 text-xl font-extrabold text-rose-800">{formatCurrency(supplier.amountDue)}</p>
             </div>
           </div>
@@ -143,17 +180,9 @@ const SupplierDetail = ({ supplierId, onBack }) => {
             </div>
           </div>
 
-          <div className="mt-5">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Commission Earned</p>
-            <p className="mt-1 text-lg font-extrabold text-slate-900">{formatCurrency(supplier.totalCommissionEarned)}</p>
-            <div className="mt-2 h-2 overflow-hidden rounded-full bg-slate-200">
-              <div
-                className={`h-full rounded-full ${
-                  payableRatio > 60 ? 'bg-rose-500' : payableRatio > 30 ? 'bg-amber-500' : 'bg-emerald-500'
-                }`}
-                style={{ width: `${payableRatio}%` }}
-              />
-            </div>
+          <div className="mt-5 rounded-xl bg-amber-50 p-4">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-amber-700">Commission Due</p>
+            <p className="mt-1 text-lg font-extrabold text-amber-800">{formatCurrency(commissionDue)}</p>
           </div>
         </div>
       </div>
@@ -235,13 +264,6 @@ const SupplierDetail = ({ supplierId, onBack }) => {
                 })}
               </tbody>
             </table>
-          </div>
-
-          <div className="mt-4 flex justify-end rounded-xl border border-emerald-100 bg-emerald-50 p-4">
-            <div className="text-right">
-              <p className="text-sm text-emerald-700">Total Stock Quantity</p>
-              <p className="text-2xl font-extrabold text-emerald-800">{totalStockQuantity.toLocaleString()}</p>
-            </div>
           </div>
           </>
         )}

@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useData } from '../context/DataContext';
 
 const formatCurrency = (value) => `৳ ${(Number(value) || 0).toLocaleString()}`;
@@ -34,6 +34,13 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
   });
   const [oneTimeCustomer, setOneTimeCustomer] = useState({ name: '', phone: '' });
   const [feedback, setFeedback] = useState({ type: '', message: '' });
+
+  useEffect(() => {
+    if (feedback.type !== 'success') return undefined;
+    const timer = window.setTimeout(() => setFeedback({ type: '', message: '' }), 1500);
+    return () => window.clearTimeout(timer);
+  }, [feedback.type]);
+
   const isPaymentOnly = entryMode === 'payment';
   const isSaleOnly = entryMode === 'sale';
   const showEntryTypeTabs = entryMode === 'both';
@@ -84,11 +91,16 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
         : 0;
   const paymentDueAmount = Number(paymentForm.amount) || 0;
   const paymentJamanotAmount = Number(paymentForm.boxJamanotChange) || 0;
+  const isSupplierParty = paymentForm.partyType === 'supplier';
   const isCashReceive = paymentForm.paymentMode === 'cash';
+  const isSupplierDuePay = paymentForm.paymentMode === 'supplier_due_pay';
+  const isSupplierCommissionReceive = paymentForm.paymentMode === 'supplier_commission_receive';
+  const isSupplierExpenseReceive = paymentForm.paymentMode === 'supplier_expense_receive';
+  const isSupplierBoxBorrow = paymentForm.paymentMode === 'supplier_box_borrow';
   const isBoxReceive = paymentForm.paymentMode === 'box';
-  const isCashAndBoxReceive = paymentForm.paymentMode === 'both';
-  const includesCashReceive = isCashReceive || isCashAndBoxReceive;
-  const includesBoxReceive = isBoxReceive || isCashAndBoxReceive;
+  const isSupplierMoneyMode = isSupplierDuePay || isSupplierCommissionReceive || isSupplierExpenseReceive;
+  const includesCashReceive = isSupplierParty ? isSupplierMoneyMode : isCashReceive;
+  const includesBoxReceive = isSupplierParty ? isBoxReceive || isSupplierBoxBorrow : isBoxReceive;
   const includesJamanotEntry = paymentForm.partyType === 'customer' && includesBoxReceive;
   const selectedCustomerDue =
     paymentForm.partyType === 'customer' ? Number(selectedPaymentEntity?.amountDue || 0) : 0;
@@ -113,7 +125,7 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
     paymentForm.partyType === 'supplier' ? Number(selectedPaymentEntity?.amountDue || 0) : 0;
   const supplierDueAfter =
     paymentForm.partyType === 'supplier'
-      ? Math.max(selectedSupplierDue - (includesCashReceive && paymentForm.supplierPaymentKind === 'PRODUCT_PAYMENT' ? paymentDueAmount : 0), 0)
+      ? Math.max(selectedSupplierDue - (isSupplierDuePay ? paymentDueAmount : 0), 0)
       : 0;
 
   const resetSaleForm = () => {
@@ -205,10 +217,7 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
         customerPhone: saleForm.customerId === 'ONE_TIME' ? oneTimeCustomer.phone : undefined,
       });
 
-      setFeedback({
-        type: 'success',
-        message: `Sale recorded (TX-${transaction.id}). Customer due is now ৳${transaction.customerNewDue.toLocaleString()}.`,
-      });
+      setFeedback({ type: 'success', message: '' });
       resetSaleForm();
       if (onClose) {
         setTimeout(() => onClose(), 900);
@@ -248,16 +257,16 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
     if (
       paymentForm.partyType === 'supplier' &&
       includesCashReceive &&
-      paymentForm.supplierPaymentKind === 'PRODUCT_PAYMENT' &&
+      isSupplierDuePay &&
       paymentDueAmount > selectedSupplierDue
     ) {
-      setFeedback({ type: 'error', message: 'Supplier product payment cannot exceed payable amount.' });
+      setFeedback({ type: 'error', message: 'Supplier due payment cannot exceed payable amount.' });
       return;
     }
     if (
       paymentForm.partyType === 'supplier' &&
       includesBoxReceive &&
-      paymentForm.supplierCrateDirection === 'give' &&
+      isSupplierBoxBorrow &&
       ((Number(paymentForm.woodenReturn) || 0) > Number(boxInventory.bangla?.inShop || 0) ||
         (Number(paymentForm.plasticReturn) || 0) > Number(boxInventory.china?.inShop || 0))
     ) {
@@ -268,6 +277,14 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
     try {
       const transaction = await recordAccountTransaction({
         ...paymentForm,
+        supplierPaymentKind: isSupplierDuePay
+          ? 'PRODUCT_PAYMENT'
+          : isSupplierCommissionReceive
+            ? 'COMMISSION_RECEIVE'
+            : isSupplierExpenseReceive
+              ? 'EXPENSE_RECEIVE'
+              : paymentForm.supplierPaymentKind,
+        supplierCrateDirection: isSupplierBoxBorrow ? 'give' : paymentForm.supplierCrateDirection,
         paymentType: 'Cash',
         amount: includesCashReceive ? Number(paymentForm.amount || 0) : 0,
         woodenReturn: includesBoxReceive ? Number(paymentForm.woodenReturn || 0) : 0,
@@ -275,10 +292,7 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
         boxJamanotChange: includesJamanotEntry ? Number(paymentForm.boxJamanotChange || 0) : 0,
       });
 
-      setFeedback({
-        type: 'success',
-        message: transaction.partyType + ' transaction recorded (TX-' + transaction.id + ').',
-      });
+      setFeedback({ type: 'success', message: '' });
       resetPaymentForm();
       if (onClose) {
         setTimeout(() => onClose(), 900);
@@ -331,9 +345,15 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
         </div>
       )}
 
-      {feedback.message && (
-        <div className={feedback.type === 'error' ? 'status-error' : 'status-success'}>
-          <span>{feedback.type === 'error' ? '!' : '✓'}</span>
+      {feedback.type === 'success' && (
+        <div className="success-splash" role="status" aria-label="Saved">
+          <span>✓</span>
+        </div>
+      )}
+
+      {feedback.type === 'error' && feedback.message && (
+        <div className="status-error">
+          <span>!</span>
           <span>{feedback.message}</span>
         </div>
       )}
@@ -570,7 +590,7 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
           <div className="payment-header">
             <div>
               <h3>Payment Settlement</h3>
-              <p>Choose cash, box, or both received.</p>
+              <p>Choose supplier/customer money or crate operation.</p>
             </div>
             <button type="submit" className="btn-primary">
               Save
@@ -590,6 +610,12 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
                         ...prev,
                         partyType: event.target.value,
                         partyId: '',
+                        paymentMode: event.target.value === 'supplier'
+                          ? 'supplier_due_pay'
+                          : ['supplier_due_pay', 'supplier_box_borrow', 'supplier_commission_receive', 'supplier_expense_receive'].includes(prev.paymentMode)
+                            ? 'cash'
+                            : prev.paymentMode,
+                        supplierPaymentKind: event.target.value === 'supplier' ? 'PRODUCT_PAYMENT' : prev.supplierPaymentKind,
                         boxJamanotChange: event.target.value === 'supplier' ? '' : prev.boxJamanotChange,
                       }))
                     }
@@ -642,49 +668,64 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
             </section>
 
             <section className="payment-panel">
-              <h4>Receive Type</h4>
+              <h4>{paymentForm.partyType === 'supplier' ? 'Payment Type' : 'Receive Type'}</h4>
               <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                 <div>
                   <label>Payment Mode</label>
                   <select
                     value={paymentForm.paymentMode}
-                    onChange={(event) =>
+                    onChange={(event) => {
+                      const mode = event.target.value;
                       setPaymentForm((prev) => ({
                         ...prev,
-                        paymentMode: event.target.value,
-                        amount: event.target.value === 'box' ? '' : prev.amount,
-                        boxJamanotChange: event.target.value === 'box' ? '' : prev.boxJamanotChange,
-                        woodenReturn: event.target.value === 'cash' ? '' : prev.woodenReturn,
-                        plasticReturn: event.target.value === 'cash' ? '' : prev.plasticReturn,
-                      }))
-                    }
+                        paymentMode: mode,
+                        supplierPaymentKind:
+                          mode === 'supplier_due_pay'
+                            ? 'PRODUCT_PAYMENT'
+                            : mode === 'supplier_commission_receive'
+                              ? 'COMMISSION_RECEIVE'
+                              : mode === 'supplier_expense_receive'
+                                ? 'EXPENSE_RECEIVE'
+                                : prev.supplierPaymentKind,
+                        supplierCrateDirection: mode === 'supplier_box_borrow' ? 'give' : mode === 'box' ? 'return' : prev.supplierCrateDirection,
+                        amount: mode === 'box' || mode === 'supplier_box_borrow' ? '' : prev.amount,
+                        boxJamanotChange: mode === 'box' ? '' : prev.boxJamanotChange,
+                        woodenReturn: mode === 'cash' || mode === 'supplier_due_pay' || mode === 'supplier_commission_receive' || mode === 'supplier_expense_receive' ? '' : prev.woodenReturn,
+                        plasticReturn: mode === 'cash' || mode === 'supplier_due_pay' || mode === 'supplier_commission_receive' || mode === 'supplier_expense_receive' ? '' : prev.plasticReturn,
+                      }));
+                    }}
                     className="input-field"
                     required
                   >
-                    <option value="cash">Cash Receive</option>
-                    <option value="box">Box Receive</option>
-                    <option value="both">Cash + Box Receive</option>
+                    {paymentForm.partyType === 'supplier' ? (
+                      <>
+                        <option value="supplier_due_pay">Supplier Due</option>
+                        <option value="box">Box Receive</option>
+                        <option value="supplier_box_borrow">Box Borrow</option>
+                        <option value="supplier_commission_receive">Commission Receive</option>
+                        <option value="supplier_expense_receive">Extra Expenses Receive</option>
+                      </>
+                    ) : (
+                      <>
+                        <option value="cash">Cash Receive</option>
+                        <option value="box">Box Receive</option>
+                      </>
+                    )}
                   </select>
                 </div>
-                {paymentForm.partyType === 'supplier' && includesCashReceive && (
-                  <div>
-                    <label>Supplier Cash Type</label>
-                    <select
-                      value={paymentForm.supplierPaymentKind}
-                      onChange={(event) =>
-                        setPaymentForm((prev) => ({ ...prev, supplierPaymentKind: event.target.value }))
-                      }
-                      className="input-field"
-                    >
-                      <option value="PRODUCT_PAYMENT">Product Payment</option>
-                      <option value="COMMISSION_RECEIVE">Commission Receive</option>
-                      <option value="EXPENSE_RECEIVE">Expense Receive</option>
-                    </select>
-                  </div>
-                )}
                 {includesCashReceive && (
                   <div>
-                    <label>{paymentForm.partyType === 'customer' ? 'Due Cash Received' : 'Cash Amount'}</label>
+                    <label>
+                      {paymentForm.partyType === 'customer'
+                        ? 'Due Cash Received'
+                        : isSupplierDuePay
+                          ? 'Due Paid to Supplier'
+                          : isSupplierCommissionReceive
+                            ? 'Commission Received'
+                            : isSupplierExpenseReceive
+                              ? 'Extra Expenses Received'
+                              : 'Cash Amount'}
+                    </label>
                     <input
                       type="number"
                       min="0"
@@ -724,22 +765,7 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
 
             {includesBoxReceive && (
               <section className="payment-panel">
-                <h4>{paymentForm.partyType === 'supplier' ? 'Crate Movement' : 'Crate Receive'}</h4>
-                {paymentForm.partyType === 'supplier' && (
-                  <div className="mb-4">
-                    <label>Supplier Crate Direction</label>
-                    <select
-                      value={paymentForm.supplierCrateDirection}
-                      onChange={(event) =>
-                        setPaymentForm((prev) => ({ ...prev, supplierCrateDirection: event.target.value }))
-                      }
-                      className="input-field"
-                    >
-                      <option value="return">Supplier Return</option>
-                      <option value="give">Give To Supplier</option>
-                    </select>
-                  </div>
-                )}
+                <h4>{paymentForm.partyType === 'supplier' ? (isSupplierBoxBorrow ? 'Box Borrow' : 'Box Receive') : 'Crate Receive'}</h4>
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div>
                     <label>Bangla Crates</label>
@@ -821,12 +847,12 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
                   <strong>{formatCurrency(supplierDueAfter)}</strong>
                 </div>
                 <div className="metric-tile">
-                  <p>Cash Amount</p>
+                  <p>Operation Amount</p>
                   <strong>{formatCurrency(includesCashReceive ? paymentDueAmount : 0)}</strong>
                 </div>
                 {includesBoxReceive && (
                   <div className="metric-tile">
-                    <p>{paymentForm.supplierCrateDirection === 'give' ? 'Crates Given' : 'Crates Returned'}</p>
+                    <p>{isSupplierBoxBorrow ? 'Crates Borrowed' : 'Crates Received'}</p>
                     <strong>{returnedBoxes}</strong>
                   </div>
                 )}
