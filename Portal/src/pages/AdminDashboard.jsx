@@ -1,8 +1,8 @@
 import { useEffect, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import Navbar from '../components/Navbar';
+import { apiPaths, postJson } from '../services/apiClient';
 
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://192.168.0.177:8080';
 const emptyForm = {
   name: '',
   email: '',
@@ -25,13 +25,7 @@ const AdminDashboard = () => {
   useEffect(() => {
     let isMounted = true;
 
-    fetch(`${API_BASE_URL}/admin/wholesalers`)
-      .then((response) => {
-        if (!response.ok) {
-          throw new Error('Unable to load wholesalers.');
-        }
-        return response.json();
-      })
+    postJson(apiPaths.adminWholesalersList)
       .then((data) => {
         if (isMounted) setWholesalers(data);
       })
@@ -58,16 +52,7 @@ const AdminDashboard = () => {
     setIsSaving(true);
 
     try {
-      const response = await fetch(`${API_BASE_URL}/admin/wholesalers`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(formData),
-      });
-      const payload = await response.json().catch(() => null);
-
-      if (!response.ok) {
-        throw new Error(payload?.message || 'Unable to create wholesaler.');
-      }
+      const payload = await postJson(apiPaths.adminWholesalersCreate, formData);
 
       setWholesalers((prev) => [payload, ...prev]);
       setFormData(emptyForm);

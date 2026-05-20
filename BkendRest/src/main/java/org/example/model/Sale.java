@@ -32,9 +32,18 @@ public class Sale {
     @JoinColumn(name = "wholesaler_id", nullable = false)
     private Wholesaler wholesaler;
 
-    @ManyToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "wholesaler_customer_id", nullable = false)
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "wholesaler_customer_id")
     private WholesalerCustomer wholesalerCustomer;
+
+    @Column(name = "customer_name_snapshot", length = 160)
+    private String customerNameSnapshot;
+
+    @Column(name = "customer_phone_snapshot", length = 30)
+    private String customerPhoneSnapshot;
+
+    @Column(name = "customer_type", nullable = false, length = 20)
+    private String customerType = "PERMANENT";
 
     @Column(name = "sale_date", nullable = false)
     private LocalDateTime saleDate;

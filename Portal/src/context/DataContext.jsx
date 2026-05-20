@@ -1,9 +1,9 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useEffect, useState, useContext } from 'react';
 import { useAuth } from './AuthContext';
+import { apiPaths, postJson } from '../services/apiClient';
 
 const DataContext = createContext();
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://192.168.0.177:8080';
 
 const roundMoney = (value) => Math.round((Number(value) + Number.EPSILON) * 100) / 100;
 const toPositiveNumber = (value) => {
@@ -23,14 +23,14 @@ const EMPTY_BOX_INVENTORY = {
   boxesWithSuppliers: 0,
   boxesWithCustomers: 0,
   boxesLostDamaged: 0,
-  wooden: {
+  bangla: {
     total: 0,
     inShop: 0,
     withSuppliers: 0,
     withCustomers: 0,
     lost: 0,
   },
-  plastic: {
+  china: {
     total: 0,
     inShop: 0,
     withSuppliers: 0,
@@ -48,6 +48,61 @@ const createDefaultState = () => ({
   boxInventory: EMPTY_BOX_INVENTORY,
 });
 
+
+const normalizeBoxType = (value) => String(value || '').trim().toUpperCase() === 'CHINA' ? 'china' : 'bangla';
+
+const createBoxTypeState = () => ({
+  total: 0,
+  inShop: 0,
+  withSuppliers: 0,
+  withCustomers: 0,
+  lost: 0,
+});
+
+const mapBoxDashboard = (dashboard) => {
+  const next = {
+    totalBoxesOwned: Number(dashboard?.totalBoxesOwned) || 0,
+    boxesInShop: Number(dashboard?.boxesInShop) || 0,
+    boxesWithSuppliers: Number(dashboard?.boxesWithSuppliers) || 0,
+    boxesWithCustomers: Number(dashboard?.boxesWithCustomers) || 0,
+    boxesLostDamaged: Number(dashboard?.boxesLostDamaged) || 0,
+    bangla: createBoxTypeState(),
+    china: createBoxTypeState(),
+  };
+
+  (dashboard?.boxTypes || []).forEach((item) => {
+    const key = normalizeBoxType(item.boxType);
+    next[key] = {
+      total: Number(item.total) || 0,
+      inShop: Number(item.inHand) || 0,
+      withSuppliers: Number(item.withSuppliers) || 0,
+      withCustomers: Number(item.withCustomers) || 0,
+      lost: Number(item.lostDamaged) || 0,
+    };
+  });
+
+  return next;
+};
+
+
+const mapInventoryItem = (item) => ({
+  id: item.inventoryId,
+  inventoryId: item.inventoryId,
+  productId: item.productId,
+  categoryId: item.categoryId || null,
+  supplierId: item.wholesalerSupplierId,
+  supplierRecordId: item.supplierId,
+  productName: item.productName,
+  category: item.categoryName || 'No Category',
+  grade: item.grade || '',
+  unit: String(item.unit || '').toLowerCase(),
+  quantity: roundMoney(Number(item.quantityOnHand) || 0),
+  unitPrice: 0,
+  totalValue: 0,
+  dateReceived: item.updatedAt?.split('T')[0] || getDateOnly(),
+  status: Number(item.quantityOnHand) > 0 ? 'in_stock' : 'sold_out',
+});
+
 const mapSupplierAccount = (account) => ({
   id: account.id,
   supplierId: account.supplierId,
@@ -59,15 +114,15 @@ const mapSupplierAccount = (account) => ({
   address: account.address || '',
   bankDetails: '',
   commissionRate: Number(account.commissionRate) || 0,
-  totalSales: 0,
-  totalCommissionEarned: 0,
+  totalSales: roundMoney(Number(account.totalSales) || 0),
+  totalCommissionEarned: roundMoney(Number(account.totalCommissionEarned) || 0),
   advancePaymentsMade: 0,
-  amountDue: roundMoney(Number(account.openingDue) || 0),
+  amountDue: roundMoney(Number(account.currentDue ?? account.openingDue) || 0),
   lastSettlementDate: account.createdAt?.split('T')[0] || getDateOnly(),
-  balance: -roundMoney(Number(account.openingDue) || 0),
-  boxesHoldingWooden: 0,
-  boxesHoldingPlastic: 0,
-  totalBoxesHolding: 0,
+  balance: -roundMoney(Number(account.currentDue ?? account.openingDue) || 0),
+  boxesHoldingWooden: Number(account.banglaCratesDue) || 0,
+  boxesHoldingPlastic: Number(account.chinaCratesDue) || 0,
+  totalBoxesHolding: Number(account.totalCratesDue) || 0,
 });
 
 const mapCustomerAccount = (account) => ({
@@ -79,23 +134,31 @@ const mapCustomerAccount = (account) => ({
   phone: account.phone,
   address: account.address || '',
   type: 'Permanent',
-  totalPurchases: 0,
-  totalPaid: 0,
-  amountDue: roundMoney(Number(account.openingDue) || 0),
+  totalPurchases: roundMoney(Number(account.totalPurchases) || 0),
+  totalPaid: roundMoney(Number(account.totalPaid) || 0),
+  amountDue: roundMoney(Number(account.currentDue ?? account.openingDue) || 0),
   boxJamanot: roundMoney(Number(account.jamanotBalance) || 0),
-  boxesHoldingWooden: 0,
-  boxesHoldingPlastic: 0,
-  totalBoxesHolding: 0,
+  boxesHoldingWooden: Number(account.banglaCratesDue) || 0,
+  boxesHoldingPlastic: Number(account.chinaCratesDue) || 0,
+  totalBoxesHolding: Number(account.totalCratesDue) || 0,
 });
 
-const fetchJson = async (url, options) => {
-  const response = await fetch(url, options);
-  const payload = await response.json().catch(() => null);
-  if (!response.ok) {
-    throw new Error(payload?.message || 'Request failed.');
-  }
-  return payload;
-};
+const mapTransaction = (transaction) => ({
+  id: transaction.id,
+  date: transaction.createdAt?.split('T')[0] || getDateOnly(),
+  createdAt: transaction.createdAt || new Date().toISOString(),
+  transactionType: transaction.transactionType === 'PAYMENT' ? 'Payment' : 'Sale',
+  customerId: transaction.wholesalerCustomerId,
+  customer: transaction.customerName || null,
+  customerPhone: transaction.customerPhone || null,
+  supplierId: transaction.wholesalerSupplierId,
+  supplier: transaction.supplierName || null,
+  supplierPhone: transaction.supplierPhone || null,
+  totalAmount: Number(transaction.saleAmount) || 0,
+  paymentAmount: Number(transaction.paymentAmount) || 0,
+  customerNewDue: Number(transaction.dueAmount) || 0,
+  note: transaction.description || '',
+});
 
 export const DataProvider = ({ children }) => {
   const { admin, isAuthenticated } = useAuth();
@@ -129,19 +192,22 @@ export const DataProvider = ({ children }) => {
       setIsLoading(true);
       setDataError('');
       try {
-        const [supplierAccounts, customerAccounts, productCatalog] = await Promise.all([
-          fetchJson(`${API_BASE_URL}/wholesalers/${admin.wholesalerId}/suppliers`),
-          fetchJson(`${API_BASE_URL}/wholesalers/${admin.wholesalerId}/customers`),
-          fetchJson(`${API_BASE_URL}/products`),
+        const [supplierAccounts, customerAccounts, productCatalog, inventoryItems, boxDashboard, transactionItems] = await Promise.all([
+          postJson(apiPaths.wholesalerSuppliersList(admin.wholesalerId)),
+          postJson(apiPaths.wholesalerCustomersList(admin.wholesalerId)),
+          postJson(apiPaths.productsList),
+          postJson(apiPaths.inventoryList(admin.wholesalerId)),
+          postJson(apiPaths.boxesDashboard(admin.wholesalerId)),
+          postJson(apiPaths.transactionsList(admin.wholesalerId)),
         ]);
 
         if (!isActive) return;
         setSuppliers(supplierAccounts.map(mapSupplierAccount));
         setCustomers(customerAccounts.map(mapCustomerAccount));
-        setTransactions([]);
-        setSupplierProducts([]);
+        setTransactions(transactionItems.map(mapTransaction));
+        setSupplierProducts(inventoryItems.map(mapInventoryItem));
         setCatalogProducts(productCatalog);
-        setBoxInventory(createDefaultState().boxInventory);
+        setBoxInventory(mapBoxDashboard(boxDashboard));
       } catch (error) {
         if (isActive) {
           setDataError(error.message || 'Failed to load wholesaler data.');
@@ -173,11 +239,7 @@ export const DataProvider = ({ children }) => {
       openingDue: Number(supplierData.openingDue) || 0,
     };
 
-    const account = await fetchJson(`${API_BASE_URL}/wholesalers/${admin.wholesalerId}/suppliers`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
+    const account = await postJson(apiPaths.wholesalerSuppliersCreate(admin.wholesalerId), payload);
     const newSupplier = mapSupplierAccount(account);
     setSuppliers((prev) => [...prev, newSupplier]);
     return newSupplier;
@@ -190,11 +252,14 @@ export const DataProvider = ({ children }) => {
 
     const supplierId = Number(productData.supplierId);
     const productId = Number(productData.productId);
-    const categoryId = Number(productData.categoryId);
+    const categoryId = productData.categoryId ? Number(productData.categoryId) : null;
     const quantity = toPositiveNumber(productData.quantity);
     const supplier = suppliers.find((item) => item.id === supplierId);
     const catalogProduct = catalogProducts.find((item) => Number(item.id) === productId);
-    const category = catalogProduct?.categories?.find((item) => Number(item.id) === categoryId);
+    const productCategories = catalogProduct?.categories || [];
+    const category = categoryId
+      ? productCategories.find((item) => Number(item.id) === categoryId)
+      : null;
 
     if (!supplier) {
       throw new Error('Supplier not found.');
@@ -202,40 +267,36 @@ export const DataProvider = ({ children }) => {
     if (!catalogProduct) {
       throw new Error('Please select a valid product.');
     }
-    if (!category) {
-      throw new Error('Please select a valid category.');
+    if (productCategories.length > 0 && !category) {
+      throw new Error('Please select a valid category for this product.');
     }
     if (!quantity) {
       throw new Error('Please provide valid quantity.');
     }
 
     const unit = String(catalogProduct.defaultUnit || 'PCS').toLowerCase();
-    const delivery = await fetchJson(API_BASE_URL + '/wholesalers/' + admin.wholesalerId + '/supplier-deliveries', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        wholesalerSupplierId: supplierId,
-        note: productData.note?.trim() || '',
-        items: [
-          {
-            productId,
-            categoryId,
-            quantity,
-            note: productData.note?.trim() || '',
-          },
-        ],
-      }),
+    const delivery = await postJson(apiPaths.supplierDeliveriesCreate(admin.wholesalerId), {
+      wholesalerSupplierId: supplierId,
+      note: productData.note?.trim() || '',
+      items: [
+        {
+          productId,
+          categoryId,
+          quantity,
+          note: productData.note?.trim() || '',
+        },
+      ],
     });
 
     const deliveryItem = delivery.items?.[0];
     const inventoryQuantity = roundMoney(Number(deliveryItem?.inventoryQuantityOnHand) || quantity);
     const productName = deliveryItem?.productName || catalogProduct.name;
-    const categoryName = deliveryItem?.categoryName || category.name;
+    const categoryName = deliveryItem?.categoryName || category?.name || 'No Category';
     const existingProduct = supplierProducts.find(
       (product) =>
         product.supplierId === supplierId &&
         Number(product.productId) === productId &&
-        Number(product.categoryId) === categoryId,
+        (product.categoryId || null) === categoryId,
     );
 
     const productAfterDelivery = existingProduct
@@ -305,149 +366,137 @@ export const DataProvider = ({ children }) => {
       jamanotBalance: Number(customerData.boxJamanot) || 0,
     };
 
-    const account = await fetchJson(`${API_BASE_URL}/wholesalers/${admin.wholesalerId}/customers`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload),
-    });
+    const account = await postJson(apiPaths.wholesalerCustomersCreate(admin.wholesalerId), payload);
     const newCustomer = mapCustomerAccount(account);
     setCustomers((prev) => [...prev, newCustomer]);
     return newCustomer;
   };
 
-  const recordSale = (saleData) => {
-    const supplierId = Number(saleData.supplierId);
-    const productId = Number(saleData.productId);
+  const recordSale = async (saleData) => {
+    if (!admin?.wholesalerId) {
+      throw new Error('Wholesaler profile not found for this user.');
+    }
+
+    const inventoryId = Number(saleData.productId);
     const quantity = toPositiveNumber(saleData.quantity);
     const unitPrice = toPositiveNumber(saleData.unitPrice);
     const paymentAmount = roundMoney(Math.max(0, Number(saleData.paymentAmount) || 0));
+    const selectedInventory = supplierProducts.find((product) => product.id === inventoryId);
 
-    if (!supplierId || !productId || !quantity || !unitPrice) {
-      throw new Error('Please provide valid supplier, product, quantity and unit price.');
+    if (!inventoryId || !quantity || !unitPrice) {
+      throw new Error('Please provide valid product, quantity and unit price.');
+    }
+    if (!selectedInventory) {
+      throw new Error('Product not found.');
+    }
+    if (selectedInventory.quantity < quantity) {
+      throw new Error('Insufficient stock for ' + selectedInventory.productName + '. Available: ' + selectedInventory.quantity + ', required: ' + quantity + '.');
     }
 
-    const workingSuppliers = [...suppliers];
-    const workingCustomers = [...customers];
-    const workingProducts = [...supplierProducts];
-
-    const supplierIndex = workingSuppliers.findIndex((supplier) => supplier.id === supplierId);
-    if (supplierIndex === -1) {
-      throw new Error('Supplier not found.');
-    }
-
-    const productIndex = workingProducts.findIndex(
-      (product) => product.id === productId && product.supplierId === supplierId,
-    );
-    if (productIndex === -1) {
-      throw new Error('Product not found for selected supplier.');
-    }
-
-    const product = workingProducts[productIndex];
-    if (product.quantity < quantity) {
-      throw new Error(
-        `Insufficient stock for ${product.productName}. Available: ${product.quantity}, required: ${quantity}.`,
-      );
-    }
-
-    let customerIndex = workingCustomers.findIndex(
-      (customer) => customer.id === Number(saleData.customerId),
-    );
-
-    if (customerIndex === -1) {
-      const name = saleData.customerName?.trim();
-      const phone = saleData.customerPhone?.trim();
-      if (!name || !phone) {
-        throw new Error('Please provide one-time customer name and phone.');
-      }
-
-      const newCustomer = {
-        id: getNextId(workingCustomers),
-        name,
-        owner: name,
-        phone,
-        address: saleData.customerAddress || '',
-        type: 'Cash',
-        totalPurchases: 0,
-        totalPaid: 0,
-        amountDue: 0,
-        boxJamanot: 0,
-        boxesHoldingWooden: 0,
-        boxesHoldingPlastic: 0,
-        totalBoxesHolding: 0,
-      };
-      workingCustomers.push(newCustomer);
-      customerIndex = workingCustomers.length - 1;
-    }
-
-    const customer = workingCustomers[customerIndex];
-    const supplier = workingSuppliers[supplierIndex];
-
-    const totalAmount = roundMoney(quantity * unitPrice);
-    const customerPreviousDue = roundMoney(customer.amountDue || 0);
-    const totalOutstanding = roundMoney(customerPreviousDue + totalAmount);
-    const customerNewDue = roundMoney(Math.max(totalOutstanding - paymentAmount, 0));
-
-    let paymentType = 'Credit';
-    if (paymentAmount > 0 && customerNewDue > 0) {
-      paymentType = 'Partial';
-    }
-    if (customerNewDue === 0) {
-      paymentType = 'Cash';
-    }
-
-    const commissionRate = Number(supplier.commissionRate) || 5;
-    const commissionAmount = roundMoney(totalAmount * (commissionRate / 100));
-
-    workingCustomers[customerIndex] = {
-      ...customer,
-      totalPurchases: roundMoney((customer.totalPurchases || 0) + totalAmount),
-      totalPaid: roundMoney((customer.totalPaid || 0) + paymentAmount),
-      amountDue: customerNewDue,
-    };
-
-    workingSuppliers[supplierIndex] = {
-      ...supplier,
-      totalSales: roundMoney((supplier.totalSales || 0) + totalAmount),
-      totalCommissionEarned: roundMoney((supplier.totalCommissionEarned || 0) + commissionAmount),
-      amountDue: roundMoney((supplier.amountDue || 0) + commissionAmount),
-    };
-
-    const remainingQuantity = roundMoney(product.quantity - quantity);
-    workingProducts[productIndex] = {
-      ...product,
-      quantity: remainingQuantity,
-      totalValue: roundMoney(remainingQuantity * Number(product.unitPrice || 0)),
-      status: remainingQuantity > 0 ? 'in_stock' : 'sold_out',
-    };
-
-    const newTransaction = {
-      id: getNextId(transactions),
-      date: getDateOnly(),
-      createdAt: new Date().toISOString(),
-      transactionType: 'Sale',
-      customer: workingCustomers[customerIndex].name,
-      customerId: workingCustomers[customerIndex].id,
-      supplier: supplier.name,
-      supplierId: supplier.id,
-      product: product.productName,
-      productId: product.id,
+    const response = await postJson(apiPaths.salesCreate(admin.wholesalerId), {
+      wholesalerCustomerId: Number(saleData.customerId) || null,
+      customerName: saleData.customerName,
+      customerPhone: saleData.customerPhone,
+      inventoryId,
       quantity,
       unitPrice,
-      totalAmount,
-      paymentType,
       paymentAmount,
-      customerPreviousDue,
-      customerNewDue,
-      commissionRate,
-      commissionAmount,
+      cratesGiven: Number(saleData.cratesGiven) || 0,
+      banglaCratesGiven: Number(saleData.banglaCratesGiven) || 0,
+      chinaCratesGiven: Number(saleData.chinaCratesGiven) || 0,
+      jamanotAmount: Number(saleData.jamanotAmount) || 0,
+    });
+
+    setSupplierProducts((prev) =>
+      prev.map((product) =>
+        product.id === inventoryId
+          ? {
+              ...product,
+              quantity: roundMoney(Number(response.inventoryQuantityOnHand) || 0),
+              status: Number(response.inventoryQuantityOnHand) > 0 ? 'in_stock' : 'sold_out',
+            }
+          : product,
+      ),
+    );
+
+    setCustomers((prev) =>
+      prev.map((customer) =>
+        customer.id === response.wholesalerCustomerId
+          ? {
+              ...customer,
+              amountDue: roundMoney(Number(response.customerDueBalance) || 0),
+              totalPurchases: roundMoney((customer.totalPurchases || 0) + Number(response.netAmount || 0)),
+              totalPaid: roundMoney((customer.totalPaid || 0) + Number(response.paidAmount || 0)),
+              boxJamanot: roundMoney(Number(response.customerJamanotBalance ?? customer.boxJamanot) || 0),
+              boxesHoldingWooden: roundMoney((customer.boxesHoldingWooden || 0) + Number(response.banglaCratesGiven || 0)),
+              boxesHoldingPlastic: roundMoney((customer.boxesHoldingPlastic || 0) + Number(response.chinaCratesGiven || 0)),
+              totalBoxesHolding: roundMoney((customer.totalBoxesHolding || 0) + Number(response.cratesGiven || 0)),
+            }
+          : customer,
+      ),
+    );
+
+    setSuppliers((prev) =>
+      prev.map((supplier) =>
+        supplier.id === response.wholesalerSupplierId
+          ? {
+              ...supplier,
+              amountDue: roundMoney(Number(response.supplierDueBalance ?? supplier.amountDue) || 0),
+              totalSales: roundMoney((supplier.totalSales || 0) + Number(response.netAmount || 0)),
+              totalCommissionEarned: roundMoney((supplier.totalCommissionEarned || 0) + Number(response.commissionAmount || 0)),
+            }
+          : supplier,
+      ),
+    );
+
+    if (Number(response.cratesGiven || 0) > 0) {
+      const banglaCount = Number(response.banglaCratesGiven || 0);
+      const chinaCount = Number(response.chinaCratesGiven || 0);
+      const crateCount = banglaCount + chinaCount;
+      setBoxInventory((prev) => ({
+        ...prev,
+        boxesInShop: Math.max((prev.boxesInShop || 0) - crateCount, 0),
+        boxesWithCustomers: (prev.boxesWithCustomers || 0) + crateCount,
+        bangla: {
+          ...prev.bangla,
+          inShop: Math.max((prev.bangla?.inShop || 0) - banglaCount, 0),
+          withCustomers: (prev.bangla?.withCustomers || 0) + banglaCount,
+        },
+        china: {
+          ...prev.china,
+          inShop: Math.max((prev.china?.inShop || 0) - chinaCount, 0),
+          withCustomers: (prev.china?.withCustomers || 0) + chinaCount,
+        },
+      }));
+    }
+
+    const transaction = {
+      id: response.transactionId || response.saleId,
+      date: getDateOnly(),
+      createdAt: response.saleDate || new Date().toISOString(),
+      transactionType: 'Sale',
+      customerId: response.wholesalerCustomerId,
+      supplier: response.supplierName,
+      supplierId: response.wholesalerSupplierId,
+      product: response.productName,
+      productId: response.inventoryId,
+      quantity: Number(response.quantity) || quantity,
+      unitPrice: Number(response.unitPrice) || unitPrice,
+      totalAmount: Number(response.netAmount) || 0,
+      paymentAmount: Number(response.paidAmount) || 0,
+      customer: response.customerName || null,
+      customerPhone: response.customerPhone || null,
+      customerType: response.customerType || 'PERMANENT',
+      customerNewDue: Number(response.customerDueBalance) || 0,
+      commissionAmount: Number(response.commissionAmount) || 0,
+      cratesGiven: Number(response.cratesGiven) || 0,
+      banglaCratesGiven: Number(response.banglaCratesGiven) || 0,
+      chinaCratesGiven: Number(response.chinaCratesGiven) || 0,
+      jamanotAmount: Number(response.jamanotAmount) || 0,
     };
 
-    setCustomers(workingCustomers);
-    setSuppliers(workingSuppliers);
-    setSupplierProducts(workingProducts);
-    setTransactions((prev) => [...prev, newTransaction]);
-
-    return newTransaction;
+    setTransactions((prev) => [...prev, transaction]);
+    return transaction;
   };
 
   const recordCustomerPayment = (customerId, amount) => {
@@ -526,15 +575,15 @@ export const DataProvider = ({ children }) => {
       ...prev,
       boxesInShop: prev.boxesInShop + appliedWooden + appliedPlastic,
       boxesWithCustomers: Math.max(prev.boxesWithCustomers - (appliedWooden + appliedPlastic), 0),
-      wooden: {
-        ...prev.wooden,
-        inShop: prev.wooden.inShop + appliedWooden,
-        withCustomers: Math.max(prev.wooden.withCustomers - appliedWooden, 0),
+      bangla: {
+        ...prev.bangla,
+        inShop: prev.bangla.inShop + appliedWooden,
+        withCustomers: Math.max(prev.bangla.withCustomers - appliedWooden, 0),
       },
-      plastic: {
-        ...prev.plastic,
-        inShop: prev.plastic.inShop + appliedPlastic,
-        withCustomers: Math.max(prev.plastic.withCustomers - appliedPlastic, 0),
+      china: {
+        ...prev.china,
+        inShop: prev.china.inShop + appliedPlastic,
+        withCustomers: Math.max(prev.china.withCustomers - appliedPlastic, 0),
       },
     }));
 
@@ -578,200 +627,210 @@ export const DataProvider = ({ children }) => {
       ...prev,
       boxesInShop: prev.boxesInShop + appliedWooden + appliedPlastic,
       boxesWithSuppliers: Math.max(prev.boxesWithSuppliers - (appliedWooden + appliedPlastic), 0),
-      wooden: {
-        ...prev.wooden,
-        inShop: prev.wooden.inShop + appliedWooden,
-        withSuppliers: Math.max(prev.wooden.withSuppliers - appliedWooden, 0),
+      bangla: {
+        ...prev.bangla,
+        inShop: prev.bangla.inShop + appliedWooden,
+        withSuppliers: Math.max(prev.bangla.withSuppliers - appliedWooden, 0),
       },
-      plastic: {
-        ...prev.plastic,
-        inShop: prev.plastic.inShop + appliedPlastic,
-        withSuppliers: Math.max(prev.plastic.withSuppliers - appliedPlastic, 0),
+      china: {
+        ...prev.china,
+        inShop: prev.china.inShop + appliedPlastic,
+        withSuppliers: Math.max(prev.china.withSuppliers - appliedPlastic, 0),
       },
     }));
 
     return { wooden: appliedWooden, plastic: appliedPlastic };
   };
 
-  const recordAccountTransaction = (transactionData) => {
+  const recordAccountTransaction = async (transactionData) => {
+    if (!admin?.wholesalerId) {
+      throw new Error('Wholesaler profile not found for this user.');
+    }
+
     const partyType = transactionData.partyType === 'supplier' ? 'supplier' : 'customer';
-    const paymentType = transactionData.paymentType === 'Due' ? 'Due' : 'Cash';
     const partyId = Number(transactionData.partyId);
     const inputAmount = roundMoney(Math.max(0, Number(transactionData.amount) || 0));
-    const woodenReturn = Math.max(0, Math.floor(Number(transactionData.woodenReturn) || 0));
-    const plasticReturn = Math.max(0, Math.floor(Number(transactionData.plasticReturn) || 0));
-    const boxJamanotChange = roundMoney(Number(transactionData.boxJamanotChange) || 0);
+    const banglaCrates = Math.max(0, Math.floor(Number(transactionData.woodenReturn) || 0));
+    const chinaCrates = Math.max(0, Math.floor(Number(transactionData.plasticReturn) || 0));
+    const jamanotAmount = roundMoney(Math.max(0, Number(transactionData.boxJamanotChange) || 0));
+    const includesCash = inputAmount > 0;
+    const includesCrates = banglaCrates + chinaCrates > 0;
 
     if (!partyId) {
       throw new Error('Please select a valid customer or supplier.');
     }
-    if (!inputAmount && !woodenReturn && !plasticReturn && !boxJamanotChange) {
-      throw new Error('Enter at least one update: cash/due amount, box return, or box jamanot.');
+    if (!includesCash && !includesCrates) {
+      throw new Error('Enter at least one update: cash amount or crate quantity.');
     }
 
-    const workingCustomers = [...customers];
-    const workingSuppliers = [...suppliers];
-    const workingBoxInventory = {
-      ...boxInventory,
-      wooden: { ...boxInventory.wooden },
-      plastic: { ...boxInventory.plastic },
-    };
-
-    let partyName;
-    let appliedPayment = 0;
-    let dueChange = 0;
-    let appliedWooden = 0;
-    let appliedPlastic = 0;
-    let appliedJamanot = 0;
+    let response;
+    let partyName = '';
+    let operationLabel = 'Payment';
 
     if (partyType === 'customer') {
-      const customerIndex = workingCustomers.findIndex((customer) => customer.id === partyId);
-      if (customerIndex === -1) {
+      const customer = customers.find((item) => item.id === partyId);
+      if (!customer) {
         throw new Error('Customer not found.');
       }
+      if (inputAmount > Number(customer.amountDue || 0)) {
+        throw new Error('Cash received cannot exceed customer due.');
+      }
+      if (jamanotAmount > Number(customer.boxJamanot || 0)) {
+        throw new Error('Jamanot refund cannot exceed customer jamanot balance.');
+      }
 
-      const customer = { ...workingCustomers[customerIndex] };
       partyName = customer.name;
+      response = await postJson(apiPaths.paymentsCustomerSettle(admin.wholesalerId), {
+        wholesalerCustomerId: partyId,
+        cashAmount: includesCash ? inputAmount : 0,
+        banglaCratesReturned: includesCrates ? banglaCrates : 0,
+        chinaCratesReturned: includesCrates ? chinaCrates : 0,
+        jamanotAmount: includesCrates ? jamanotAmount : 0,
+        paymentMethod: 'CASH',
+        note: transactionData.note?.trim() || '',
+      });
 
-      if (paymentType === 'Cash' && inputAmount > 0) {
-        appliedPayment = roundMoney(Math.min(inputAmount, customer.amountDue || 0));
-        customer.amountDue = roundMoney(Math.max((customer.amountDue || 0) - appliedPayment, 0));
-        customer.totalPaid = roundMoney((customer.totalPaid || 0) + appliedPayment);
-      } else if (paymentType === 'Due' && inputAmount > 0) {
-        dueChange = inputAmount;
-        customer.amountDue = roundMoney((customer.amountDue || 0) + dueChange);
-      }
+      setCustomers((prev) =>
+        prev.map((customerItem) =>
+          customerItem.id === partyId
+            ? {
+                ...customerItem,
+                amountDue: roundMoney(Number(response.dueAfter) || 0),
+                totalPaid: roundMoney((customerItem.totalPaid || 0) + Number(response.cashAmount || 0)),
+                boxJamanot: roundMoney(Number(response.jamanotAfter ?? customerItem.boxJamanot) || 0),
+                boxesHoldingWooden: Math.max((customerItem.boxesHoldingWooden || 0) - Number(response.banglaCrates || 0), 0),
+                boxesHoldingPlastic: Math.max((customerItem.boxesHoldingPlastic || 0) - Number(response.chinaCrates || 0), 0),
+                totalBoxesHolding: Math.max(
+                  (customerItem.totalBoxesHolding || 0) - Number(response.banglaCrates || 0) - Number(response.chinaCrates || 0),
+                  0,
+                ),
+              }
+            : customerItem,
+        ),
+      );
 
-      if (woodenReturn || plasticReturn) {
-        appliedWooden = Math.min(woodenReturn, customer.boxesHoldingWooden || 0);
-        appliedPlastic = Math.min(plasticReturn, customer.boxesHoldingPlastic || 0);
-
-        customer.boxesHoldingWooden = Math.max(
-          (customer.boxesHoldingWooden || 0) - appliedWooden,
+      setBoxInventory((prev) => ({
+        ...prev,
+        boxesInShop: (prev.boxesInShop || 0) + Number(response.banglaCrates || 0) + Number(response.chinaCrates || 0),
+        boxesWithCustomers: Math.max(
+          (prev.boxesWithCustomers || 0) - Number(response.banglaCrates || 0) - Number(response.chinaCrates || 0),
           0,
-        );
-        customer.boxesHoldingPlastic = Math.max(
-          (customer.boxesHoldingPlastic || 0) - appliedPlastic,
-          0,
-        );
-        customer.totalBoxesHolding = Math.max(
-          (customer.totalBoxesHolding || 0) - (appliedWooden + appliedPlastic),
-          0,
-        );
-
-        workingBoxInventory.boxesInShop += appliedWooden + appliedPlastic;
-        workingBoxInventory.boxesWithCustomers = Math.max(
-          workingBoxInventory.boxesWithCustomers - (appliedWooden + appliedPlastic),
-          0,
-        );
-        workingBoxInventory.wooden.inShop += appliedWooden;
-        workingBoxInventory.wooden.withCustomers = Math.max(
-          workingBoxInventory.wooden.withCustomers - appliedWooden,
-          0,
-        );
-        workingBoxInventory.plastic.inShop += appliedPlastic;
-        workingBoxInventory.plastic.withCustomers = Math.max(
-          workingBoxInventory.plastic.withCustomers - appliedPlastic,
-          0,
-        );
-      }
-
-      if (boxJamanotChange) {
-        const nextJamanot = roundMoney((customer.boxJamanot || 0) + boxJamanotChange);
-        if (nextJamanot < 0) {
-          throw new Error('Box jamanot cannot go below 0.');
-        }
-        customer.boxJamanot = nextJamanot;
-        appliedJamanot = boxJamanotChange;
-      }
-
-      workingCustomers[customerIndex] = customer;
+        ),
+        bangla: {
+          ...prev.bangla,
+          inShop: (prev.bangla?.inShop || 0) + Number(response.banglaCrates || 0),
+          withCustomers: Math.max((prev.bangla?.withCustomers || 0) - Number(response.banglaCrates || 0), 0),
+        },
+        china: {
+          ...prev.china,
+          inShop: (prev.china?.inShop || 0) + Number(response.chinaCrates || 0),
+          withCustomers: Math.max((prev.china?.withCustomers || 0) - Number(response.chinaCrates || 0), 0),
+        },
+      }));
     } else {
-      const supplierIndex = workingSuppliers.findIndex((supplier) => supplier.id === partyId);
-      if (supplierIndex === -1) {
+      const supplier = suppliers.find((item) => item.id === partyId);
+      if (!supplier) {
         throw new Error('Supplier not found.');
       }
-
-      const supplier = { ...workingSuppliers[supplierIndex] };
       partyName = supplier.name;
 
-      if (paymentType === 'Cash' && inputAmount > 0) {
-        appliedPayment = roundMoney(Math.min(inputAmount, supplier.amountDue || 0));
-        supplier.amountDue = roundMoney(Math.max((supplier.amountDue || 0) - appliedPayment, 0));
-        supplier.advancePaymentsMade = roundMoney(
-          (supplier.advancePaymentsMade || 0) + appliedPayment,
-        );
-        supplier.lastSettlementDate = getDateOnly();
-      } else if (paymentType === 'Due' && inputAmount > 0) {
-        dueChange = inputAmount;
-        supplier.amountDue = roundMoney((supplier.amountDue || 0) + dueChange);
-      }
+      if (includesCash) {
+        const supplierPaymentKind = transactionData.supplierPaymentKind || 'PRODUCT_PAYMENT';
+        const pathByKind = {
+          PRODUCT_PAYMENT: apiPaths.paymentsSupplierProductPay,
+          COMMISSION_RECEIVE: apiPaths.paymentsSupplierCommissionReceive,
+          EXPENSE_RECEIVE: apiPaths.paymentsSupplierExpenseReceive,
+        };
+        const endpoint = pathByKind[supplierPaymentKind] || apiPaths.paymentsSupplierProductPay;
+        response = await postJson(endpoint(admin.wholesalerId), {
+          wholesalerSupplierId: partyId,
+          amount: inputAmount,
+          paymentMethod: 'CASH',
+          note: transactionData.note?.trim() || '',
+        });
+        operationLabel = supplierPaymentKind;
 
-      if (woodenReturn || plasticReturn) {
-        appliedWooden = Math.min(woodenReturn, supplier.boxesHoldingWooden || 0);
-        appliedPlastic = Math.min(plasticReturn, supplier.boxesHoldingPlastic || 0);
-
-        supplier.boxesHoldingWooden = Math.max(
-          (supplier.boxesHoldingWooden || 0) - appliedWooden,
-          0,
-        );
-        supplier.boxesHoldingPlastic = Math.max(
-          (supplier.boxesHoldingPlastic || 0) - appliedPlastic,
-          0,
-        );
-        supplier.totalBoxesHolding = Math.max(
-          (supplier.totalBoxesHolding || 0) - (appliedWooden + appliedPlastic),
-          0,
-        );
-
-        workingBoxInventory.boxesInShop += appliedWooden + appliedPlastic;
-        workingBoxInventory.boxesWithSuppliers = Math.max(
-          workingBoxInventory.boxesWithSuppliers - (appliedWooden + appliedPlastic),
-          0,
-        );
-        workingBoxInventory.wooden.inShop += appliedWooden;
-        workingBoxInventory.wooden.withSuppliers = Math.max(
-          workingBoxInventory.wooden.withSuppliers - appliedWooden,
-          0,
-        );
-        workingBoxInventory.plastic.inShop += appliedPlastic;
-        workingBoxInventory.plastic.withSuppliers = Math.max(
-          workingBoxInventory.plastic.withSuppliers - appliedPlastic,
-          0,
+        setSuppliers((prev) =>
+          prev.map((supplierItem) =>
+            supplierItem.id === partyId
+              ? {
+                  ...supplierItem,
+                  amountDue: roundMoney(Number(response.dueAfter ?? supplierItem.amountDue) || 0),
+                  advancePaymentsMade:
+                    supplierPaymentKind === 'PRODUCT_PAYMENT'
+                      ? roundMoney((supplierItem.advancePaymentsMade || 0) + Number(response.cashAmount || 0))
+                      : supplierItem.advancePaymentsMade,
+                  lastSettlementDate: getDateOnly(),
+                }
+              : supplierItem,
+          ),
         );
       }
 
-      workingSuppliers[supplierIndex] = supplier;
-    }
+      if (includesCrates) {
+        const crateDirection = transactionData.supplierCrateDirection === 'give' ? 'give' : 'return';
+        const endpoint = crateDirection === 'give' ? apiPaths.paymentsSupplierCrateGive : apiPaths.paymentsSupplierCrateReturn;
+        const crateResponse = await postJson(endpoint(admin.wholesalerId), {
+          wholesalerSupplierId: partyId,
+          banglaCrates,
+          chinaCrates,
+          note: transactionData.note?.trim() || '',
+        });
+        response = response || crateResponse;
+        operationLabel = crateDirection === 'give' ? 'SUPPLIER_CRATE_GIVE' : 'SUPPLIER_CRATE_RETURN';
+        const sign = crateDirection === 'give' ? 1 : -1;
+        const inventorySign = crateDirection === 'give' ? -1 : 1;
 
-    if (!appliedPayment && !dueChange && !appliedWooden && !appliedPlastic && !appliedJamanot) {
-      throw new Error('No effective change applied. Check due amount or box holdings.');
+        setSuppliers((prev) =>
+          prev.map((supplierItem) =>
+            supplierItem.id === partyId
+              ? {
+                  ...supplierItem,
+                  boxesHoldingWooden: Math.max((supplierItem.boxesHoldingWooden || 0) + sign * banglaCrates, 0),
+                  boxesHoldingPlastic: Math.max((supplierItem.boxesHoldingPlastic || 0) + sign * chinaCrates, 0),
+                  totalBoxesHolding: Math.max((supplierItem.totalBoxesHolding || 0) + sign * (banglaCrates + chinaCrates), 0),
+                }
+              : supplierItem,
+          ),
+        );
+        setBoxInventory((prev) => ({
+          ...prev,
+          boxesInShop: Math.max((prev.boxesInShop || 0) + inventorySign * (banglaCrates + chinaCrates), 0),
+          boxesWithSuppliers: Math.max((prev.boxesWithSuppliers || 0) - inventorySign * (banglaCrates + chinaCrates), 0),
+          bangla: {
+            ...prev.bangla,
+            inShop: Math.max((prev.bangla?.inShop || 0) + inventorySign * banglaCrates, 0),
+            withSuppliers: Math.max((prev.bangla?.withSuppliers || 0) - inventorySign * banglaCrates, 0),
+          },
+          china: {
+            ...prev.china,
+            inShop: Math.max((prev.china?.inShop || 0) + inventorySign * chinaCrates, 0),
+            withSuppliers: Math.max((prev.china?.withSuppliers || 0) - inventorySign * chinaCrates, 0),
+          },
+        }));
+      }
     }
 
     const newTransaction = {
-      id: getNextId(transactions),
+      id: response.transactionId || getNextId(transactions),
       date: getDateOnly(),
-      createdAt: new Date().toISOString(),
+      createdAt: response.createdAt || new Date().toISOString(),
       transactionType: 'Payment',
       partyType: partyType === 'customer' ? 'Customer' : 'Supplier',
       partyName,
       partyId,
-      paymentType,
+      paymentType: operationLabel,
       totalAmount: inputAmount,
-      paymentAmount: appliedPayment,
-      dueAmountChange: dueChange,
-      customerNewDue: null,
-      boxReturnWooden: appliedWooden,
-      boxReturnPlastic: appliedPlastic,
-      boxJamanotChange: appliedJamanot,
+      paymentAmount: Number(response.cashAmount || inputAmount || 0),
+      dueAmountChange: 0,
+      customerNewDue: partyType === 'customer' ? Number(response.dueAfter || 0) : null,
+      boxReturnWooden: banglaCrates,
+      boxReturnPlastic: chinaCrates,
+      boxJamanotChange: partyType === 'customer' ? -jamanotAmount : 0,
       note: transactionData.note?.trim() || '',
     };
 
-    setCustomers(workingCustomers);
-    setSuppliers(workingSuppliers);
-    setBoxInventory(workingBoxInventory);
     setTransactions((prev) => [...prev, newTransaction]);
-
     return newTransaction;
   };
 
@@ -779,55 +838,39 @@ export const DataProvider = ({ children }) => {
     setBoxInventory((prev) => ({ ...prev, ...updates }));
   };
 
-  const addBoxes = (boxType, quantityInput) => {
+  const addBoxes = async (boxType, quantityInput) => {
+    if (!admin?.wholesalerId) {
+      throw new Error('Wholesaler profile not found for this user.');
+    }
     const quantity = Math.max(0, Math.floor(Number(quantityInput) || 0));
-    if (!quantity) return;
+    if (!quantity) return mapBoxDashboard(null);
 
-    setBoxInventory((prev) => {
-      if (boxType !== 'wooden' && boxType !== 'plastic') {
-        return prev;
-      }
-
-      const updated = {
-        ...prev,
-        totalBoxesOwned: prev.totalBoxesOwned + quantity,
-        boxesInShop: prev.boxesInShop + quantity,
-        [boxType]: {
-          ...prev[boxType],
-          total: prev[boxType].total + quantity,
-          inShop: prev[boxType].inShop + quantity,
-        },
-      };
-
-      return updated;
+    const dashboard = await postJson(apiPaths.boxesPurchaseCreate(admin.wholesalerId), {
+      boxType: String(boxType || '').toUpperCase(),
+      quantity,
+      note: 'Manual box purchase',
     });
+    const mapped = mapBoxDashboard(dashboard);
+    setBoxInventory(mapped);
+    return mapped;
   };
 
-  const markBoxesLost = (boxType, quantityInput) => {
+  const markBoxesLost = async (boxType, quantityInput, reason = 'lost') => {
+    if (!admin?.wholesalerId) {
+      throw new Error('Wholesaler profile not found for this user.');
+    }
     const quantity = Math.max(0, Math.floor(Number(quantityInput) || 0));
-    if (!quantity) return 0;
-    if (boxType !== 'wooden' && boxType !== 'plastic') return 0;
+    if (!quantity) return mapBoxDashboard(null);
 
-    let removed = 0;
-    setBoxInventory((prev) => {
-      const maxLoss = prev[boxType].inShop;
-      removed = Math.min(quantity, maxLoss);
-      if (!removed) return prev;
-
-      return {
-        ...prev,
-        totalBoxesOwned: prev.totalBoxesOwned - removed,
-        boxesInShop: prev.boxesInShop - removed,
-        boxesLostDamaged: prev.boxesLostDamaged + removed,
-        [boxType]: {
-          ...prev[boxType],
-          total: prev[boxType].total - removed,
-          inShop: prev[boxType].inShop - removed,
-          lost: prev[boxType].lost + removed,
-        },
-      };
+    const dashboard = await postJson(apiPaths.boxesLostDamagedCreate(admin.wholesalerId), {
+      boxType: String(boxType || '').toUpperCase(),
+      quantity,
+      reason,
+      note: 'Manual box loss/damage update',
     });
-    return removed;
+    const mapped = mapBoxDashboard(dashboard);
+    setBoxInventory(mapped);
+    return mapped;
   };
 
   return (

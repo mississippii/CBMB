@@ -4,10 +4,12 @@ import java.util.List;
 import org.example.dto.CreateWholesalerRequest;
 import org.example.dto.WholesalerResponse;
 import org.example.exception.BadRequestException;
+import org.example.model.BoxType;
 import org.example.model.enums.RecordStatus;
 import org.example.model.enums.UserRole;
 import org.example.model.User;
 import org.example.model.Wholesaler;
+import org.example.repository.BoxTypeRepository;
 import org.example.repository.UserRepository;
 import org.example.repository.WholesalerRepository;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -20,15 +22,18 @@ public class AdminWholesalerService {
     private final UserRepository userRepository;
     private final WholesalerRepository wholesalerRepository;
     private final PasswordEncoder passwordEncoder;
+    private final BoxTypeRepository boxTypeRepository;
 
     public AdminWholesalerService(
             UserRepository userRepository,
             WholesalerRepository wholesalerRepository,
-            PasswordEncoder passwordEncoder
+            PasswordEncoder passwordEncoder,
+            BoxTypeRepository boxTypeRepository
     ) {
         this.userRepository = userRepository;
         this.wholesalerRepository = wholesalerRepository;
         this.passwordEncoder = passwordEncoder;
+        this.boxTypeRepository = boxTypeRepository;
     }
 
     @Transactional
@@ -63,7 +68,10 @@ public class AdminWholesalerService {
         wholesaler.setAddress(address);
         wholesaler.setStatus(RecordStatus.ACTIVE);
 
-        return toResponse(wholesalerRepository.save(wholesaler));
+        Wholesaler savedWholesaler = wholesalerRepository.save(wholesaler);
+        createDefaultBoxTypes(savedWholesaler);
+
+        return toResponse(savedWholesaler);
     }
 
     @Transactional(readOnly = true)
@@ -72,6 +80,19 @@ public class AdminWholesalerService {
                 .stream()
                 .map(this::toResponse)
                 .toList();
+    }
+
+    private void createDefaultBoxTypes(Wholesaler wholesaler) {
+        createBoxType(wholesaler, "BANGLA");
+        createBoxType(wholesaler, "CHINA");
+    }
+
+    private void createBoxType(Wholesaler wholesaler, String name) {
+        BoxType boxType = new BoxType();
+        boxType.setWholesaler(wholesaler);
+        boxType.setName(name);
+        boxType.setStatus(RecordStatus.ACTIVE);
+        boxTypeRepository.save(boxType);
     }
 
     private WholesalerResponse toResponse(Wholesaler wholesaler) {

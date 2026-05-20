@@ -12,6 +12,12 @@ public record SupplierAccountResponse(
         String address,
         BigDecimal commissionRate,
         BigDecimal openingDue,
+        BigDecimal currentDue,
+        BigDecimal totalSales,
+        BigDecimal totalCommissionEarned,
+        Integer banglaCratesDue,
+        Integer chinaCratesDue,
+        Integer totalCratesDue,
         String status,
         LocalDateTime createdAt
 ) {

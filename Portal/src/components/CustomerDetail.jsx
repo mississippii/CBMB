@@ -1,6 +1,6 @@
 import { useData } from '../context/DataContext'
-
-const formatCurrency = (value) => `৳ ${(Number(value) || 0).toLocaleString()}`
+const formatCurrency = (value) => '৳ ' + (Number(value) || 0).toLocaleString()
+const formatSignedCurrency = (value) => (Number(value) > 0 ? '+' : Number(value) < 0 ? '-' : '') + '৳ ' + Math.abs(Number(value) || 0).toLocaleString()
 const getDateOnly = (value) => new Date(value).toISOString().split('T')[0]
 
 const CustomerDetail = ({ customerId, onBack }) => {
@@ -19,8 +19,7 @@ const CustomerDetail = ({ customerId, onBack }) => {
 
   const todaySales = transactions.filter(
     (transaction) =>
-      transaction.transactionType !== 'Payment' &&
-      transaction.transactionType !== 'SupplierDelivery' &&
+      transaction.transactionType === 'Sale' &&
       (transaction.customerId === customer.id || transaction.customer === customer.name) &&
       getDateOnly(transaction.createdAt || transaction.date) === today,
   )
@@ -41,8 +40,8 @@ const CustomerDetail = ({ customerId, onBack }) => {
   const todayPaidAmount =
     todaySales.reduce((sum, transaction) => sum + (Number(transaction.paymentAmount) || 0), 0) +
     todayPayments.reduce((sum, transaction) => sum + (Number(transaction.paymentAmount) || 0), 0)
-  const todayDueAdded = Math.max(todayPurchaseAmount - todayPaidAmount, 0)
-  const previousDue = Math.max((Number(customer.amountDue) || 0) - todayDueAdded, 0)
+  const todayDueMovement = todayPurchaseAmount - todayPaidAmount
+  const previousDue = Math.max((Number(customer.amountDue) || 0) - todayDueMovement, 0)
   const dueRatio =
     customer.totalPurchases > 0
       ? Math.min(Math.round((customer.amountDue / customer.totalPurchases) * 100), 100)
@@ -78,7 +77,7 @@ const CustomerDetail = ({ customerId, onBack }) => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
+      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-6">
         <div className="metric-tile">
           <p>Today Purchases</p>
           <strong>{formatCurrency(todayPurchaseAmount)}</strong>
@@ -87,12 +86,20 @@ const CustomerDetail = ({ customerId, onBack }) => {
           <p>Today Paid</p>
           <strong>{formatCurrency(todayPaidAmount)}</strong>
         </div>
+        <div className="metric-tile">
+          <p>Total Purchases</p>
+          <strong>{formatCurrency(customer.totalPurchases)}</strong>
+        </div>
+        <div className="metric-tile">
+          <p>Total Paid</p>
+          <strong>{formatCurrency(customer.totalPaid)}</strong>
+        </div>
         <div className="metric-tile danger">
           <p>Current Due</p>
           <strong>{formatCurrency(customer.amountDue)}</strong>
         </div>
         <div className="metric-tile">
-          <p>Box Jamanot</p>
+          <p>Crate Jamanot</p>
           <strong>{formatCurrency(customer.boxJamanot || 0)}</strong>
         </div>
       </div>
@@ -116,8 +123,8 @@ const CustomerDetail = ({ customerId, onBack }) => {
               <p className="mt-1 text-xl font-extrabold text-slate-900">{formatCurrency(previousDue)}</p>
             </div>
             <div className="rounded-xl bg-emerald-50 p-4">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Today Added</p>
-              <p className="mt-1 text-xl font-extrabold text-emerald-800">{formatCurrency(todayDueAdded)}</p>
+              <p className="text-[11px] font-bold uppercase tracking-wider text-emerald-700">Today Net Change</p>
+              <p className="mt-1 text-xl font-extrabold text-emerald-800">{formatSignedCurrency(todayDueMovement)}</p>
             </div>
             <div className="rounded-xl bg-rose-50 p-4">
               <p className="text-[11px] font-bold uppercase tracking-wider text-rose-700">Current Due</p>
@@ -139,24 +146,24 @@ const CustomerDetail = ({ customerId, onBack }) => {
         </div>
 
         <div className="supplier-panel">
-          <h3>Box Accountability</h3>
+          <h3>Crate Accountability</h3>
           <div className="mt-4 space-y-3">
             <div className="box-row">
-              <span>Wooden</span>
+              <span>Bangla</span>
               <strong>{customer.boxesHoldingWooden}</strong>
             </div>
             <div className="box-row">
-              <span>Plastic</span>
+              <span>China</span>
               <strong>{customer.boxesHoldingPlastic}</strong>
             </div>
             <div className="box-row total">
-              <span>Total Due</span>
+              <span>Total Crates Due</span>
               <strong>{customer.totalBoxesHolding}</strong>
             </div>
           </div>
 
           <div className="mt-5 rounded-xl bg-emerald-50 p-4">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-[#307D7E]">Box Jamanot</p>
+            <p className="text-[11px] font-bold uppercase tracking-wider text-[#307D7E]">Crate Jamanot</p>
             <p className="mt-1 text-xl font-extrabold text-[#255f60]">
               {formatCurrency(customer.boxJamanot || 0)}
             </p>

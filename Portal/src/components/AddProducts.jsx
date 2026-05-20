@@ -20,6 +20,7 @@ const AddProducts = () => {
   );
 
   const categories = useMemo(() => selectedProduct?.categories || [], [selectedProduct]);
+  const categoryRequired = categories.length > 0;
 
   const selectedCategory = useMemo(
     () => categories.find((category) => Number(category.id) === Number(formData.categoryId)),
@@ -38,7 +39,7 @@ const AddProducts = () => {
       const product = await addSupplierProduct(formData);
       setFeedback({
         type: 'success',
-        message: `${product.productName} ${product.category} added. Quantity: ${product.quantity} ${product.unit}.`,
+        message: `${product.productName}${product.category === 'No Category' ? '' : ` ${product.category}`} added. Quantity: ${product.quantity} ${product.unit}.`,
       });
       resetForm();
     } catch (error) {
@@ -105,10 +106,12 @@ const AddProducts = () => {
               value={formData.categoryId}
               onChange={(event) => setFormData((prev) => ({ ...prev, categoryId: event.target.value }))}
               className="input-field"
-              disabled={!selectedProduct}
-              required
+              disabled={!selectedProduct || !categoryRequired}
+              required={categoryRequired}
             >
-              <option value="">{selectedProduct ? 'Choose category...' : 'Select product first'}</option>
+              <option value="">
+                {!selectedProduct ? 'Select product first' : categoryRequired ? 'Choose category...' : 'No category required'}
+              </option>
               {categories.map((category) => (
                 <option key={category.id} value={category.id}>
                   {category.name}{category.grade ? ` - ${category.grade}` : ''}
@@ -145,8 +148,8 @@ const AddProducts = () => {
             <label>Selected Item</label>
             <input
               type="text"
-              value={selectedProduct && selectedCategory ? `${selectedProduct.name} / ${selectedCategory.name}` : ''}
-              placeholder="Product and category"
+              value={selectedProduct ? (selectedCategory ? `${selectedProduct.name} / ${selectedCategory.name}` : selectedProduct.name) : ''}
+              placeholder="Product selection"
               className="input-field"
               readOnly
             />

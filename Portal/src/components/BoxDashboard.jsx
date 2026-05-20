@@ -6,54 +6,58 @@ const BoxDashboard = () => {
   const [showAddForm, setShowAddForm] = useState(false);
   const [showLossForm, setShowLossForm] = useState(false);
   const [formData, setFormData] = useState({
-    boxType: 'wooden',
+    boxType: 'BANGLA',
     quantity: 0,
     reason: 'lost',
     description: '',
   });
   const [statusMessage, setStatusMessage] = useState('');
 
-  const handleAddBoxes = () => {
+  const handleAddBoxes = async () => {
     const quantity = Number(formData.quantity) || 0;
     if (quantity <= 0) {
-      setStatusMessage('Please enter a valid quantity to add.');
+      setStatusMessage('Please enter a valid crate quantity to add.');
       return;
     }
 
-    addBoxes(formData.boxType, quantity);
-    setFormData({ boxType: 'wooden', quantity: 0, reason: 'lost', description: '' });
-    setShowAddForm(false);
-    setStatusMessage(`Added ${quantity} ${formData.boxType} box(es) to inventory.`);
+    try {
+      await addBoxes(formData.boxType, quantity);
+      setFormData({ boxType: 'BANGLA', quantity: 0, reason: 'lost', description: '' });
+      setShowAddForm(false);
+      setStatusMessage(`Added ${quantity} ${formData.boxType} crate(s) to inventory.`);
+    } catch (error) {
+      setStatusMessage(error.message || 'Unable to add crates.');
+    }
   };
 
-  const handleMarkLost = () => {
+  const handleMarkLost = async () => {
     const quantity = Number(formData.quantity) || 0;
     if (quantity <= 0) {
-      setStatusMessage('Please enter a valid quantity to mark as lost/damaged.');
+      setStatusMessage('Please enter a valid crate quantity to mark as lost/damaged.');
       return;
     }
 
-    const removed = markBoxesLost(formData.boxType, quantity);
-    setFormData({ boxType: 'wooden', quantity: 0, reason: 'lost', description: '' });
-    setShowLossForm(false);
-    if (removed === 0) {
-      setStatusMessage(`No ${formData.boxType} boxes available in shop storage to mark as lost.`);
-      return;
+    try {
+      await markBoxesLost(formData.boxType, quantity, formData.reason);
+      setFormData({ boxType: 'BANGLA', quantity: 0, reason: 'lost', description: '' });
+      setShowLossForm(false);
+      setStatusMessage(`Marked ${quantity} ${formData.boxType} crate(s) as lost/damaged.`);
+    } catch (error) {
+      setStatusMessage(error.message || 'Unable to mark crates as lost/damaged.');
     }
-    setStatusMessage(`Marked ${removed} ${formData.boxType} box(es) as lost/damaged.`);
   };
 
-  const boxesDue = boxInventory.boxesWithSuppliers + boxInventory.boxesWithCustomers;
-  const boxesInHand = boxInventory.boxesInShop;
-  const activeBoxes = Math.max(boxInventory.totalBoxesOwned, 1);
-  const duePercent = Math.round((boxesDue / activeBoxes) * 100);
-  const inShopPercent = Math.round((boxInventory.boxesInShop / activeBoxes) * 100);
-  const supplierPercent = Math.round((boxInventory.boxesWithSuppliers / activeBoxes) * 100);
-  const customerPercent = Math.round((boxInventory.boxesWithCustomers / activeBoxes) * 100);
+  const cratesDue = boxInventory.boxesWithSuppliers + boxInventory.boxesWithCustomers;
+  const cratesInHand = boxInventory.boxesInShop;
+  const activeCrates = Math.max(boxInventory.totalBoxesOwned, 1);
+  const duePercent = Math.round((cratesDue / activeCrates) * 100);
+  const inShopPercent = Math.round((boxInventory.boxesInShop / activeCrates) * 100);
+  const supplierPercent = Math.round((boxInventory.boxesWithSuppliers / activeCrates) * 100);
+  const customerPercent = Math.round((boxInventory.boxesWithCustomers / activeCrates) * 100);
   const lostPercent = Math.round((boxInventory.boxesLostDamaged / Math.max(boxInventory.totalBoxesOwned + boxInventory.boxesLostDamaged, 1)) * 100);
   const boxTypes = [
-    { key: 'wooden', label: 'Wooden Boxes', shortLabel: 'Wooden', data: boxInventory.wooden },
-    { key: 'plastic', label: 'Plastic Boxes', shortLabel: 'Plastic', data: boxInventory.plastic },
+    { key: 'bangla', label: 'Bangla Crate', shortLabel: 'Bangla', data: boxInventory.bangla },
+    { key: 'china', label: 'China Crate', shortLabel: 'China', data: boxInventory.china },
   ];
   const topCustomerHolders = customers
     .filter((customer) => Number(customer.totalBoxesHolding) > 0)
@@ -75,10 +79,10 @@ const BoxDashboard = () => {
 
       <section className="box-overview">
         <div className="box-overview-copy">
-          <span className="box-eyebrow">Box Control</span>
+          <span className="box-eyebrow">Crate Control</span>
           <h3>Inventory accountability</h3>
           <p>
-            Track boxes in shop, with customers, with suppliers, and lost/damaged from one place.
+            Track crates in shop, with customers, with suppliers, and lost/damaged from one place.
           </p>
         </div>
         <div className="box-action-row">
@@ -86,7 +90,7 @@ const BoxDashboard = () => {
             onClick={() => setShowAddForm(true)}
             className="btn-primary"
           >
-            Add Boxes
+            Add Crates
           </button>
           <button
             onClick={() => setShowLossForm(true)}
@@ -101,16 +105,16 @@ const BoxDashboard = () => {
         <div className="box-kpi primary">
           <span>Total Inventory</span>
           <strong>{boxInventory.totalBoxesOwned}</strong>
-          <p>Boxes currently owned</p>
+          <p>Crates currently owned</p>
         </div>
         <div className="box-kpi success">
           <span>In Shop</span>
-          <strong>{boxesInHand}</strong>
+          <strong>{cratesInHand}</strong>
           <p>{inShopPercent}% ready for dispatch</p>
         </div>
         <div className="box-kpi warning">
           <span>Due Outside</span>
-          <strong>{boxesDue}</strong>
+          <strong>{cratesDue}</strong>
           <p>{duePercent}% with parties</p>
         </div>
         <div className="box-kpi danger">
@@ -125,12 +129,12 @@ const BoxDashboard = () => {
           <div className="box-panel-header">
             <div>
               <h3>Current Allocation</h3>
-              <p>Where the boxes are right now.</p>
+              <p>Where the crates are right now.</p>
             </div>
             <span>{boxInventory.totalBoxesOwned} active</span>
           </div>
 
-          <div className="allocation-track" aria-label="Box allocation">
+          <div className="allocation-track" aria-label="Crate allocation">
             <span className="allocation-shop" style={{ width: `${inShopPercent}%` }} />
             <span className="allocation-suppliers" style={{ width: `${supplierPercent}%` }} />
             <span className="allocation-customers" style={{ width: `${customerPercent}%` }} />
@@ -165,7 +169,7 @@ const BoxDashboard = () => {
           <div className="box-panel-header">
             <div>
               <h3>Type Breakdown</h3>
-              <p>Wooden and plastic box movement.</p>
+              <p>Bangla and China crate movement.</p>
             </div>
           </div>
 
@@ -203,7 +207,7 @@ const BoxDashboard = () => {
         <div className="box-panel">
           <div className="box-panel-header">
             <div>
-              <h3>Customer Box Due</h3>
+              <h3>Customer Crate Due</h3>
               <p>Highest customer holdings.</p>
             </div>
           </div>
@@ -219,7 +223,7 @@ const BoxDashboard = () => {
                 </div>
               ))
             ) : (
-              <div className="empty-state">No customer box due.</div>
+              <div className="empty-state">No customer crate due.</div>
             )}
           </div>
         </div>
@@ -227,7 +231,7 @@ const BoxDashboard = () => {
         <div className="box-panel">
           <div className="box-panel-header">
             <div>
-              <h3>Supplier Box Due</h3>
+              <h3>Supplier Crate Due</h3>
               <p>Highest supplier holdings.</p>
             </div>
           </div>
@@ -243,7 +247,7 @@ const BoxDashboard = () => {
                 </div>
               ))
             ) : (
-              <div className="empty-state">No supplier box due.</div>
+              <div className="empty-state">No supplier crate due.</div>
             )}
           </div>
         </div>
@@ -253,7 +257,7 @@ const BoxDashboard = () => {
         <div className="modal-overlay">
           <div className="modal-content" style={{ maxWidth: '42rem' }}>
             <div className="modal-header">
-              <h2>Add New Boxes</h2>
+              <h2>Add New Crates</h2>
               <button
                 onClick={() => setShowAddForm(false)}
                 className="modal-close-btn"
@@ -264,14 +268,14 @@ const BoxDashboard = () => {
             <div className="modal-body">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Box Type</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Crate Type</label>
                   <select
                     value={formData.boxType}
                     onChange={(e) => setFormData({ ...formData, boxType: e.target.value })}
                     className="input-field"
                   >
-                    <option value="wooden">Wooden</option>
-                    <option value="plastic">Plastic</option>
+                    <option value="BANGLA">Bangla</option>
+                    <option value="CHINA">China</option>
                   </select>
                 </div>
                 <div>
@@ -298,7 +302,7 @@ const BoxDashboard = () => {
                 onClick={handleAddBoxes}
                 className="btn-primary"
               >
-                Add Boxes
+                Add Crates
               </button>
             </div>
           </div>
@@ -309,7 +313,7 @@ const BoxDashboard = () => {
         <div className="modal-overlay">
           <div className="modal-content" style={{ maxWidth: '42rem' }}>
             <div className="modal-header danger">
-              <h2>Mark Boxes Lost/Damaged</h2>
+              <h2>Mark Crates Lost/Damaged</h2>
               <button
                 onClick={() => setShowLossForm(false)}
                 className="modal-close-btn"
@@ -320,14 +324,14 @@ const BoxDashboard = () => {
             <div className="modal-body">
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                 <div>
-                  <label className="block text-sm font-medium text-gray-700 mb-2">Box Type</label>
+                  <label className="block text-sm font-medium text-gray-700 mb-2">Crate Type</label>
                   <select
                     value={formData.boxType}
                     onChange={(e) => setFormData({ ...formData, boxType: e.target.value })}
                     className="input-field"
                   >
-                    <option value="wooden">Wooden</option>
-                    <option value="plastic">Plastic</option>
+                    <option value="BANGLA">Bangla</option>
+                    <option value="CHINA">China</option>
                   </select>
                 </div>
                 <div>

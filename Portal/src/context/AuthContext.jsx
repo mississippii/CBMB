@@ -1,9 +1,9 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useEffect, useState, useContext } from 'react';
+import { apiPaths, postJson } from '../services/apiClient';
 
 const AuthContext = createContext();
 const AUTH_STORAGE_KEY = 'cbtrading-auth-v1';
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://192.168.0.177:8080';
 
 const loadAuthState = () => {
   if (typeof window === 'undefined') {
@@ -52,16 +52,7 @@ export const AuthProvider = ({ children }) => {
   }, [isAuthenticated, admin]);
 
   const login = async (email, password) => {
-    const response = await fetch(`${API_BASE_URL}/auth/login`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ email, password }),
-    });
-    const payload = await response.json().catch(() => null);
-
-    if (!response.ok) {
-      throw new Error(payload?.message || 'Invalid email or password.');
-    }
+    const payload = await postJson(apiPaths.authLogin, { email, password });
 
     if (payload?.role === 'WHOLESALER' && !payload.wholesalerId) {
       throw new Error('Wholesaler profile not found. Ask admin to create the wholesaler profile again.');

@@ -1,8 +1,9 @@
 package org.example.model.enums;
 
 public enum SettlementType {
-    COMMISSION_PAYOUT,
-    EXPENSE_PAYOUT,
+    PRODUCT_PAYMENT,
+    COMMISSION_RECEIVE,
+    EXPENSE_RECEIVE,
     ADVANCE_PAYMENT,
     ADJUSTMENT
 }

@@ -12,7 +12,13 @@ public record CustomerAccountResponse(
         String phone,
         String address,
         BigDecimal openingDue,
+        BigDecimal currentDue,
+        BigDecimal totalPurchases,
+        BigDecimal totalPaid,
         BigDecimal jamanotBalance,
+        Integer banglaCratesDue,
+        Integer chinaCratesDue,
+        Integer totalCratesDue,
         String status,
         LocalDateTime createdAt
 ) {

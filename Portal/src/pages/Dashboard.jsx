@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useAuth } from '../context/AuthContext';
 import Navbar from '../components/Navbar';
 import BoxDashboard from '../components/BoxDashboard';
@@ -12,12 +12,35 @@ import { useData } from '../context/DataContext';
 
 const Dashboard = () => {
   const { admin: wholesaler } = useAuth();
-  const { isLoading, dataError } = useData();
+  const { isLoading, dataError, suppliers, customers, transactions, supplierProducts, catalogProducts, boxInventory } = useData();
   const [activeTab, setActiveTab] = useState('inventory');
   const [showTransactionModal, setShowTransactionModal] = useState(false);
+  const [showLoadFallback, setShowLoadFallback] = useState(false);
+
+  useEffect(() => {
+    if (!isLoading) {
+      setShowLoadFallback(false);
+      return undefined;
+    }
+
+    const timer = window.setTimeout(() => setShowLoadFallback(true), 8000);
+    return () => window.clearTimeout(timer);
+  }, [isLoading]);
+
+  const hasLoadedData = useMemo(() => {
+    const hasCrates = Number(boxInventory?.totalBoxesOwned || 0) > 0;
+    return (
+      suppliers.length > 0 ||
+      customers.length > 0 ||
+      transactions.length > 0 ||
+      supplierProducts.length > 0 ||
+      catalogProducts.length > 0 ||
+      hasCrates
+    );
+  }, [boxInventory, catalogProducts.length, customers.length, supplierProducts.length, suppliers.length, transactions.length]);
 
   const tabs = [
-    { id: 'dashboard', label: 'Box Dashboard' },
+    { id: 'dashboard', label: 'Crate Dashboard' },
     { id: 'add-products', label: 'Add Products' },
     { id: 'suppliers', label: 'Suppliers' },
     { id: 'customers', label: 'Customers' },
@@ -70,17 +93,6 @@ const Dashboard = () => {
           </div>
         )}
 
-        {isLoading && (
-          <div className="mb-4 rounded-lg border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-600">
-            Loading wholesaler data...
-          </div>
-        )}
-
-        {dataError && (
-          <div className="mb-4 rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm font-semibold text-red-700">
-            {dataError}
-          </div>
-        )}
 
         <div className="workspace-layout">
           <aside className="workspace-sidebar">
@@ -108,15 +120,45 @@ const Dashboard = () => {
           </aside>
 
           <main className="workspace-content">
-            <div className="animate-fadeIn">
-              {activeTab === 'inventory' && <StoreInventory onAddProducts={() => setActiveTab('add-products')} />}
-              {activeTab === 'dashboard' && <BoxDashboard />}
-              {activeTab === 'add-products' && <AddProducts />}
-              {activeTab === 'suppliers' && <SuppliersList />}
-              {activeTab === 'customers' && <CustomersList />}
-              {activeTab === 'transactions' && <TransactionsList />}
-              {activeTab === 'payment' && <TransactionForm entryMode="payment" />}
-            </div>
+            {isLoading ? (
+              <div className="data-load-panel">
+                {!showLoadFallback ? (
+                  <>
+                    <div className="windows-loader" aria-label="Loading data" />
+                    <h3>Loading data</h3>
+                    <p>Connecting to the server and preparing wholesaler records.</p>
+                  </>
+                ) : (
+                  <>
+                    <div className="data-not-found-icon">!</div>
+                    <h3>Data not found yet</h3>
+                    <p>The server is taking longer than expected or no records are available for this wholesaler.</p>
+                  </>
+                )}
+              </div>
+            ) : dataError ? (
+              <div className="data-load-panel error">
+                <div className="data-not-found-icon">!</div>
+                <h3>Unable to load data</h3>
+                <p>{dataError}</p>
+              </div>
+            ) : !hasLoadedData ? (
+              <div className="data-load-panel">
+                <div className="data-not-found-icon">0</div>
+                <h3>Data not found</h3>
+                <p>No supplier, customer, inventory, crate, or transaction data is available for this wholesaler.</p>
+              </div>
+            ) : (
+              <div className="animate-fadeIn">
+                {activeTab === 'inventory' && <StoreInventory onAddProducts={() => setActiveTab('add-products')} />}
+                {activeTab === 'dashboard' && <BoxDashboard />}
+                {activeTab === 'add-products' && <AddProducts />}
+                {activeTab === 'suppliers' && <SuppliersList />}
+                {activeTab === 'customers' && <CustomersList />}
+                {activeTab === 'transactions' && <TransactionsList />}
+                {activeTab === 'payment' && <TransactionForm entryMode="payment" />}
+              </div>
+            )}
           </main>
         </div>
       </div>

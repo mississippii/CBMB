@@ -1,7 +1,6 @@
-package org.example.controller;
+package org.example.exception;
 
 import org.example.dto.ErrorResponse;
-import org.example.exception.BadRequestException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.ExceptionHandler;

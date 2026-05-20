@@ -6,7 +6,6 @@ import org.example.dto.WholesalerResponse;
 import org.example.service.AdminWholesalerService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.CrossOrigin;
-import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -24,17 +23,12 @@ public class AdminController {
         this.adminWholesalerService = adminWholesalerService;
     }
 
-    @GetMapping("/hello")
-    public String hello() {
-        return "Hello Admin";
-    }
-
-    @GetMapping("/wholesalers")
+    @PostMapping("/wholesalers/list")
     public List<WholesalerResponse> listWholesalers() {
         return adminWholesalerService.listWholesalers();
     }
 
-    @PostMapping("/wholesalers")
+    @PostMapping("/wholesalers/create")
     @ResponseStatus(HttpStatus.CREATED)
     public WholesalerResponse createWholesaler(@RequestBody CreateWholesalerRequest request) {
         return adminWholesalerService.createWholesaler(request);

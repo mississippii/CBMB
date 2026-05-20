@@ -113,36 +113,6 @@ const StoreInventory = ({ onAddProducts }) => {
           </div>
         ) : (
           <>
-            <div className="inventory-card-grid">
-              {products.map((product) => (
-                <article key={product.id} className="inventory-card">
-                  <div className="inventory-card-title">
-                    <div>
-                      <h4>{product.productName}</h4>
-                      <p>{product.category}</p>
-                    </div>
-                    <span className={`stock-pill ${product.quantity <= 0 ? 'out' : product.quantity <= 10 ? 'low' : ''}`}>
-                      {product.stockStatus}
-                    </span>
-                  </div>
-                  <div className="inventory-card-meta">
-                    <span>Supplier</span>
-                    <strong>{product.supplierName}</strong>
-                  </div>
-                  <div className="inventory-card-stats">
-                    <div>
-                      <span>Quantity</span>
-                      <strong>{formatNumber(product.quantity)} {String(product.unit || '').toUpperCase()}</strong>
-                    </div>
-                    <div>
-                      <span>Last Received</span>
-                      <strong>{getDateOnly(product.dateReceived)}</strong>
-                    </div>
-                  </div>
-                </article>
-              ))}
-            </div>
-
             <div className="table-scroll inventory-table">
               <table className="w-full min-w-[860px] text-sm">
                 <thead>
@@ -150,7 +120,7 @@ const StoreInventory = ({ onAddProducts }) => {
                     <th className="px-4 py-3 text-left">Product</th>
                     <th className="px-4 py-3 text-left">Category</th>
                     <th className="px-4 py-3 text-left">Supplier</th>
-                    <th className="px-4 py-3 text-right">Quantity</th>
+                    <th className="px-4 py-3" style={{ textAlign: 'center' }}>Quantity</th>
                     <th className="px-4 py-3 text-left">Unit</th>
                     <th className="px-4 py-3 text-left">Status</th>
                     <th className="px-4 py-3 text-left">Last Received</th>
@@ -165,7 +135,7 @@ const StoreInventory = ({ onAddProducts }) => {
                         <div className="font-semibold">{product.supplierName}</div>
                         <div className="text-xs text-slate-500">{product.supplierPhone}</div>
                       </td>
-                      <td className="px-4 py-3 text-right font-semibold text-slate-900">
+                      <td className="px-4 py-3 font-semibold text-slate-900" style={{ textAlign: 'center' }}>
                         {formatNumber(product.quantity)}
                       </td>
                       <td className="px-4 py-3 text-slate-700">{String(product.unit || '').toUpperCase()}</td>

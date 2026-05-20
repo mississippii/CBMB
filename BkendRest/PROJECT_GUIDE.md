@@ -97,14 +97,239 @@ OpenAPI JSON:
 http://192.168.0.177:8080/v3/api-docs
 ```
 
+## API Style
+
+All business APIs use `POST`. API paths should stay grouped by module, for example `/admin/...`, `/auth/...`, `/products/...`, and `/wholesalers/{wholesalerId}/...`. Query-style operations use action suffixes such as `/list`; write operations use suffixes such as `/create`.
+
 ## Current Controllers
 
 ```text
 AuthController
 AdminController
 WholesalerController
-ApiExceptionHandler
+ProductController
 ```
+
+## Exception Handling
+
+Global REST error handling is in `org.example.exception.ApiExceptionHandler`. It uses `@RestControllerAdvice`, so it applies across all controllers but is not itself an endpoint controller.
+
+## API List
+
+This API plan is based on the current Portal frontend design. Development should implement backend APIs first, verify them with Swagger/Postman, and then connect the frontend section by section.
+
+### Already Started
+
+#### Auth
+
+- `POST /auth/login`
+  - Login by email and password.
+  - Returns authenticated user info, role, and `wholesalerId` when the user is a wholesaler.
+
+#### Admin
+
+- `POST /admin/me`
+  - Returns logged-in admin profile.
+
+- `POST /admin/wholesalers/list`
+  - Lists wholesalers created by admin.
+
+- `POST /admin/wholesalers/create`
+  - Creates a wholesaler user and wholesaler profile.
+
+#### Wholesaler Accounts
+
+- `POST /wholesalers/{wholesalerId}/suppliers/list`
+  - Lists suppliers connected to a wholesaler.
+
+- `POST /wholesalers/{wholesalerId}/suppliers/create`
+  - Creates or connects a supplier account for a wholesaler.
+
+- `POST /wholesalers/{wholesalerId}/customers/list`
+  - Lists customers connected to a wholesaler.
+
+- `POST /wholesalers/{wholesalerId}/customers/create`
+  - Creates or connects a customer account for a wholesaler.
+
+#### Product Catalog
+
+- `POST /products/list`
+  - Lists active products with their active categories.
+  - Used by Add Products dropdowns.
+
+#### Supplier Shipment / Add Product
+
+- `POST /wholesalers/{wholesalerId}/supplier-deliveries/create`
+  - Receives supplier shipment.
+  - Wholesaler selects supplier, product, category, and enters quantity.
+  - Updates `supplier_deliveries`, `supplier_delivery_items`, `inventory`, and `stock_ledger`.
+
+### APIs Needed Next
+
+#### 1. Store Inventory
+
+Used by the default wholesaler landing page and sale product dropdown.
+
+- `POST /wholesalers/{wholesalerId}/inventory/list`
+
+Optional request fields:
+
+```text
+supplierId=
+productId=
+status=ACTIVE/STOCK_OUT
+```
+
+Response should include:
+
+```text
+inventoryId
+wholesalerSupplierId
+supplierName
+supplierPhone
+productId
+productName
+categoryId
+categoryName
+quantityOnHand
+unit
+status
+lastUpdated
+```
+
+#### 2. Sales
+
+Used by `+New Sale`.
+
+- `POST /wholesalers/{wholesalerId}/sales/create`
+- `POST /wholesalers/{wholesalerId}/sales/list`
+
+Payload should include:
+
+```text
+wholesalerCustomerId OR oneTimeCustomer
+inventoryId
+quantity
+unitPrice
+paymentAmount
+saleType=PAY_INSTANT/PAY_LATER
+boxesGiven
+jamanotAmount
+note
+```
+
+The sale API must update:
+
+```text
+sales
+sale_items
+inventory
+stock_ledger
+transactions
+customer due/account ledger
+supplier commission due
+box ledger/balance when boxes are given
+```
+
+#### 3. Payments
+
+Used by Payment page.
+
+- `POST /wholesalers/{wholesalerId}/payments/create`
+- `POST /wholesalers/{wholesalerId}/payments/list`
+
+Payload should include:
+
+```text
+partyType=CUSTOMER/SUPPLIER
+partyAccountId
+paymentMode=CASH/BOX/BOTH
+cashAmount
+boxType returns
+jamanotAmount
+note
+```
+
+The payment API must update:
+
+```text
+payments
+transactions
+account balance
+customer jamanot
+box balances
+box inventory
+box ledger
+```
+
+#### 4. Transactions Dashboard
+
+Used by transaction list, filters, and export.
+
+- `POST /wholesalers/{wholesalerId}/transactions/list`
+
+Request fields:
+
+```text
+type=SALE/PAYMENT
+fromDate=
+toDate=
+phone=
+page=
+size=
+```
+
+- `POST /wholesalers/{wholesalerId}/transactions/export`
+  - Can return PDF later.
+  - Initial implementation may return filtered report data and let frontend print/export.
+
+#### 5. Box Dashboard
+
+Used by Box Dashboard.
+
+- `POST /wholesalers/{wholesalerId}/boxes/dashboard`
+  - Returns total boxes, in shop, with suppliers, with customers, lost/damaged, and per-type breakdown.
+
+- `POST /wholesalers/{wholesalerId}/boxes/purchase/create`
+  - Adds newly purchased boxes to wholesaler inventory.
+
+- `POST /wholesalers/{wholesalerId}/boxes/lost-damaged/create`
+  - Marks boxes as lost or damaged.
+
+Later box APIs:
+
+- `POST /wholesalers/{wholesalerId}/boxes/ledger/list`
+- `POST /wholesalers/{wholesalerId}/boxes/balances/list`
+
+#### 6. Supplier Profile
+
+Used by supplier detail page.
+
+- `POST /wholesalers/{wholesalerId}/suppliers/list/{wholesalerSupplierId}`
+- `POST /wholesalers/{wholesalerId}/suppliers/list/{wholesalerSupplierId}/inventory`
+- `POST /wholesalers/{wholesalerId}/suppliers/list/{wholesalerSupplierId}/transactions`
+- `POST /wholesalers/{wholesalerId}/suppliers/list/{wholesalerSupplierId}/due-summary`
+
+#### 7. Customer Profile
+
+Used by customer detail page.
+
+- `POST /wholesalers/{wholesalerId}/customers/list/{wholesalerCustomerId}`
+- `POST /wholesalers/{wholesalerId}/customers/list/{wholesalerCustomerId}/transactions`
+- `POST /wholesalers/{wholesalerId}/customers/list/{wholesalerCustomerId}/due-summary`
+- `POST /wholesalers/{wholesalerId}/customers/list/{wholesalerCustomerId}/box-summary`
+
+### Recommended Implementation Order
+
+1. `POST /wholesalers/{wholesalerId}/inventory/list`
+2. Connect landing page and sale product dropdown to real inventory.
+3. `POST /wholesalers/{wholesalerId}/sales/create`
+4. `POST /wholesalers/{wholesalerId}/transactions/list`
+5. `POST /wholesalers/{wholesalerId}/payments/create`
+6. Box dashboard APIs.
+7. Supplier/customer detail APIs.
+
+This order keeps development stable because inventory is the base for sales, and sales/payments are the base for transactions.
 
 ## Auth API
 
@@ -155,13 +380,13 @@ Base path:
 List wholesalers:
 
 ```http
-GET /admin/wholesalers
+POST /admin/wholesalers/list
 ```
 
 Create wholesaler:
 
 ```http
-POST /admin/wholesalers
+POST /admin/wholesalers/create
 ```
 
 Payload:
@@ -197,13 +422,13 @@ Base path:
 List supplier accounts:
 
 ```http
-GET /wholesalers/{wholesalerId}/suppliers
+POST /wholesalers/{wholesalerId}/suppliers/list
 ```
 
 Create/connect supplier:
 
 ```http
-POST /wholesalers/{wholesalerId}/suppliers
+POST /wholesalers/{wholesalerId}/suppliers/create
 ```
 
 Payload:
@@ -228,13 +453,13 @@ Behavior:
 List customer accounts:
 
 ```http
-GET /wholesalers/{wholesalerId}/customers
+POST /wholesalers/{wholesalerId}/customers/list
 ```
 
 Create/connect customer:
 
 ```http
-POST /wholesalers/{wholesalerId}/customers
+POST /wholesalers/{wholesalerId}/customers/create
 ```
 
 Payload:
