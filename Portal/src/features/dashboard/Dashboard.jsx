@@ -1,31 +1,31 @@
 import { useEffect, useState } from 'react';
 import {
   LayoutGrid, Package, Truck, Users, UserCheck,
-  ArrowLeftRight, CreditCard, LogOut,
+  ArrowLeftRight, CreditCard,
 } from 'lucide-react';
-import { useAuth } from '../context/AuthContext';
-import Navbar from '../components/Navbar';
-import BoxDashboard from '../components/BoxDashboard';
-import SuppliersList from '../components/SuppliersList';
-import CustomersList from '../components/CustomersList';
-import TransactionForm from '../components/TransactionForm';
-import TransactionsList from '../components/TransactionsList';
-import AddProducts from '../components/AddProducts';
-import StoreInventory from '../components/StoreInventory';
-import { useData } from '../context/DataContext';
+import { useAuth } from '../auth/AuthContext';
+import Navbar from '../../shared/components/Navbar';
+import CratesDashboard from '../crates/CratesDashboard';
+import SuppliersList from '../suppliers/SuppliersList';
+import CustomersList from '../customers/CustomersList';
+import TransactionForm from '../sales/TransactionForm';
+import TransactionsList from '../transactions/TransactionsList';
+import AddProducts from '../inventory/AddProducts';
+import StoreInventory from '../inventory/StoreInventory';
+import { useData } from '../../data/DataContext';
 
 const tabs = [
   { id: 'inventory',     label: 'Inventory',     icon: LayoutGrid },
   { id: 'add-products',  label: 'Shipment',       icon: Truck },
   { id: 'suppliers',     label: 'Suppliers',      icon: UserCheck },
   { id: 'customers',     label: 'Customers',      icon: Users },
-  { id: 'dashboard',     label: 'Crate Dashboard',icon: Package },
+  { id: 'dashboard',     label: 'Crates',        icon: Package },
   { id: 'transactions',  label: 'Transactions',   icon: ArrowLeftRight },
   { id: 'payment',       label: 'Payments',       icon: CreditCard },
 ];
 
 const Dashboard = () => {
-  const { admin: wholesaler, logout } = useAuth();
+  const { admin: wholesaler } = useAuth();
   const { isLoading, dataError } = useData();
   const [activeTab, setActiveTab] = useState('inventory');
   const [showTransactionModal, setShowTransactionModal] = useState(false);
@@ -48,7 +48,7 @@ const Dashboard = () => {
         <div className="mb-5 welcome-banner">
           <div className="flex flex-col items-start gap-2">
             <div>
-              <h2 className="mb-1 bg-gradient-to-r from-[#255f60] to-[#307D7E] bg-clip-text text-2xl font-extrabold text-transparent md:text-3xl">
+              <h2 className="mb-1 text-2xl font-extrabold text-slate-900 md:text-3xl">
                 Welcome back, {wholesaler?.fullName || 'Wholesaler'}
               </h2>
               <p className="text-sm font-medium text-slate-600">
@@ -57,22 +57,12 @@ const Dashboard = () => {
               </p>
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">Status</p>
-              <div className="mt-1 flex items-center gap-2">
-                <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-emerald-500" />
-                <span className="text-sm font-semibold text-emerald-700">Active</span>
-              </div>
+          <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">Status</p>
+            <div className="mt-1 flex items-center gap-2">
+              <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-emerald-500" />
+              <span className="text-sm font-semibold text-emerald-700">Active</span>
             </div>
-            <button
-              onClick={logout}
-              className="btn-secondary flex items-center gap-2"
-              title="Sign out"
-            >
-              <LogOut size={15} />
-              <span className="hidden sm:inline">Sign out</span>
-            </button>
           </div>
         </div>
 
@@ -142,7 +132,7 @@ const Dashboard = () => {
                   </div>
                 )}
                 {activeTab === 'inventory'    && <StoreInventory onAddProducts={() => setActiveTab('add-products')} />}
-                {activeTab === 'dashboard'    && <BoxDashboard />}
+                {activeTab === 'dashboard'    && <CratesDashboard />}
                 {activeTab === 'add-products' && <AddProducts />}
                 {activeTab === 'suppliers'    && <SuppliersList />}
                 {activeTab === 'customers'    && <CustomersList />}

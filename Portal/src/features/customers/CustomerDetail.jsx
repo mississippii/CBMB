@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { useData } from '../context/DataContext'
+import { useData } from '../../data/DataContext'
 
 const formatCurrency = (value) => '৳ ' + (Number(value) || 0).toLocaleString()
 const formatAmount = (transaction) => {
@@ -84,7 +84,7 @@ const CustomerDetail = ({ customerId, onBack }) => {
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-2xl font-extrabold text-slate-950">{customer.name}</h2>
-                <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-bold text-[#307D7E]">
+                <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-bold text-[#1d63ed]">
                   {customer.type}
                 </span>
               </div>
@@ -123,7 +123,7 @@ const CustomerDetail = ({ customerId, onBack }) => {
               <h3>Payment Summary</h3>
               <p>All sale and payment transactions for this customer.</p>
             </div>
-            <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-[#307D7E]">
+            <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-[#1d63ed]">
               {isProfileLoading ? 'Loading' : customerTransactions.length + ' entries'}
             </span>
           </div>
@@ -186,8 +186,8 @@ const CustomerDetail = ({ customerId, onBack }) => {
           </div>
 
           <div className="mt-5 rounded-xl bg-emerald-50 p-4">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-[#307D7E]">Crate Jamanot</p>
-            <p className="mt-1 text-xl font-extrabold text-[#255f60]">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-[#1d63ed]">Crate Jamanot</p>
+            <p className="mt-1 text-xl font-extrabold text-[#1755c9]">
               {formatCurrency(customer.boxJamanot || 0)}
             </p>
           </div>

@@ -175,6 +175,41 @@ public class PaymentService {
     }
 
     @Transactional
+    public PaymentOperationResponse borrowCustomerCrates(Long wholesalerId, org.example.dto.CustomerCrateBorrowRequest request) {
+        Wholesaler wholesaler = findWholesaler(wholesalerId);
+        WholesalerCustomer customerAccount = findCustomerAccount(wholesalerId, request.wholesalerCustomerId());
+        int bangla = nonNegativeInt(request.banglaCrates(), "Bangla crate quantity cannot be negative.");
+        int china = nonNegativeInt(request.chinaCrates(), "China crate quantity cannot be negative.");
+        int total = bangla + china;
+        if (total == 0) {
+            throw new BadRequestException("Enter at least one crate to borrow.");
+        }
+        BigDecimal jamanot = nonNegative(request.jamanotAmount(), "Jamanot amount cannot be negative.");
+
+        if (bangla > 0) {
+            applyCustomerCrateBorrow(wholesaler, customerAccount, "BANGLA", bangla, request.note());
+        }
+        if (china > 0) {
+            applyCustomerCrateBorrow(wholesaler, customerAccount, "CHINA", china, request.note());
+        }
+
+        BigDecimal previousJamanot = money(customerAccount.getJamanotBalance() == null ? BigDecimal.ZERO : customerAccount.getJamanotBalance());
+        BigDecimal jamanotAfter = money(previousJamanot.add(jamanot));
+        if (jamanot.signum() > 0) {
+            customerAccount.setJamanotBalance(jamanotAfter);
+            wholesalerCustomerRepository.save(customerAccount);
+        }
+
+        BigDecimal currentDue = currentBalance(wholesaler, PartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), customerAccount.getOpeningDue());
+        String description = "Customer crate borrow — B:" + bangla + " C:" + china
+                + (jamanot.signum() > 0 ? " · Jamanot ৳" + jamanot.toPlainString() : "");
+        Transaction transaction = savePaymentTransaction(
+                wholesaler.getId(), null, customerAccount.getId(), null, BigDecimal.ZERO, currentDue, description
+        );
+        return response(transaction, null, null, customerAccount.getId(), null, currentDue, currentDue, BigDecimal.ZERO, bangla, china, previousJamanot, jamanotAfter, "CUSTOMER_CRATE_BORROW");
+    }
+
+    @Transactional
     public PaymentOperationResponse giveSupplierCrates(Long wholesalerId, SupplierCrateRequest request) {
         return moveSupplierCrates(wholesalerId, request, true);
     }
@@ -242,11 +277,37 @@ public class PaymentService {
 
         BigDecimal currentDue = currentBalance(wholesaler, PartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), supplierAccount.getOpeningDue());
         String operationType = giveToSupplier ? "SUPPLIER_CRATE_GIVE" : "SUPPLIER_CRATE_RETURN";
+        String verb = giveToSupplier ? "Crates given to supplier" : "Crates returned from supplier";
+        String description = verb + " — B:" + bangla + " C:" + china;
         Transaction transaction = savePaymentTransaction(
-                wholesaler.getId(), null, null, supplierAccount.getId(), BigDecimal.ZERO, currentDue,
-                operationType + " for supplier #" + supplierAccount.getId()
+                wholesaler.getId(), null, null, supplierAccount.getId(), BigDecimal.ZERO, currentDue, description
         );
         return response(transaction, null, null, null, supplierAccount.getId(), currentDue, currentDue, BigDecimal.ZERO, bangla, china, BigDecimal.ZERO, BigDecimal.ZERO, operationType);
+    }
+
+    private void applyCustomerCrateBorrow(Wholesaler wholesaler, WholesalerCustomer customerAccount, String crateTypeValue, int quantity, String note) {
+        BoxType boxType = findBoxType(wholesaler.getId(), crateTypeValue);
+        BoxInventory inventory = findBoxInventory(wholesaler, boxType);
+        if (inventory.getInHand() < quantity) {
+            throw new BadRequestException("Not enough " + crateTypeValue + " crates in shop.");
+        }
+        BoxBalance balance = boxBalanceRepository
+                .findByWholesaler_IdAndPartyTypeAndPartyAccountIdAndBoxType_Id(wholesaler.getId(), PartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), boxType.getId())
+                .orElseGet(() -> {
+                    BoxBalance newBalance = new BoxBalance();
+                    newBalance.setWholesaler(wholesaler);
+                    newBalance.setBoxType(boxType);
+                    newBalance.setPartyType(PartyType.WHOLESALER_CUSTOMER);
+                    newBalance.setPartyAccountId(customerAccount.getId());
+                    newBalance.setBoxesDue(0);
+                    return newBalance;
+                });
+        inventory.setInHand(inventory.getInHand() - quantity);
+        inventory.setWithCustomers(inventory.getWithCustomers() + quantity);
+        balance.setBoxesDue(balance.getBoxesDue() + quantity);
+        boxInventoryRepository.save(inventory);
+        boxBalanceRepository.save(balance);
+        saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), BoxMovementType.GIVEN_TO_CUSTOMER, quantity, null, note);
     }
 
     private void applyCustomerCrateReturn(Wholesaler wholesaler, WholesalerCustomer customerAccount, String crateTypeValue, int quantity, Long paymentId, String note) {
@@ -272,17 +333,22 @@ public class PaymentService {
     private void applySupplierCrateMovement(Wholesaler wholesaler, WholesalerSupplier supplierAccount, String crateTypeValue, int quantity, boolean giveToSupplier, String note) {
         BoxType boxType = findBoxType(wholesaler.getId(), crateTypeValue);
         BoxInventory inventory = findBoxInventory(wholesaler, boxType);
-        BoxBalance balance = boxBalanceRepository
-                .findByWholesaler_IdAndPartyTypeAndPartyAccountIdAndBoxType_Id(wholesaler.getId(), PartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), boxType.getId())
-                .orElseGet(() -> {
-                    BoxBalance newBalance = new BoxBalance();
-                    newBalance.setWholesaler(wholesaler);
-                    newBalance.setBoxType(boxType);
-                    newBalance.setPartyType(PartyType.WHOLESALER_SUPPLIER);
-                    newBalance.setPartyAccountId(supplierAccount.getId());
-                    newBalance.setBoxesDue(0);
-                    return newBalance;
-                });
+        var existing = boxBalanceRepository
+                .findByWholesaler_IdAndPartyTypeAndPartyAccountIdAndBoxType_Id(wholesaler.getId(), PartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), boxType.getId());
+
+        if (!giveToSupplier && existing.isEmpty()) {
+            throw new BadRequestException("This supplier has no " + crateTypeValue + " crate balance to return.");
+        }
+
+        BoxBalance balance = existing.orElseGet(() -> {
+            BoxBalance newBalance = new BoxBalance();
+            newBalance.setWholesaler(wholesaler);
+            newBalance.setBoxType(boxType);
+            newBalance.setPartyType(PartyType.WHOLESALER_SUPPLIER);
+            newBalance.setPartyAccountId(supplierAccount.getId());
+            newBalance.setBoxesDue(0);
+            return newBalance;
+        });
 
         if (giveToSupplier) {
             if (inventory.getInHand() < quantity) {

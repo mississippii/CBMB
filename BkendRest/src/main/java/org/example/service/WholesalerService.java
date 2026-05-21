@@ -85,17 +85,32 @@ public class WholesalerService {
         Wholesaler wholesaler = findWholesaler(wholesalerId);
         String name = requireText(request.name(), "Supplier name is required.");
         String phone = requireText(request.phone(), "Supplier phone is required.");
-        String address = clean(request.address());
+        String businessName = clean(request.businessName());
+        String location = clean(request.location());
 
         Supplier supplier = supplierRepository.findByPhone(phone)
                 .orElseGet(() -> {
                     Supplier newSupplier = new Supplier();
                     newSupplier.setName(name);
+                    newSupplier.setBusinessName(businessName);
                     newSupplier.setPhone(phone);
-                    newSupplier.setAddress(address);
+                    newSupplier.setAddress(location);
                     newSupplier.setStatus(RecordStatus.ACTIVE);
                     return supplierRepository.save(newSupplier);
                 });
+
+        boolean changed = false;
+        if (businessName != null && !businessName.isBlank() && supplier.getBusinessName() == null) {
+            supplier.setBusinessName(businessName);
+            changed = true;
+        }
+        if (location != null && !location.isBlank() && (supplier.getAddress() == null || supplier.getAddress().isBlank())) {
+            supplier.setAddress(location);
+            changed = true;
+        }
+        if (changed) {
+            supplierRepository.save(supplier);
+        }
 
         if (wholesalerSupplierRepository.existsByWholesaler_IdAndSupplier_Id(wholesalerId, supplier.getId())) {
             throw new BadRequestException("Supplier is already connected to this wholesaler.");
@@ -111,13 +126,67 @@ public class WholesalerService {
         return toSupplierResponse(wholesalerSupplierRepository.save(account));
     }
 
+    @Transactional
+    public SupplierAccountResponse updateSupplier(Long wholesalerId, org.example.dto.UpdateSupplierRequest request) {
+        if (request == null || request.accountId() == null) {
+            throw new BadRequestException("Supplier account id is required.");
+        }
+        WholesalerSupplier account = wholesalerSupplierRepository
+                .findByWholesaler_IdAndId(wholesalerId, request.accountId())
+                .orElseThrow(() -> new BadRequestException("Supplier account not found."));
+
+        Supplier supplier = account.getSupplier();
+        String name = requireText(request.name(), "Supplier name is required.");
+        supplier.setName(name);
+        supplier.setBusinessName(clean(request.businessName()));
+        supplier.setAddress(clean(request.location()));
+        supplierRepository.save(supplier);
+
+        account.setCommissionRate(nonNegative(request.commissionRate(), "Commission rate cannot be negative."));
+        return toSupplierResponse(wholesalerSupplierRepository.save(account));
+    }
+
     @Transactional(readOnly = true)
-    public List<SupplierAccountResponse> listSuppliers(Long wholesalerId) {
+    public List<SupplierAccountResponse> listSuppliers(Long wholesalerId, boolean includeDisabled) {
         findWholesaler(wholesalerId);
-        return wholesalerSupplierRepository.findByWholesaler_IdOrderByCreatedAtDesc(wholesalerId)
-                .stream()
-                .map(this::toSupplierResponse)
-                .toList();
+        var rows = includeDisabled
+                ? wholesalerSupplierRepository.findByWholesaler_IdOrderByCreatedAtDesc(wholesalerId)
+                : wholesalerSupplierRepository.findByWholesaler_IdAndStatusOrderByCreatedAtDesc(wholesalerId, RecordStatus.ACTIVE);
+        return rows.stream().map(this::toSupplierResponse).toList();
+    }
+
+    @Transactional
+    public SupplierAccountResponse disableSupplier(Long wholesalerId, Long accountId) {
+        Wholesaler wholesaler = findWholesaler(wholesalerId);
+        if (accountId == null) throw new BadRequestException("Supplier account id is required.");
+        WholesalerSupplier account = wholesalerSupplierRepository.findByWholesaler_IdAndId(wholesalerId, accountId)
+                .orElseThrow(() -> new BadRequestException("Supplier account not found."));
+
+        if (account.getStatus() != RecordStatus.ACTIVE) {
+            throw new BadRequestException("Supplier is already disabled.");
+        }
+
+        BigDecimal due = currentBalance(wholesaler.getId(), PartyType.WHOLESALER_SUPPLIER, account.getId(), account.getOpeningDue());
+        CrateDue crates = crateDue(wholesaler.getId(), PartyType.WHOLESALER_SUPPLIER, account.getId());
+        if (due.signum() > 0) {
+            throw new BadRequestException("Cannot disable — outstanding due ৳" + due.toPlainString() + ". Settle first.");
+        }
+        if (crates.total() > 0) {
+            throw new BadRequestException("Cannot disable — " + crates.total() + " crates still with supplier. Settle crates first.");
+        }
+
+        account.setStatus(RecordStatus.DISABLED);
+        return toSupplierResponse(wholesalerSupplierRepository.save(account));
+    }
+
+    @Transactional
+    public SupplierAccountResponse enableSupplier(Long wholesalerId, Long accountId) {
+        findWholesaler(wholesalerId);
+        if (accountId == null) throw new BadRequestException("Supplier account id is required.");
+        WholesalerSupplier account = wholesalerSupplierRepository.findByWholesaler_IdAndId(wholesalerId, accountId)
+                .orElseThrow(() -> new BadRequestException("Supplier account not found."));
+        account.setStatus(RecordStatus.ACTIVE);
+        return toSupplierResponse(wholesalerSupplierRepository.save(account));
     }
 
     @Transactional
@@ -158,12 +227,50 @@ public class WholesalerService {
     }
 
     @Transactional(readOnly = true)
-    public List<CustomerAccountResponse> listCustomers(Long wholesalerId) {
+    public List<CustomerAccountResponse> listCustomers(Long wholesalerId, boolean includeDisabled) {
         findWholesaler(wholesalerId);
-        return wholesalerCustomerRepository.findByWholesaler_IdAndStatusOrderByCreatedAtDesc(wholesalerId, RecordStatus.ACTIVE)
-                .stream()
-                .map(this::toCustomerResponse)
-                .toList();
+        var rows = includeDisabled
+                ? wholesalerCustomerRepository.findByWholesaler_IdOrderByCreatedAtDesc(wholesalerId)
+                : wholesalerCustomerRepository.findByWholesaler_IdAndStatusOrderByCreatedAtDesc(wholesalerId, RecordStatus.ACTIVE);
+        return rows.stream().map(this::toCustomerResponse).toList();
+    }
+
+    @Transactional
+    public CustomerAccountResponse disableCustomer(Long wholesalerId, Long accountId) {
+        Wholesaler wholesaler = findWholesaler(wholesalerId);
+        if (accountId == null) throw new BadRequestException("Customer account id is required.");
+        WholesalerCustomer account = wholesalerCustomerRepository.findByWholesaler_IdAndId(wholesalerId, accountId)
+                .orElseThrow(() -> new BadRequestException("Customer account not found."));
+
+        if (account.getStatus() != RecordStatus.ACTIVE) {
+            throw new BadRequestException("Customer is already disabled.");
+        }
+
+        BigDecimal due = currentBalance(wholesaler.getId(), PartyType.WHOLESALER_CUSTOMER, account.getId(), account.getOpeningDue());
+        CrateDue crates = crateDue(wholesaler.getId(), PartyType.WHOLESALER_CUSTOMER, account.getId());
+        BigDecimal jamanot = account.getJamanotBalance() == null ? BigDecimal.ZERO : account.getJamanotBalance();
+        if (due.signum() > 0) {
+            throw new BadRequestException("Cannot disable — customer owes ৳" + due.toPlainString() + ". Settle first.");
+        }
+        if (crates.total() > 0) {
+            throw new BadRequestException("Cannot disable — customer still holds " + crates.total() + " crates. Recover first.");
+        }
+        if (jamanot.signum() > 0) {
+            throw new BadRequestException("Cannot disable — ৳" + jamanot.toPlainString() + " jamanot still with you. Refund first.");
+        }
+
+        account.setStatus(RecordStatus.DISABLED);
+        return toCustomerResponse(wholesalerCustomerRepository.save(account));
+    }
+
+    @Transactional
+    public CustomerAccountResponse enableCustomer(Long wholesalerId, Long accountId) {
+        findWholesaler(wholesalerId);
+        if (accountId == null) throw new BadRequestException("Customer account id is required.");
+        WholesalerCustomer account = wholesalerCustomerRepository.findByWholesaler_IdAndId(wholesalerId, accountId)
+                .orElseThrow(() -> new BadRequestException("Customer account not found."));
+        account.setStatus(RecordStatus.ACTIVE);
+        return toCustomerResponse(wholesalerCustomerRepository.save(account));
     }
 
     @Transactional(readOnly = true)
@@ -228,6 +335,7 @@ public class WholesalerService {
                 wholesalerId,
                 supplier.getId(),
                 supplier.getName(),
+                supplier.getBusinessName(),
                 supplier.getPhone(),
                 supplier.getAddress(),
                 account.getCommissionRate(),

@@ -38,8 +38,28 @@ public class WholesalerController {
     }
 
     @PostMapping("/suppliers/list")
-    public List<SupplierAccountResponse> listSuppliers(@PathVariable Long wholesalerId) {
-        return wholesalerService.listSuppliers(wholesalerId);
+    public List<SupplierAccountResponse> listSuppliers(
+            @PathVariable Long wholesalerId,
+            @RequestBody(required = false) java.util.Map<String, Object> body
+    ) {
+        boolean includeDisabled = body != null && Boolean.TRUE.equals(body.get("includeDisabled"));
+        return wholesalerService.listSuppliers(wholesalerId, includeDisabled);
+    }
+
+    @PostMapping("/suppliers/disable")
+    public SupplierAccountResponse disableSupplier(
+            @PathVariable Long wholesalerId,
+            @RequestBody org.example.dto.AccountStatusRequest request
+    ) {
+        return wholesalerService.disableSupplier(wholesalerId, request == null ? null : request.accountId());
+    }
+
+    @PostMapping("/suppliers/enable")
+    public SupplierAccountResponse enableSupplier(
+            @PathVariable Long wholesalerId,
+            @RequestBody org.example.dto.AccountStatusRequest request
+    ) {
+        return wholesalerService.enableSupplier(wholesalerId, request == null ? null : request.accountId());
     }
 
     @PostMapping("/suppliers/create")
@@ -59,9 +79,37 @@ public class WholesalerController {
         return wholesalerService.getSupplierProfile(wholesalerId, request == null ? null : request.accountId());
     }
 
+    @PostMapping("/suppliers/update")
+    public SupplierAccountResponse updateSupplier(
+            @PathVariable Long wholesalerId,
+            @RequestBody org.example.dto.UpdateSupplierRequest request
+    ) {
+        return wholesalerService.updateSupplier(wholesalerId, request);
+    }
+
     @PostMapping("/customers/list")
-    public List<CustomerAccountResponse> listCustomers(@PathVariable Long wholesalerId) {
-        return wholesalerService.listCustomers(wholesalerId);
+    public List<CustomerAccountResponse> listCustomers(
+            @PathVariable Long wholesalerId,
+            @RequestBody(required = false) java.util.Map<String, Object> body
+    ) {
+        boolean includeDisabled = body != null && Boolean.TRUE.equals(body.get("includeDisabled"));
+        return wholesalerService.listCustomers(wholesalerId, includeDisabled);
+    }
+
+    @PostMapping("/customers/disable")
+    public CustomerAccountResponse disableCustomer(
+            @PathVariable Long wholesalerId,
+            @RequestBody org.example.dto.AccountStatusRequest request
+    ) {
+        return wholesalerService.disableCustomer(wholesalerId, request == null ? null : request.accountId());
+    }
+
+    @PostMapping("/customers/enable")
+    public CustomerAccountResponse enableCustomer(
+            @PathVariable Long wholesalerId,
+            @RequestBody org.example.dto.AccountStatusRequest request
+    ) {
+        return wholesalerService.enableCustomer(wholesalerId, request == null ? null : request.accountId());
     }
 
     @PostMapping("/customers/create")

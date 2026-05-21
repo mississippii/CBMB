@@ -1,8 +1,10 @@
 package org.example.controller;
 
 import org.example.dto.BoxDashboardResponse;
+import org.example.dto.BoxLossStatsResponse;
 import org.example.dto.BoxQuantityRequest;
 import org.example.service.BoxService;
+import java.util.Map;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
@@ -40,5 +42,14 @@ public class BoxController {
             @RequestBody BoxQuantityRequest request
     ) {
         return boxService.markLostOrDamaged(wholesalerId, request);
+    }
+
+    @PostMapping("/loss-stats")
+    public BoxLossStatsResponse getLossStats(
+            @PathVariable Long wholesalerId,
+            @RequestBody(required = false) Map<String, Integer> body
+    ) {
+        Integer months = body == null ? null : body.get("months");
+        return boxService.getLossStats(wholesalerId, months);
     }
 }

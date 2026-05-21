@@ -2,6 +2,8 @@ package org.example.service;
 
 import java.util.List;
 import org.example.dto.CreateWholesalerRequest;
+import org.example.dto.PageResponse;
+import org.example.dto.WholesalerListRequest;
 import org.example.dto.WholesalerResponse;
 import org.example.exception.BadRequestException;
 import org.example.model.BoxType;
@@ -12,6 +14,9 @@ import org.example.model.Wholesaler;
 import org.example.repository.BoxTypeRepository;
 import org.example.repository.UserRepository;
 import org.example.repository.WholesalerRepository;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -93,6 +98,28 @@ public class AdminWholesalerService {
                 .stream()
                 .map(this::toResponse)
                 .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public PageResponse<WholesalerResponse> listWholesalersPaged(WholesalerListRequest request) {
+        int page = (request == null || request.page() == null || request.page() < 0) ? 0 : request.page();
+        int size = (request == null || request.size() == null || request.size() <= 0 || request.size() > 200)
+                ? 20 : request.size();
+        String phone = request == null ? null : request.phone();
+        String normalized = phone == null ? "" : phone.replaceAll("\\D", "").trim();
+
+        Pageable pageable = PageRequest.of(page, size);
+        Page<Wholesaler> result = normalized.isEmpty()
+                ? wholesalerRepository.findAllByOrderByCreatedAtDesc(pageable)
+                : wholesalerRepository.findByPhoneContainingOrderByCreatedAtDesc(normalized, pageable);
+
+        return new PageResponse<>(
+                result.getContent().stream().map(this::toResponse).toList(),
+                result.getNumber(),
+                result.getSize(),
+                result.getTotalElements(),
+                result.getTotalPages()
+        );
     }
 
     private void createDefaultBoxTypes(Wholesaler wholesaler) {

@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { useData } from '../context/DataContext';
+import { useData } from '../../data/DataContext';
 
 const formatCurrency = (value) => `৳ ${(Number(value) || 0).toLocaleString()}`;
 

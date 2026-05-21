@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useEffect, useState, useContext } from 'react';
-import { useAuth } from './AuthContext';
+import { useAuth } from '../features/auth/AuthContext';
 import { apiPaths, postJson } from '../services/apiClient';
 
 const DataContext = createContext();
@@ -119,11 +119,10 @@ const mapSupplierAccount = (account) => ({
   supplierId: account.supplierId,
   wholesalerId: account.wholesalerId,
   name: account.name,
+  businessName: account.businessName || '',
   contact: account.phone,
   phone: account.phone,
-  location: account.address || '',
-  address: account.address || '',
-  bankDetails: '',
+  location: account.location || '',
   commissionRate: Number(account.commissionRate) || 0,
   totalSales: roundMoney(Number(account.totalSales) || 0),
   totalCommissionEarned: roundMoney(Number(account.totalCommissionEarned) || 0),
@@ -134,6 +133,7 @@ const mapSupplierAccount = (account) => ({
   boxesHoldingWooden: Number(account.banglaCratesDue) || 0,
   boxesHoldingPlastic: Number(account.chinaCratesDue) || 0,
   totalBoxesHolding: Number(account.totalCratesDue) || 0,
+  status: account.status || 'ACTIVE',
 });
 
 const mapCustomerAccount = (account) => ({
@@ -152,6 +152,7 @@ const mapCustomerAccount = (account) => ({
   boxesHoldingWooden: Number(account.banglaCratesDue) || 0,
   boxesHoldingPlastic: Number(account.chinaCratesDue) || 0,
   totalBoxesHolding: Number(account.totalCratesDue) || 0,
+  status: account.status || 'ACTIVE',
 });
 
 
@@ -277,11 +278,7 @@ export const DataProvider = ({ children }) => {
         setShipments(asArray(shipmentItems.data).map(mapShipment));
         setCatalogProducts(asArray(productCatalog.data));
         setBoxInventory(mapBoxDashboard(boxDashboard.data));
-
-        const failedSections = [supplierAccounts, customerAccounts, productCatalog, inventoryItems, boxDashboard, transactionItems, shipmentItems]
-          .filter((section) => section.error)
-          .map((section) => section.label);
-        setDataError(failedSections.length ? 'Unable to load: ' + failedSections.join(', ') + '.' : '');
+        setDataError('');
       } catch (error) {
         if (isActive) {
           setDataError(error.message || 'Failed to load wholesaler data.');
@@ -307,8 +304,9 @@ export const DataProvider = ({ children }) => {
 
     const payload = {
       name: supplierData.name,
+      businessName: supplierData.businessName || null,
       phone: supplierData.contact || supplierData.phone,
-      address: supplierData.location || supplierData.address,
+      location: supplierData.location || null,
       commissionRate: Number(supplierData.commissionRate) || 0,
       openingDue: Number(supplierData.openingDue) || 0,
     };
@@ -317,6 +315,65 @@ export const DataProvider = ({ children }) => {
     const newSupplier = mapSupplierAccount(account);
     setSuppliers((prev) => [...prev, newSupplier]);
     return newSupplier;
+  };
+
+  const updateSupplier = async (supplierData) => {
+    if (!admin?.wholesalerId) {
+      throw new Error('Wholesaler profile not found for this user.');
+    }
+    const payload = {
+      accountId: Number(supplierData.id),
+      name: supplierData.name,
+      businessName: supplierData.businessName || null,
+      location: supplierData.location || null,
+      commissionRate: Number(supplierData.commissionRate) || 0,
+    };
+    const account = await postJson(apiPaths.wholesalerSuppliersUpdate(admin.wholesalerId), payload);
+    const updated = mapSupplierAccount(account);
+    setSuppliers((prev) => prev.map((s) => (s.id === updated.id ? { ...s, ...updated } : s)));
+    return updated;
+  };
+
+  const reloadSuppliers = async (includeDisabled = false) => {
+    if (!admin?.wholesalerId) return;
+    try {
+      const data = await postJson(apiPaths.wholesalerSuppliersList(admin.wholesalerId), { includeDisabled });
+      setSuppliers(asArray(data).map(mapSupplierAccount));
+    } catch { /* keep existing */ }
+  };
+
+  const reloadCustomers = async (includeDisabled = false) => {
+    if (!admin?.wholesalerId) return;
+    try {
+      const data = await postJson(apiPaths.wholesalerCustomersList(admin.wholesalerId), { includeDisabled });
+      setCustomers(asArray(data).map(mapCustomerAccount));
+    } catch { /* keep existing */ }
+  };
+
+  const setSupplierStatus = async (supplierAccountId, enable) => {
+    if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
+    const path = enable ? apiPaths.wholesalerSuppliersEnable : apiPaths.wholesalerSuppliersDisable;
+    const account = await postJson(path(admin.wholesalerId), { accountId: Number(supplierAccountId) });
+    const updated = mapSupplierAccount(account);
+    setSuppliers((prev) => {
+      const exists = prev.some((s) => s.id === updated.id);
+      if (exists) return prev.map((s) => (s.id === updated.id ? { ...s, ...updated } : s));
+      return [...prev, updated];
+    });
+    return updated;
+  };
+
+  const setCustomerStatus = async (customerAccountId, enable) => {
+    if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
+    const path = enable ? apiPaths.wholesalerCustomersEnable : apiPaths.wholesalerCustomersDisable;
+    const account = await postJson(path(admin.wholesalerId), { accountId: Number(customerAccountId) });
+    const updated = mapCustomerAccount(account);
+    setCustomers((prev) => {
+      const exists = prev.some((c) => c.id === updated.id);
+      if (exists) return prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c));
+      return [...prev, updated];
+    });
+    return updated;
   };
 
   const addSupplierProduct = async (productData) => {
@@ -935,6 +992,16 @@ export const DataProvider = ({ children }) => {
     setBoxInventory((prev) => ({ ...prev, ...updates }));
   };
 
+  const refreshTransactions = async () => {
+    if (!admin?.wholesalerId) return;
+    try {
+      const data = await postJson(apiPaths.transactionsList(admin.wholesalerId));
+      setTransactions(asArray(data).map(mapTransaction));
+    } catch {
+      /* keep existing transactions on failure */
+    }
+  };
+
   const addBoxes = async (boxType, quantityInput) => {
     if (!admin?.wholesalerId) {
       throw new Error('Wholesaler profile not found for this user.');
@@ -949,6 +1016,7 @@ export const DataProvider = ({ children }) => {
     });
     const mapped = mapBoxDashboard(dashboard);
     setBoxInventory(mapped);
+    refreshTransactions();
     return mapped;
   };
 
@@ -967,6 +1035,7 @@ export const DataProvider = ({ children }) => {
     });
     const mapped = mapBoxDashboard(dashboard);
     setBoxInventory(mapped);
+    refreshTransactions();
     return mapped;
   };
 
@@ -983,7 +1052,13 @@ export const DataProvider = ({ children }) => {
         isLoading,
         dataError,
         addSupplier,
+        updateSupplier,
+        setSupplierStatus,
+        reloadSuppliers,
+        refreshTransactions,
         addCustomer,
+        setCustomerStatus,
+        reloadCustomers,
         addTransaction: recordSale,
         recordSale,
         recordAccountTransaction,

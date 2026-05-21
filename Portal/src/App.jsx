@@ -1,10 +1,11 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
-import { AuthProvider, useAuth } from './context/AuthContext';
-import { DataProvider } from './context/DataContext';
-import { ToastProvider } from './components/Toast';
-import Login from './pages/Login';
-import Dashboard from './pages/Dashboard';
-import AdminDashboard from './pages/AdminDashboard';
+import { AuthProvider, useAuth } from './features/auth/AuthContext';
+import { DataProvider } from './data/DataContext';
+import { LanguageProvider } from './shared/contexts/LanguageContext';
+import { ToastProvider } from './shared/components/Toast';
+import Login from './features/auth/Login';
+import Dashboard from './features/dashboard/Dashboard';
+import AdminDashboard from './features/admin/AdminDashboard';
 import './index.css';
 
 const getHomePath = (admin) => (admin?.role === 'ADMIN' ? '/admin' : '/dashboard');
@@ -46,13 +47,15 @@ function AppContent() {
 function App() {
   return (
     <Router>
-      <AuthProvider>
-        <DataProvider>
-          <ToastProvider>
-            <AppContent />
-          </ToastProvider>
-        </DataProvider>
-      </AuthProvider>
+      <LanguageProvider>
+        <AuthProvider>
+          <DataProvider>
+            <ToastProvider>
+              <AppContent />
+            </ToastProvider>
+          </DataProvider>
+        </AuthProvider>
+      </LanguageProvider>
     </Router>
   );
 }

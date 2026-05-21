@@ -1,10 +1,17 @@
 package org.example.service;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
+import java.time.YearMonth;
+import java.time.format.DateTimeFormatter;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
+import java.util.Map;
 import org.example.dto.BoxDashboardResponse;
 import org.example.dto.BoxInventoryTypeResponse;
+import org.example.dto.BoxLossStatsResponse;
 import org.example.dto.BoxQuantityRequest;
 import org.example.exception.BadRequestException;
 import org.example.model.BoxInventory;
@@ -75,6 +82,43 @@ public class BoxService {
         );
     }
 
+    @Transactional(readOnly = true)
+    public BoxLossStatsResponse getLossStats(Long wholesalerId, Integer monthsInput) {
+        findWholesaler(wholesalerId);
+        int months = (monthsInput == null || monthsInput <= 0 || monthsInput > 24) ? 3 : monthsInput;
+
+        YearMonth thisMonth = YearMonth.now();
+        LocalDateTime since = thisMonth.minusMonths(months - 1L).atDay(1).atStartOfDay();
+        List<Object[]> rows = boxLedgerRepository.findLostStats(wholesalerId, since);
+
+        // Pre-fill the last N months so the chart has zero buckets too
+        Map<String, long[]> map = new LinkedHashMap<>();
+        DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM");
+        for (int i = months - 1; i >= 0; i--) {
+            map.put(thisMonth.minusMonths(i).format(fmt), new long[]{0, 0});
+        }
+
+        for (Object[] row : rows) {
+            String month = (String) row[0];
+            String boxType = ((String) row[1]).toUpperCase();
+            long qty = ((Number) row[3]).longValue();
+            long[] entry = map.computeIfAbsent(month, k -> new long[]{0, 0});
+            if ("BANGLA".equals(boxType)) entry[0] += qty;
+            else if ("CHINA".equals(boxType)) entry[1] += qty;
+        }
+
+        List<BoxLossStatsResponse.MonthBucket> buckets = new ArrayList<>();
+        long totalBangla = 0, totalChina = 0;
+        for (Map.Entry<String, long[]> e : map.entrySet()) {
+            long b = e.getValue()[0];
+            long c = e.getValue()[1];
+            totalBangla += b;
+            totalChina += c;
+            buckets.add(new BoxLossStatsResponse.MonthBucket(e.getKey(), b, c, b + c));
+        }
+        return new BoxLossStatsResponse(months, totalBangla + totalChina, totalBangla, totalChina, buckets);
+    }
+
     @Transactional
     public BoxDashboardResponse addBoxes(Long wholesalerId, BoxQuantityRequest request) {
         Wholesaler wholesaler = findWholesaler(wholesalerId);
@@ -87,7 +131,7 @@ public class BoxService {
         boxInventoryRepository.save(inventory);
 
         saveLedger(wholesaler, boxType, BoxMovementType.PURCHASE, quantity, request.note());
-        saveTransaction(wholesalerId, "Crate purchase: " + quantity + " " + boxType.getName());
+        saveTransaction(wholesalerId, "Crate purchase — " + quantity + " " + boxType.getName() + " added to shop");
         return getDashboard(wholesalerId);
     }
 
@@ -108,7 +152,7 @@ public class BoxService {
         boxInventoryRepository.save(inventory);
 
         saveLedger(wholesaler, boxType, movementType, quantity, request.note());
-        saveTransaction(wholesalerId, "Crate " + movementType.name() + ": " + quantity + " " + boxType.getName());
+        saveTransaction(wholesalerId, quantity + " " + boxType.getName() + " crates marked " + movementType.name().toLowerCase());
         return getDashboard(wholesalerId);
     }
 

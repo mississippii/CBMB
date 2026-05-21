@@ -1,5 +1,5 @@
 import { useCallback, useMemo, useState } from 'react';
-import { useData } from '../context/DataContext';
+import { useData } from '../../data/DataContext';
 
 const toStartOfDay = (dateString) => new Date(`${dateString}T00:00:00`);
 const toEndOfDay = (dateString) => new Date(`${dateString}T23:59:59.999`);
@@ -192,6 +192,15 @@ const TransactionsList = () => {
 
   const renderDetails = (transaction) => {
     if (transaction.transactionType === 'Payment') {
+      // Crate-only operations (purchase, lost/damaged, customer borrow) have no
+      // paymentType but carry the meaningful description from the backend.
+      const hasPaymentType = String(transaction.paymentOperationType || '').trim().length > 0;
+      const hasParty = transaction.customer || transaction.supplier;
+      const description = String(transaction.note || '').trim();
+      if (!hasPaymentType && !hasParty && description) {
+        return description;
+      }
+
       const bangla = Number(transaction.boxReturnWooden || transaction.banglaCrates || 0);
       const china = Number(transaction.boxReturnPlastic || transaction.chinaCrates || 0);
       const parts = [getPaymentOperationLabel(transaction)];
@@ -257,13 +266,13 @@ const TransactionsList = () => {
             * { box-sizing: border-box; }
             body { margin: 0; color: #0f172a; font-family: Arial, Helvetica, sans-serif; padding: 24px 24px 52px; background: #ffffff; }
             .page { max-width: 1120px; margin: 0 auto; }
-            .header { border-bottom: 3px solid #307d7e; padding-bottom: 14px; margin-bottom: 20px; text-align: center; }
-            .logo { width: 48px; height: 48px; display: grid; place-items: center; margin: 0 auto 8px; border-radius: 14px; color: #fff; background: linear-gradient(135deg, #255f60, #307d7e); font-size: 18px; font-weight: 900; }
+            .header { border-bottom: 3px solid #1d63ed; padding-bottom: 14px; margin-bottom: 20px; text-align: center; }
+            .logo { width: 48px; height: 48px; display: grid; place-items: center; margin: 0 auto 8px; border-radius: 14px; color: #fff; background: linear-gradient(135deg, #1755c9, #1d63ed); font-size: 18px; font-weight: 900; }
             h1 { margin: 0; font-size: 21px; }
-            .solution { margin-top: 5px; color: #255f60; font-size: 11px; font-weight: 800; }
+            .solution { margin-top: 5px; color: #1755c9; font-size: 11px; font-weight: 800; }
             h2 { margin: 22px 0 8px; font-size: 15px; color: #0f172a; }
             table { width: 100%; border-collapse: collapse; font-size: 11px; margin-bottom: 16px; }
-            th { background: #e9f4f4; color: #255f60; text-align: left; padding: 8px; border: 1px solid #cbd5e1; font-size: 10px; text-transform: uppercase; }
+            th { background: #eff6ff; color: #1755c9; text-align: left; padding: 8px; border: 1px solid #cbd5e1; font-size: 10px; text-transform: uppercase; }
             td { padding: 8px; border: 1px solid #e2e8f0; vertical-align: top; color: #334155; line-height: 1.35; }
             tbody tr:nth-child(even) td { background: #f8fafc; }
             .right { text-align: right; white-space: nowrap; }
@@ -372,7 +381,7 @@ const TransactionsList = () => {
       <div className="supplier-panel">
         <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <h3>Transaction Ledger</h3>
-          <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-[#307D7E]">
+          <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-[#1d63ed]">
             {filteredTransactions.length} entries
           </span>
         </div>

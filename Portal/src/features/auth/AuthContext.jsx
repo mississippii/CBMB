@@ -1,6 +1,6 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useEffect, useState, useContext } from 'react';
-import { apiPaths, postJson } from '../services/apiClient';
+import { apiPaths, postJson } from '../../services/apiClient';
 
 const AuthContext = createContext();
 const AUTH_STORAGE_KEY = 'cbtrading-auth-v1';

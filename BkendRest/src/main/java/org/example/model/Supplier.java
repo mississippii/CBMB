@@ -22,6 +22,9 @@ public class Supplier {
     @Column(nullable = false, length = 150)
     private String name;
 
+    @Column(name = "business_name", length = 160)
+    private String businessName;
+
     @Column(nullable = false, length = 30)
     private String phone;
 
@@ -48,6 +51,14 @@ public class Supplier {
 
     public void setName(String name) {
         this.name = name;
+    }
+
+    public String getBusinessName() {
+        return businessName;
+    }
+
+    public void setBusinessName(String businessName) {
+        this.businessName = businessName;
     }
 
     public String getPhone() {

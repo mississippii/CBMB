@@ -1,5 +1,6 @@
 package org.example.controller;
 
+import org.example.dto.CustomerCrateBorrowRequest;
 import org.example.dto.CustomerSettlementRequest;
 import org.example.dto.PaymentOperationResponse;
 import org.example.dto.SupplierCrateRequest;
@@ -32,6 +33,15 @@ public class PaymentController {
             @RequestBody CustomerSettlementRequest request
     ) {
         return paymentService.settleCustomer(wholesalerId, request);
+    }
+
+    @PostMapping("/customer/crate-borrow")
+    @ResponseStatus(HttpStatus.CREATED)
+    public PaymentOperationResponse borrowCustomerCrates(
+            @PathVariable Long wholesalerId,
+            @RequestBody CustomerCrateBorrowRequest request
+    ) {
+        return paymentService.borrowCustomerCrates(wholesalerId, request);
     }
 
     @PostMapping("/supplier/product-pay")
