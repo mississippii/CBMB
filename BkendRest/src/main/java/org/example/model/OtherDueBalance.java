@@ -17,7 +17,8 @@ import lombok.Setter;
 @Getter
 @Setter
 @Entity
-@Table(name = "other_due_balances")
+@Table(name = "other_due_balances",
+        uniqueConstraints = @jakarta.persistence.UniqueConstraint(name = "uk_other_due_supplier_category", columnNames = {"wholesaler_id", "wholesaler_supplier_id", "category_id"}))
 public class OtherDueBalance {
 
     @Id

@@ -20,7 +20,12 @@ import lombok.Setter;
 @Getter
 @Setter
 @Entity
-@Table(name = "supplier_deliveries")
+@Table(name = "supplier_deliveries",
+        indexes = {
+                @jakarta.persistence.Index(name = "idx_supplier_deliveries_wholesaler_date", columnList = "wholesaler_id,delivery_date"),
+                @jakarta.persistence.Index(name = "idx_supplier_deliveries_supplier_date", columnList = "wholesaler_supplier_id,delivery_date")
+        })
+@org.hibernate.annotations.Check(constraints = "total_quantity >= 0")
 public class SupplierDelivery {
 
     @Id

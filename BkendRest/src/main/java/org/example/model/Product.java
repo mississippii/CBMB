@@ -18,7 +18,10 @@ import lombok.Setter;
 @Getter
 @Setter
 @Entity
-@Table(name = "products")
+@Table(name = "products",
+        uniqueConstraints = @jakarta.persistence.UniqueConstraint(name = "uk_products_name", columnNames = "name"),
+        indexes = @jakarta.persistence.Index(name = "idx_products_status_name", columnList = "status,name"))
+@org.hibernate.annotations.Check(constraints = "((unit_type = 'WEIGHT' and default_unit in ('KG','MOUND')) or (unit_type = 'COUNT' and default_unit in ('PCS','DOZEN','BOX','BAG')))")
 public class Product {
 
     @Id

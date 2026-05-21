@@ -120,9 +120,6 @@ public class PaymentService {
         AccountBalance balance = getOrCreateBalance(wholesaler, PartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), customerAccount.getOpeningDue());
         balance.setBalance(dueAfter);
         accountBalanceRepository.save(balance);
-        if (cashAmount.signum() > 0) {
-            saveAccountLedger(wholesaler, PartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), AccountReferenceType.PAYMENT, null, BigDecimal.ZERO, cashAmount, "Customer due payment");
-        }
 
         Payment payment = new Payment();
         payment.setWholesalerId(wholesaler.getId());
@@ -135,9 +132,13 @@ public class PaymentService {
         payment.setDueAfterPayment(dueAfter);
         payment.setPreviousJamanot(previousJamanot);
         payment.setJamanotAfterPayment(jamanotAfter);
-        payment.setPaymentMethod(resolvePaymentMethod(request.paymentMethod()));
+        payment.setPaymentMethod(resolveCustomerPaymentMethod(request.paymentMethod(), cashAmount));
         payment.setNote(clean(request.note()));
         payment = paymentRepository.save(payment);
+
+        if (cashAmount.signum() > 0) {
+            saveAccountLedger(wholesaler, PartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), AccountReferenceType.PAYMENT, payment.getId(), BigDecimal.ZERO, cashAmount, "Customer due payment");
+        }
 
         if (banglaReturned > 0) {
             applyCustomerCrateReturn(wholesaler, customerAccount, "BANGLA", banglaReturned, payment.getId(), request.note());
@@ -150,9 +151,10 @@ public class PaymentService {
             wholesalerCustomerRepository.save(customerAccount);
         }
 
+        String description = buildCustomerPaymentDescription(payment.getId(), cashAmount, banglaReturned, chinaReturned, jamanotAmount);
         Transaction transaction = savePaymentTransaction(
                 wholesaler.getId(), payment.getId(), customerAccount.getId(), null, cashAmount, dueAfter,
-                "Customer payment #" + payment.getId()
+                description
         );
         return response(transaction, payment.getId(), null, customerAccount.getId(), null, previousDue, dueAfter, cashAmount, banglaReturned, chinaReturned, previousJamanot, jamanotAfter, payment.getPaymentType().name());
     }
@@ -197,7 +199,6 @@ public class PaymentService {
             AccountBalance balance = getOrCreateBalance(wholesaler, PartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), supplierAccount.getOpeningDue());
             balance.setBalance(dueAfter);
             accountBalanceRepository.save(balance);
-            saveAccountLedger(wholesaler, PartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), AccountReferenceType.SUPPLIER_SETTLEMENT, null, amount, BigDecimal.ZERO, label);
         }
 
         SupplierSettlement settlement = new SupplierSettlement();
@@ -208,9 +209,13 @@ public class PaymentService {
         settlement.setAmount(amount);
         settlement.setPreviousDue(previousDue);
         settlement.setDueAfterSettlement(dueAfter);
-        settlement.setPaymentMethod(resolvePaymentMethod(request.paymentMethod()));
+        settlement.setPaymentMethod(requireSupplierPaymentMethod(request.paymentMethod()));
         settlement.setNote(clean(request.note()));
         settlement = supplierSettlementRepository.save(settlement);
+
+        if (reduceDue) {
+            saveAccountLedger(wholesaler, PartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), AccountReferenceType.SUPPLIER_SETTLEMENT, settlement.getId(), amount, BigDecimal.ZERO, label);
+        }
 
         Transaction transaction = savePaymentTransaction(
                 wholesaler.getId(), null, null, supplierAccount.getId(), amount, dueAfter,
@@ -253,9 +258,12 @@ public class PaymentService {
             throw new BadRequestException("Returned " + crateTypeValue + " crates cannot exceed customer crate due.");
         }
         BoxInventory inventory = findBoxInventory(wholesaler, boxType);
+        if (inventory.getWithCustomers() < quantity) {
+            throw new BadRequestException("Crate inventory inconsistency for " + crateTypeValue + ": with_customers (" + inventory.getWithCustomers() + ") < returned (" + quantity + "). Reconcile before processing.");
+        }
         balance.setBoxesDue(balance.getBoxesDue() - quantity);
         inventory.setInHand(inventory.getInHand() + quantity);
-        inventory.setWithCustomers(Math.max(inventory.getWithCustomers() - quantity, 0));
+        inventory.setWithCustomers(inventory.getWithCustomers() - quantity);
         boxBalanceRepository.save(balance);
         boxInventoryRepository.save(inventory);
         saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), BoxMovementType.RETURNED_FROM_CUSTOMER, quantity, paymentId, note);
@@ -288,8 +296,11 @@ public class PaymentService {
             if (balance.getBoxesDue() < quantity) {
                 throw new BadRequestException("Returned " + crateTypeValue + " crates cannot exceed supplier crate due.");
             }
+            if (inventory.getWithSuppliers() < quantity) {
+                throw new BadRequestException("Crate inventory inconsistency for " + crateTypeValue + ": with_suppliers (" + inventory.getWithSuppliers() + ") < returned (" + quantity + "). Reconcile before processing.");
+            }
             inventory.setInHand(inventory.getInHand() + quantity);
-            inventory.setWithSuppliers(Math.max(inventory.getWithSuppliers() - quantity, 0));
+            inventory.setWithSuppliers(inventory.getWithSuppliers() - quantity);
             balance.setBoxesDue(balance.getBoxesDue() - quantity);
             saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), BoxMovementType.RETURNED_FROM_SUPPLIER, quantity, null, note);
         }
@@ -367,8 +378,39 @@ public class PaymentService {
         return PaymentType.BOX_RETURN;
     }
 
-    private PaymentMethod resolvePaymentMethod(PaymentMethod method) {
+    private PaymentMethod resolveCustomerPaymentMethod(PaymentMethod method, BigDecimal cashAmount) {
+        if (cashAmount.signum() == 0) {
+            return PaymentMethod.NONE;
+        }
         return method == null || method == PaymentMethod.NONE ? PaymentMethod.CASH : method;
+    }
+
+    private PaymentMethod requireSupplierPaymentMethod(PaymentMethod method) {
+        if (method == null) {
+            return PaymentMethod.CASH;
+        }
+        if (method == PaymentMethod.NONE) {
+            throw new BadRequestException("Payment method NONE is not valid for supplier settlements.");
+        }
+        return method;
+    }
+
+    private String buildCustomerPaymentDescription(Long paymentId, BigDecimal cashAmount, int banglaReturned, int chinaReturned, BigDecimal jamanotAmount) {
+        StringBuilder sb = new StringBuilder("Customer payment #").append(paymentId);
+        if (cashAmount.signum() > 0) {
+            sb.append(", cash ").append(money(cashAmount).toPlainString());
+        }
+        int crates = banglaReturned + chinaReturned;
+        if (crates > 0) {
+            sb.append(", ").append(crates).append(" crates returned");
+            if (banglaReturned > 0 && chinaReturned > 0) {
+                sb.append(" (BANGLA ").append(banglaReturned).append(", CHINA ").append(chinaReturned).append(")");
+            }
+        }
+        if (jamanotAmount.signum() > 0) {
+            sb.append(", jamanot ").append(money(jamanotAmount).toPlainString());
+        }
+        return sb.toString();
     }
 
     private BigDecimal currentBalance(Wholesaler wholesaler, PartyType partyType, Long partyAccountId, BigDecimal openingDue) {

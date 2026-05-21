@@ -13,7 +13,9 @@ import org.example.model.enums.RecordStatus;
 import org.example.model.enums.UserRole;
 
 @Entity
-@Table(name = "users")
+@Table(name = "users",
+        uniqueConstraints = @jakarta.persistence.UniqueConstraint(name = "uk_users_email", columnNames = "email"),
+        indexes = @jakarta.persistence.Index(name = "idx_users_role_status", columnList = "role,status"))
 public class User {
 
     @Id
@@ -23,7 +25,7 @@ public class User {
     @Column(nullable = false, length = 120)
     private String name;
 
-    @Column(nullable = false, unique = true, length = 190)
+    @Column(nullable = false, length = 190)
     private String email;
 
     @Column(name = "password_hash", nullable = false)

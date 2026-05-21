@@ -21,7 +21,15 @@ import lombok.Setter;
 @Getter
 @Setter
 @Entity
-@Table(name = "transactions")
+@Table(name = "transactions",
+        indexes = {
+                @jakarta.persistence.Index(name = "idx_transactions_wholesaler_date", columnList = "wholesaler_id,created_at"),
+                @jakarta.persistence.Index(name = "idx_transactions_type_date", columnList = "wholesaler_id,transaction_type,created_at"),
+                @jakarta.persistence.Index(name = "idx_transactions_customer_date", columnList = "wholesaler_id,wholesaler_customer_id,created_at"),
+                @jakarta.persistence.Index(name = "idx_transactions_supplier_date", columnList = "wholesaler_id,wholesaler_supplier_id,created_at"),
+                @jakarta.persistence.Index(name = "idx_transactions_sale", columnList = "sale_id"),
+                @jakarta.persistence.Index(name = "idx_transactions_payment", columnList = "payment_id")
+        })
 @IdClass(TransactionId.class)
 public class Transaction {
 

@@ -22,7 +22,14 @@ import lombok.Setter;
 @Getter
 @Setter
 @Entity
-@Table(name = "payments")
+@Table(name = "payments",
+        indexes = {
+                @jakarta.persistence.Index(name = "idx_payments_wholesaler_date", columnList = "wholesaler_id,created_at"),
+                @jakarta.persistence.Index(name = "idx_payments_customer_date", columnList = "wholesaler_id,wholesaler_customer_id,created_at"),
+                @jakarta.persistence.Index(name = "idx_payments_type_date", columnList = "wholesaler_id,payment_type,created_at")
+        })
+@org.hibernate.annotations.Check(constraints = "cash_amount >= 0 and boxes_returned >= 0 and jamanot_amount >= 0 and previous_due >= 0 and due_after_payment >= 0 and previous_jamanot >= 0 and jamanot_after_payment >= 0")
+@org.hibernate.annotations.Check(constraints = "((payment_type = 'CASH_RECEIVE' and cash_amount > 0 and boxes_returned = 0) or (payment_type = 'BOX_RETURN' and cash_amount = 0 and boxes_returned > 0) or (payment_type = 'CASH_AND_BOX_RETURN' and cash_amount > 0 and boxes_returned > 0))")
 @IdClass(PaymentId.class)
 public class Payment {
 

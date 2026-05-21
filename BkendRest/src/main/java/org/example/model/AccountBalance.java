@@ -20,7 +20,8 @@ import lombok.Setter;
 @Getter
 @Setter
 @Entity
-@Table(name = "account_balances")
+@Table(name = "account_balances",
+        uniqueConstraints = @jakarta.persistence.UniqueConstraint(name = "uk_account_balance_party", columnNames = {"wholesaler_id", "party_type", "party_account_id"}))
 public class AccountBalance {
 
     @Id

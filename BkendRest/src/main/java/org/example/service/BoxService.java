@@ -1,5 +1,6 @@
 package org.example.service;
 
+import java.math.BigDecimal;
 import java.util.List;
 import java.util.Locale;
 import org.example.dto.BoxDashboardResponse;
@@ -9,14 +10,17 @@ import org.example.exception.BadRequestException;
 import org.example.model.BoxInventory;
 import org.example.model.BoxLedger;
 import org.example.model.BoxType;
+import org.example.model.Transaction;
 import org.example.model.Wholesaler;
 import org.example.model.enums.BoxLedgerPartyType;
 import org.example.model.enums.BoxMovementType;
 import org.example.model.enums.BoxReferenceType;
 import org.example.model.enums.RecordStatus;
+import org.example.model.enums.TransactionType;
 import org.example.repository.BoxInventoryRepository;
 import org.example.repository.BoxLedgerRepository;
 import org.example.repository.BoxTypeRepository;
+import org.example.repository.TransactionRepository;
 import org.example.repository.WholesalerRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,17 +32,20 @@ public class BoxService {
     private final BoxTypeRepository boxTypeRepository;
     private final BoxInventoryRepository boxInventoryRepository;
     private final BoxLedgerRepository boxLedgerRepository;
+    private final TransactionRepository transactionRepository;
 
     public BoxService(
             WholesalerRepository wholesalerRepository,
             BoxTypeRepository boxTypeRepository,
             BoxInventoryRepository boxInventoryRepository,
-            BoxLedgerRepository boxLedgerRepository
+            BoxLedgerRepository boxLedgerRepository,
+            TransactionRepository transactionRepository
     ) {
         this.wholesalerRepository = wholesalerRepository;
         this.boxTypeRepository = boxTypeRepository;
         this.boxInventoryRepository = boxInventoryRepository;
         this.boxLedgerRepository = boxLedgerRepository;
+        this.transactionRepository = transactionRepository;
     }
 
     @Transactional
@@ -80,6 +87,7 @@ public class BoxService {
         boxInventoryRepository.save(inventory);
 
         saveLedger(wholesaler, boxType, BoxMovementType.PURCHASE, quantity, request.note());
+        saveTransaction(wholesalerId, "Crate purchase: " + quantity + " " + boxType.getName());
         return getDashboard(wholesalerId);
     }
 
@@ -100,7 +108,19 @@ public class BoxService {
         boxInventoryRepository.save(inventory);
 
         saveLedger(wholesaler, boxType, movementType, quantity, request.note());
+        saveTransaction(wholesalerId, "Crate " + movementType.name() + ": " + quantity + " " + boxType.getName());
         return getDashboard(wholesalerId);
+    }
+
+    private void saveTransaction(Long wholesalerId, String description) {
+        Transaction transaction = new Transaction();
+        transaction.setWholesalerId(wholesalerId);
+        transaction.setTransactionType(TransactionType.PAYMENT);
+        transaction.setSaleAmount(BigDecimal.ZERO);
+        transaction.setPaymentAmount(BigDecimal.ZERO);
+        transaction.setDueAmount(BigDecimal.ZERO);
+        transaction.setDescription(description);
+        transactionRepository.save(transaction);
     }
 
     private BoxInventoryTypeResponse toTypeResponse(Long wholesalerId, BoxType boxType) {
@@ -111,15 +131,16 @@ public class BoxService {
         int inHand = value(inventory, BoxInventory::getInHand);
         int withCustomers = value(inventory, BoxInventory::getWithCustomers);
         int withSuppliers = value(inventory, BoxInventory::getWithSuppliers);
+        int lostDamaged = value(inventory, BoxInventory::getLostDamaged);
 
         return new BoxInventoryTypeResponse(
                 boxType.getId(),
                 boxType.getName(),
-                inHand + withCustomers + withSuppliers,
+                inHand + withCustomers + withSuppliers + lostDamaged,
                 inHand,
                 withCustomers,
                 withSuppliers,
-                value(inventory, BoxInventory::getLostDamaged)
+                lostDamaged
         );
     }
 

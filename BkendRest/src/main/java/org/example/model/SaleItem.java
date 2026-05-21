@@ -20,7 +20,15 @@ import lombok.Setter;
 @Getter
 @Setter
 @Entity
-@Table(name = "sale_items")
+@Table(name = "sale_items",
+        indexes = {
+                @jakarta.persistence.Index(name = "idx_sale_items_sale", columnList = "sale_id"),
+                @jakarta.persistence.Index(name = "idx_sale_items_supplier", columnList = "wholesaler_id,wholesaler_supplier_id"),
+                @jakarta.persistence.Index(name = "idx_sale_items_product", columnList = "wholesaler_id,product_id"),
+                @jakarta.persistence.Index(name = "idx_sale_items_category", columnList = "wholesaler_id,category_id")
+        })
+@org.hibernate.annotations.Check(constraints = "quantity > 0")
+@org.hibernate.annotations.Check(constraints = "unit_price >= 0 and line_total >= 0 and commission_rate >= 0 and commission_amount >= 0")
 public class SaleItem {
 
     @Id

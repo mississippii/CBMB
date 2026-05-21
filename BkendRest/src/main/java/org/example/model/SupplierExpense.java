@@ -17,7 +17,12 @@ import lombok.Setter;
 @Getter
 @Setter
 @Entity
-@Table(name = "supplier_expenses")
+@Table(name = "supplier_expenses",
+        indexes = {
+                @jakarta.persistence.Index(name = "idx_supplier_expense_supplier_date", columnList = "wholesaler_id,wholesaler_supplier_id,expense_date"),
+                @jakarta.persistence.Index(name = "idx_supplier_expense_category_date", columnList = "wholesaler_id,category_id,expense_date")
+        })
+@org.hibernate.annotations.Check(constraints = "amount >= 0 and paid_amount >= 0 and due_amount >= 0 and paid_amount <= amount")
 public class SupplierExpense {
 
     @Id

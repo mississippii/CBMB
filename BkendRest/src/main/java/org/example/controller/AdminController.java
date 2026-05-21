@@ -2,10 +2,12 @@ package org.example.controller;
 
 import java.util.List;
 import org.example.dto.CreateWholesalerRequest;
+import org.example.dto.ResetPasswordRequest;
 import org.example.dto.WholesalerResponse;
 import org.example.service.AdminWholesalerService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.CrossOrigin;
+import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -32,5 +34,11 @@ public class AdminController {
     @ResponseStatus(HttpStatus.CREATED)
     public WholesalerResponse createWholesaler(@RequestBody CreateWholesalerRequest request) {
         return adminWholesalerService.createWholesaler(request);
+    }
+
+    @PostMapping("/wholesalers/{wholesalerId}/reset-password")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void resetPassword(@PathVariable Long wholesalerId, @RequestBody ResetPasswordRequest request) {
+        adminWholesalerService.resetWholesalerPassword(wholesalerId, request.newPassword());
     }
 }

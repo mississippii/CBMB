@@ -15,7 +15,11 @@ import java.time.LocalDateTime;
 import org.example.model.enums.RecordStatus;
 
 @Entity
-@Table(name = "wholesalers")
+@Table(name = "wholesalers",
+        uniqueConstraints = {
+                @jakarta.persistence.UniqueConstraint(name = "uk_wholesalers_user_id", columnNames = "user_id"),
+                @jakarta.persistence.UniqueConstraint(name = "uk_wholesalers_phone", columnNames = "phone")
+        })
 public class Wholesaler {
 
     @Id
@@ -23,13 +27,13 @@ public class Wholesaler {
     private Long id;
 
     @OneToOne(fetch = FetchType.LAZY, optional = false)
-    @JoinColumn(name = "user_id", nullable = false, unique = true)
+    @JoinColumn(name = "user_id", nullable = false)
     private User user;
 
     @Column(name = "business_name", nullable = false, length = 160)
     private String businessName;
 
-    @Column(nullable = false, unique = true, length = 30)
+    @Column(nullable = false, length = 30)
     private String phone;
 
     @Column(columnDefinition = "TEXT")

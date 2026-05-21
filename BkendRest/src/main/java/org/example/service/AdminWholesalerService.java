@@ -74,6 +74,19 @@ public class AdminWholesalerService {
         return toResponse(savedWholesaler);
     }
 
+    @Transactional
+    public void resetWholesalerPassword(Long wholesalerId, String newPassword) {
+        if (newPassword == null || newPassword.trim().length() < 8) {
+            throw new BadRequestException("New password must be at least 8 characters.");
+        }
+        Wholesaler wholesaler = wholesalerRepository.findById(wholesalerId)
+                .orElseThrow(() -> new BadRequestException("Wholesaler not found."));
+
+        User user = wholesaler.getUser();
+        user.setPasswordHash(passwordEncoder.encode(newPassword.trim()));
+        userRepository.save(user);
+    }
+
     @Transactional(readOnly = true)
     public List<WholesalerResponse> listWholesalers() {
         return wholesalerRepository.findAll()

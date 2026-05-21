@@ -135,15 +135,13 @@ public class SaleService {
         WholesalerCustomer customerAccount = oneTimeCustomer ? null : resolveCustomerAccount(wholesaler, request);
         String customerNameSnapshot = oneTimeCustomer ? requireText(request.customerName(), "Customer name is required.") : customerAccount.getCustomer().getName();
         String customerPhoneSnapshot = oneTimeCustomer ? requireText(request.customerPhone(), "Customer phone is required.") : customerAccount.getCustomer().getPhone();
-        BigDecimal previousCustomerBalance = oneTimeCustomer ? BigDecimal.ZERO : getCustomerBalance(wholesaler, customerAccount);
         if (oneTimeCustomer && paidAmount.compareTo(netAmount) != 0) {
             throw new BadRequestException("One-time customer must pay the full sale amount.");
         }
-        BigDecimal totalPayable = money(previousCustomerBalance.add(netAmount));
-        if (paidAmount.compareTo(totalPayable) > 0) {
-            throw new BadRequestException("Payment amount cannot be greater than customer total payable.");
+        if (paidAmount.compareTo(netAmount) > 0) {
+            throw new BadRequestException("Paid amount cannot exceed sale amount. To settle prior due, use the customer settle endpoint after this sale.");
         }
-        BigDecimal dueAmount = money(netAmount.subtract(paidAmount.min(netAmount)).max(BigDecimal.ZERO));
+        BigDecimal dueAmount = money(netAmount.subtract(paidAmount));
 
         Sale sale = new Sale();
         sale.setWholesaler(wholesaler);
@@ -251,13 +249,6 @@ public class SaleService {
         stockLedger.setQuantity(quantity);
         stockLedger.setNote("Sale #" + sale.getId());
         stockLedgerRepository.save(stockLedger);
-    }
-
-    private BigDecimal getCustomerBalance(Wholesaler wholesaler, WholesalerCustomer customerAccount) {
-        return accountBalanceRepository
-                .findByWholesaler_IdAndPartyTypeAndPartyAccountId(wholesaler.getId(), PartyType.WHOLESALER_CUSTOMER, customerAccount.getId())
-                .map(AccountBalance::getBalance)
-                .orElse(customerAccount.getOpeningDue() == null ? BigDecimal.ZERO : customerAccount.getOpeningDue());
     }
 
     private BigDecimal applyCustomerSaleBalance(

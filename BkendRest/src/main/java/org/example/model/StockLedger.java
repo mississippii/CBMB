@@ -21,7 +21,13 @@ import lombok.Setter;
 @Getter
 @Setter
 @Entity
-@Table(name = "stock_ledger")
+@Table(name = "stock_ledger",
+        indexes = {
+                @jakarta.persistence.Index(name = "idx_stock_ledger_supplier_date", columnList = "wholesaler_id,wholesaler_supplier_id,created_at"),
+                @jakarta.persistence.Index(name = "idx_stock_ledger_product_date", columnList = "wholesaler_id,product_id,created_at"),
+                @jakarta.persistence.Index(name = "idx_stock_ledger_category_date", columnList = "wholesaler_id,category_id,created_at")
+        })
+@org.hibernate.annotations.Check(constraints = "quantity > 0")
 public class StockLedger {
 
     @Id

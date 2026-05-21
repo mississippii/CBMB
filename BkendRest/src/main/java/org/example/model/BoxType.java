@@ -19,7 +19,7 @@ import lombok.Setter;
 @Getter
 @Setter
 @Entity
-@Table(name = "box_types")
+@Table(name = "box_types", uniqueConstraints = @jakarta.persistence.UniqueConstraint(name = "uk_box_types_wholesaler_name", columnNames = {"wholesaler_id", "name"}))
 public class BoxType {
 
     @Id

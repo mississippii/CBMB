@@ -12,7 +12,7 @@ import java.time.LocalDateTime;
 import org.example.model.enums.RecordStatus;
 
 @Entity
-@Table(name = "customers")
+@Table(name = "customers", uniqueConstraints = @jakarta.persistence.UniqueConstraint(name = "uk_customers_phone", columnNames = "phone"))
 public class Customer {
 
     @Id
@@ -25,7 +25,7 @@ public class Customer {
     @Column(name = "owner_name", length = 150)
     private String ownerName;
 
-    @Column(nullable = false, unique = true, length = 30)
+    @Column(nullable = false, length = 30)
     private String phone;
 
     @Column(columnDefinition = "TEXT")

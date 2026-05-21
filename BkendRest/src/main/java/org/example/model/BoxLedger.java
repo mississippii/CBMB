@@ -21,7 +21,14 @@ import lombok.Setter;
 @Getter
 @Setter
 @Entity
-@Table(name = "box_ledger")
+@Table(name = "box_ledger",
+        indexes = {
+                @jakarta.persistence.Index(name = "idx_box_ledger_wholesaler_date", columnList = "wholesaler_id,created_at"),
+                @jakarta.persistence.Index(name = "idx_box_ledger_party", columnList = "wholesaler_id,party_type,party_account_id,created_at"),
+                @jakarta.persistence.Index(name = "idx_box_ledger_type_date", columnList = "wholesaler_id,box_type_id,created_at")
+        })
+@org.hibernate.annotations.Check(constraints = "((party_type = 'WHOLESALER' and party_account_id is null) or (party_type in ('WHOLESALER_CUSTOMER','WHOLESALER_SUPPLIER') and party_account_id is not null))")
+@org.hibernate.annotations.Check(constraints = "quantity > 0")
 public class BoxLedger {
 
     @Id

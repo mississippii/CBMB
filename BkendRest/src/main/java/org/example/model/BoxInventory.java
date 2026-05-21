@@ -16,7 +16,10 @@ import lombok.Setter;
 @Getter
 @Setter
 @Entity
-@Table(name = "box_inventory")
+@Table(name = "box_inventory",
+        uniqueConstraints = @jakarta.persistence.UniqueConstraint(name = "uk_box_inventory_wholesaler_type", columnNames = {"wholesaler_id", "box_type_id"}))
+@org.hibernate.annotations.Check(constraints = "total_owned >= 0 and in_hand >= 0 and with_customers >= 0 and with_suppliers >= 0 and lost_damaged >= 0")
+@org.hibernate.annotations.Check(constraints = "total_owned = (in_hand + with_customers + with_suppliers + lost_damaged)")
 public class BoxInventory {
 
     @Id

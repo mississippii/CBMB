@@ -5,8 +5,8 @@ import { useAuth } from '../context/AuthContext';
 const Login = () => {
   const { login } = useAuth();
   const navigate = useNavigate();
-  const [email, setEmail] = useState('tanvir@admin.com');
-  const [password, setPassword] = useState('Adm!n@123');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [showPassword, setShowPassword] = useState(false);
   const [isSubmitting, setIsSubmitting] = useState(false);
   const [error, setError] = useState('');
@@ -14,7 +14,7 @@ const Login = () => {
   const handleSubmit = async (e) => {
     e.preventDefault();
     setError('');
-    
+
     if (!email || !password) {
       setError('Please fill in all fields');
       return;
@@ -25,7 +25,7 @@ const Login = () => {
       const user = await login(email, password);
       navigate(user.role === 'ADMIN' ? '/admin' : '/dashboard');
     } catch (err) {
-      setError(err.message || 'Invalid email/username or password');
+      setError(err.message || 'Invalid email or password');
     } finally {
       setIsSubmitting(false);
     }
@@ -36,51 +36,50 @@ const Login = () => {
       <div className="auth-layout">
         <section className="auth-card">
           <div className="auth-card-header">
-            <div className="auth-card-logo">
-              CB
-            </div>
+            <div className="auth-card-logo">CB</div>
             <div>
               <h2>Sign in</h2>
-              <p>Access the assigned wholesaler account.</p>
+              <p>Access your wholesaler account.</p>
             </div>
           </div>
 
           <form onSubmit={handleSubmit} className="auth-form">
             <div className="auth-field">
-              <label>Email</label>
+              <label htmlFor="email">Email</label>
               <div className="auth-input-wrap">
-                <span>
-                  @
-                </span>
+                <span>@</span>
                 <input
-                  type="text"
+                  id="email"
+                  type="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
-                  placeholder="wholesaler@gmail.com"
+                  placeholder="you@example.com"
                   className="input-field"
+                  autoComplete="email"
+                  required
                 />
               </div>
             </div>
 
             <div className="auth-field">
-              <label>Password</label>
+              <label htmlFor="password">Password</label>
               <div className="auth-input-wrap">
-                <span>
-                  *
-                </span>
+                <span>*</span>
                 <input
+                  id="password"
                   type={showPassword ? 'text' : 'password'}
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="Enter your password"
                   className="input-field auth-password-input"
+                  autoComplete="current-password"
+                  required
                 />
                 <button
                   type="button"
                   onClick={() => setShowPassword((prev) => !prev)}
                   className="auth-password-toggle"
                   aria-label={showPassword ? 'Hide password' : 'Show password'}
-                  title={showPassword ? 'Hide password' : 'Show password'}
                 >
                   {showPassword ? (
                     <svg viewBox="0 0 24 24" aria-hidden="true">
@@ -107,16 +106,7 @@ const Login = () => {
             )}
 
             <button type="submit" className="btn-primary auth-submit" disabled={isSubmitting}>
-              {isSubmitting ? 'Signing In...' : 'Sign In'}
-            </button>
-
-            <div className="auth-divider">
-              <span>or</span>
-            </div>
-
-            <button type="button" className="auth-google-button">
-              <span aria-hidden="true">G</span>
-              Sign in with Google
+              {isSubmitting ? 'Signing in…' : 'Sign In'}
             </button>
           </form>
         </section>

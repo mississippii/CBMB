@@ -19,7 +19,10 @@ import lombok.Setter;
 @Getter
 @Setter
 @Entity
-@Table(name = "box_balances")
+@Table(name = "box_balances",
+        uniqueConstraints = @jakarta.persistence.UniqueConstraint(name = "uk_box_balances_party_type", columnNames = {"wholesaler_id", "party_type", "party_account_id", "box_type_id"}),
+        indexes = @jakarta.persistence.Index(name = "idx_box_balances_wholesaler_type", columnList = "wholesaler_id,box_type_id"))
+@org.hibernate.annotations.Check(constraints = "boxes_due >= 0")
 public class BoxBalance {
 
     @Id

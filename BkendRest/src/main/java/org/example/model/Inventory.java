@@ -21,7 +21,14 @@ import lombok.Setter;
 @Getter
 @Setter
 @Entity
-@Table(name = "inventory")
+@Table(name = "inventory",
+        uniqueConstraints = @jakarta.persistence.UniqueConstraint(name = "uk_inventory_item", columnNames = {"wholesaler_id", "wholesaler_supplier_id", "product_id", "category_id", "unit"}),
+        indexes = {
+                @jakarta.persistence.Index(name = "idx_inventory_wholesaler_status", columnList = "wholesaler_id,status"),
+                @jakarta.persistence.Index(name = "idx_inventory_supplier", columnList = "wholesaler_supplier_id"),
+                @jakarta.persistence.Index(name = "idx_inventory_product_category", columnList = "product_id,category_id")
+        })
+@org.hibernate.annotations.Check(constraints = "quantity_on_hand >= 0")
 public class Inventory {
 
     @Id

@@ -16,7 +16,12 @@ import java.time.LocalDateTime;
 import org.example.model.enums.RecordStatus;
 
 @Entity
-@Table(name = "wholesaler_customers")
+@Table(name = "wholesaler_customers",
+        uniqueConstraints = @jakarta.persistence.UniqueConstraint(name = "uk_wholesaler_customer", columnNames = {"wholesaler_id", "customer_id"}),
+        indexes = {
+                @jakarta.persistence.Index(name = "idx_wc_wholesaler_status", columnList = "wholesaler_id,status"),
+                @jakarta.persistence.Index(name = "idx_wc_customer", columnList = "customer_id")
+        })
 public class WholesalerCustomer {
 
     @Id

@@ -19,7 +19,9 @@ import lombok.Setter;
 @Getter
 @Setter
 @Entity
-@Table(name = "expense_categories")
+@Table(name = "expense_categories",
+        uniqueConstraints = @jakarta.persistence.UniqueConstraint(name = "uk_expense_category_wh_name", columnNames = {"wholesaler_id", "name"}),
+        indexes = @jakarta.persistence.Index(name = "idx_expense_category_status", columnList = "wholesaler_id,status"))
 public class ExpenseCategory {
 
     @Id

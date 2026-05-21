@@ -21,7 +21,10 @@ import lombok.Setter;
 @Getter
 @Setter
 @Entity
-@Table(name = "supplier_settlements")
+@Table(name = "supplier_settlements",
+        indexes = @jakarta.persistence.Index(name = "idx_supplier_settlement_supplier_date", columnList = "wholesaler_id,wholesaler_supplier_id,settlement_date"))
+@org.hibernate.annotations.Check(constraints = "amount > 0")
+@org.hibernate.annotations.Check(constraints = "payment_method <> 'NONE'")
 public class SupplierSettlement {
 
     @Id

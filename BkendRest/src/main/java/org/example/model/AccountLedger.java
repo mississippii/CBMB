@@ -21,7 +21,12 @@ import lombok.Setter;
 @Getter
 @Setter
 @Entity
-@Table(name = "account_ledger")
+@Table(name = "account_ledger",
+        indexes = {
+                @jakarta.persistence.Index(name = "idx_account_ledger_wh_party_date", columnList = "wholesaler_id,party_type,party_account_id,created_at"),
+                @jakarta.persistence.Index(name = "idx_account_ledger_reference", columnList = "reference_type,reference_id")
+        })
+@org.hibernate.annotations.Check(constraints = "((debit > 0 and credit = 0) or (credit > 0 and debit = 0))")
 public class AccountLedger {
 
     @Id
