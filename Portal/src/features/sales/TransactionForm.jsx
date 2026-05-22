@@ -441,11 +441,16 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
                 <option value="">
                   {saleForm.supplierId ? 'Choose product...' : 'Select supplier first'}
                 </option>
-                {availableProducts.map((product) => (
-                  <option key={product.id} value={product.id}>
-                    {product.productName} ({product.category}) • stock: {product.quantity}
-                  </option>
-                ))}
+                {availableProducts.map((product) => {
+                  const lot = product.deliveryId
+                    ? ` • lot #${product.deliveryId}${product.deliveryDate ? ` (${String(product.deliveryDate).split('T')[0]})` : ''}`
+                    : '';
+                  return (
+                    <option key={product.id} value={product.id}>
+                      {product.productName} ({product.category}) • stock: {product.quantity}{lot}
+                    </option>
+                  );
+                })}
               </select>
             </div>
             <div>

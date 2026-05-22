@@ -43,6 +43,11 @@ public class Inventory {
     @JoinColumn(name = "wholesaler_supplier_id", nullable = false)
     private WholesalerSupplier wholesalerSupplier;
 
+    /** The shipment (lot) this stock belongs to. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "delivery_id")
+    private SupplierDelivery delivery;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "product_id", nullable = false)
     private Product product;

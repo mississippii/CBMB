@@ -1,5 +1,7 @@
 import { useEffect, useState } from 'react'
+import { Power, RotateCcw } from 'lucide-react'
 import { useData } from '../../data/DataContext'
+import { useToast } from '../../shared/components/Toast'
 
 const formatCurrency = (value) => '৳ ' + (Number(value) || 0).toLocaleString()
 const formatAmount = (transaction) => {
@@ -26,9 +28,13 @@ const renderCustomerTransactionDetails = (transaction) => {
 }
 
 const CustomerDetail = ({ customerId, onBack }) => {
-  const { customers, transactions, getCustomerProfile } = useData()
+  const { customers, transactions, getCustomerProfile, setCustomerStatus } = useData()
+  const showToast = useToast()
   const [profile, setProfile] = useState(null)
   const [isProfileLoading, setIsProfileLoading] = useState(false)
+  const [showDisableConfirm, setShowDisableConfirm] = useState(false)
+  const [isTogglingStatus, setIsTogglingStatus] = useState(false)
+  const [disableError, setDisableError] = useState('')
 
   useEffect(() => {
     let isActive = true
@@ -75,6 +81,34 @@ const CustomerDetail = ({ customerId, onBack }) => {
     .sort((a, b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date))
   const customerTransactions = profile?.transactions || fallbackTransactions
 
+  const handleConfirmDisable = async () => {
+    setIsTogglingStatus(true)
+    setDisableError('')
+    try {
+      const updated = await setCustomerStatus(customer.id, false)
+      setProfile((prev) => (prev ? { ...prev, account: { ...prev.account, ...updated } } : prev))
+      setShowDisableConfirm(false)
+      showToast(`${customer.name} disabled`, 'success')
+    } catch (error) {
+      setDisableError(error.message || 'Failed to disable customer.')
+    } finally {
+      setIsTogglingStatus(false)
+    }
+  }
+
+  const handleReactivate = async () => {
+    setIsTogglingStatus(true)
+    try {
+      const updated = await setCustomerStatus(customer.id, true)
+      setProfile((prev) => (prev ? { ...prev, account: { ...prev.account, ...updated } } : prev))
+      showToast(`${customer.name} reactivated`, 'success')
+    } catch (error) {
+      showToast(error.message || 'Failed to reactivate customer.', 'error')
+    } finally {
+      setIsTogglingStatus(false)
+    }
+  }
+
   return (
     <div className="space-y-5">
       <div className="supplier-profile-header">
@@ -87,6 +121,9 @@ const CustomerDetail = ({ customerId, onBack }) => {
                 <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-bold text-[#1d63ed]">
                   {customer.type}
                 </span>
+                {customer.status === 'DISABLED' && (
+                  <span className="badge badge-rose">Disabled</span>
+                )}
               </div>
               <p className="mt-1 text-sm font-medium text-slate-600">
                 {customer.owner} • {customer.phone}
@@ -97,11 +134,22 @@ const CustomerDetail = ({ customerId, onBack }) => {
             </div>
           </div>
 
-          {onBack && (
-            <button type="button" onClick={onBack} className="btn-secondary">
-              Back to Customers
-            </button>
-          )}
+          <div className="flex flex-wrap gap-2 shrink-0">
+            {customer.status === 'DISABLED' ? (
+              <button onClick={handleReactivate} disabled={isTogglingStatus} className="btn-primary flex items-center gap-2">
+                <RotateCcw size={14} /> {isTogglingStatus ? 'Reactivating…' : 'Reactivate'}
+              </button>
+            ) : (
+              <button onClick={() => { setDisableError(''); setShowDisableConfirm(true); }} className="btn-secondary flex items-center gap-2">
+                <Power size={14} /> Disable
+              </button>
+            )}
+            {onBack && (
+              <button type="button" onClick={onBack} className="btn-secondary">
+                Back to Customers
+              </button>
+            )}
+          </div>
         </div>
       </div>
 
@@ -193,6 +241,42 @@ const CustomerDetail = ({ customerId, onBack }) => {
           </div>
         </div>
       </div>
+
+      {showDisableConfirm && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: '26rem' }}>
+            <div className="modal-header">
+              <div className="flex items-center gap-2.5">
+                <div className="modal-icon-circle bg-rose-100 text-rose-700">
+                  <Power size={18} />
+                </div>
+                <div>
+                  <h2>Disable {customer.name}?</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">Hidden from active lists. History stays intact.</p>
+                </div>
+              </div>
+              <button onClick={() => setShowDisableConfirm(false)} className="modal-close-btn">✕</button>
+            </div>
+            <div className="modal-body">
+              <p className="text-sm text-slate-600">
+                The customer will no longer appear in sale dropdowns or active lists, but all transactions,
+                ledger entries, crate movements, and jamanot history remain. You can reactivate them later.
+              </p>
+              {disableError && (
+                <div className="status-error mt-4">
+                  <span>!</span><span>{disableError}</span>
+                </div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button onClick={() => setShowDisableConfirm(false)} className="btn-secondary" disabled={isTogglingStatus}>Cancel</button>
+              <button onClick={handleConfirmDisable} className="btn-danger flex items-center gap-2" disabled={isTogglingStatus}>
+                {isTogglingStatus ? 'Disabling…' : (<><Power size={14} /> Confirm Disable</>)}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

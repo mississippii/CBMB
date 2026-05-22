@@ -110,6 +110,8 @@ const mapInventoryItem = (item) => ({
   quantity: roundMoney(Number(item.quantityOnHand) || 0),
   unitPrice: 0,
   totalValue: 0,
+  deliveryId: item.deliveryId || null,
+  deliveryDate: item.deliveryDate || null,
   dateReceived: item.updatedAt?.split('T')[0] || getDateOnly(),
   status: Number(item.quantityOnHand) > 0 ? 'in_stock' : 'sold_out',
 });
@@ -165,6 +167,13 @@ const mapShipment = (shipment) => ({
   totalQuantity: roundMoney(Number(shipment.totalQuantity) || 0),
   status: shipment.status || 'POSTED',
   note: shipment.note || '',
+  estimatedValue: roundMoney(Number(shipment.estimatedValue) || 0),
+  advancePaid: roundMoney(Number(shipment.advancePaid) || 0),
+  commissionRate: shipment.commissionRate == null ? null : Number(shipment.commissionRate),
+  settlementStatus: shipment.settlementStatus || 'OPEN',
+  totalSold: roundMoney(Number(shipment.totalSold) || 0),
+  commissionAmount: roundMoney(Number(shipment.commissionAmount) || 0),
+  netPayable: roundMoney(Number(shipment.netPayable) || 0),
   items: (shipment.items || []).map((item) => ({
     id: item.id,
     inventoryId: item.inventoryId,
@@ -408,6 +417,11 @@ export const DataProvider = ({ children }) => {
     const unit = String(catalogProduct.defaultUnit || 'PCS').toLowerCase();
     const delivery = await postJson(apiPaths.supplierDeliveriesCreate(admin.wholesalerId), {
       wholesalerSupplierId: supplierId,
+      estimatedValue: Number(productData.estimatedValue) || 0,
+      advancePaid: Number(productData.advancePaid) || 0,
+      commissionRate: productData.commissionRate === '' || productData.commissionRate == null
+        ? null
+        : Number(productData.commissionRate),
       note: productData.note?.trim() || '',
       items: [
         {
@@ -423,37 +437,26 @@ export const DataProvider = ({ children }) => {
     const inventoryQuantity = roundMoney(Number(deliveryItem?.inventoryQuantityOnHand) || quantity);
     const productName = deliveryItem?.productName || catalogProduct.name;
     const categoryName = deliveryItem?.categoryName || category?.name || 'No Category';
-    const existingProduct = supplierProducts.find(
-      (product) =>
-        product.supplierId === supplierId &&
-        Number(product.productId) === productId &&
-        (product.categoryId || null) === categoryId,
-    );
 
-    const productAfterDelivery = existingProduct
-      ? {
-          ...existingProduct,
-          deliveryItemId: deliveryItem?.id || existingProduct.deliveryItemId,
-          quantity: inventoryQuantity,
-          totalValue: 0,
-          dateReceived: delivery.deliveryDate?.split('T')[0] || getDateOnly(),
-          status: 'in_stock',
-        }
-      : {
-          id: deliveryItem?.inventoryId || getNextId(supplierProducts),
-          deliveryItemId: deliveryItem?.id,
-          productId,
-          categoryId,
-          supplierId,
-          productName,
-          category: categoryName,
-          unit,
-          quantity: inventoryQuantity,
-          unitPrice: 0,
-          totalValue: 0,
-          dateReceived: delivery.deliveryDate?.split('T')[0] || getDateOnly(),
-          status: 'in_stock',
-        };
+    // Inventory is lot-scoped: every delivery creates its own inventory row.
+    const productAfterDelivery = {
+      id: deliveryItem?.inventoryId || getNextId(supplierProducts),
+      inventoryId: deliveryItem?.inventoryId,
+      deliveryItemId: deliveryItem?.id,
+      deliveryId: delivery.id,
+      deliveryDate: delivery.deliveryDate,
+      productId,
+      categoryId,
+      supplierId,
+      productName,
+      category: categoryName,
+      unit,
+      quantity: inventoryQuantity,
+      unitPrice: 0,
+      totalValue: 0,
+      dateReceived: delivery.deliveryDate?.split('T')[0] || getDateOnly(),
+      status: 'in_stock',
+    };
 
     const newShipment = mapShipment(delivery);
     setShipments((prev) => [newShipment, ...prev]);
@@ -475,15 +478,41 @@ export const DataProvider = ({ children }) => {
       note: productData.note?.trim() || '',
     };
 
-    setSupplierProducts((prev) =>
-      existingProduct
-        ? prev.map((product) =>
-            product.id === existingProduct.id ? productAfterDelivery : product,
-          )
-        : [...prev, productAfterDelivery],
-    );
+    setSupplierProducts((prev) => [...prev, productAfterDelivery]);
     setTransactions((prev) => [...prev, newTransaction]);
     return productAfterDelivery;
+  };
+
+  const getSupplierShipments = async (supplierAccountId) => {
+    if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
+    const data = await postJson(apiPaths.shipmentsBySupplier(admin.wholesalerId), {
+      accountId: Number(supplierAccountId),
+    });
+    return asArray(data).map(mapShipment);
+  };
+
+  const setShipmentCommission = async (deliveryId, commissionRate) => {
+    if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
+    const data = await postJson(apiPaths.shipmentSetCommission(admin.wholesalerId), {
+      deliveryId: Number(deliveryId),
+      commissionRate: Number(commissionRate),
+    });
+    const updated = mapShipment(data);
+    setShipments((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+    return updated;
+  };
+
+  const writeOffStock = async ({ inventoryId, quantity, reason, note }) => {
+    if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
+    const item = await postJson(apiPaths.inventoryWriteOff(admin.wholesalerId), {
+      inventoryId: Number(inventoryId),
+      quantity: Number(quantity),
+      reason: reason?.trim() || null,
+      note: note?.trim() || null,
+    });
+    const mapped = mapInventoryItem(item);
+    setSupplierProducts((prev) => prev.map((p) => (p.id === mapped.id ? { ...p, ...mapped } : p)));
+    return mapped;
   };
 
   const addCustomer = async (customerData) => {
@@ -1067,6 +1096,9 @@ export const DataProvider = ({ children }) => {
         recordCustomerBoxReturn,
         recordSupplierBoxReturn,
         addSupplierProduct,
+        getSupplierShipments,
+        setShipmentCommission,
+        writeOffStock,
         updateBoxInventory,
         addBoxes,
         markBoxesLost,

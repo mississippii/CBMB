@@ -23,4 +23,14 @@ public interface SaleItemRepository extends JpaRepository<SaleItem, Long> {
 
     @Query("select coalesce(sum(i.commissionAmount), 0) from SaleItem i where i.wholesaler.id = :wholesalerId and i.wholesalerSupplier.id = :supplierAccountId and i.sale.saleDate >= :startDate and i.sale.saleDate < :endDate")
     BigDecimal sumCommissionBySupplierBetween(@Param("wholesalerId") Long wholesalerId, @Param("supplierAccountId") Long supplierAccountId, @Param("startDate") LocalDateTime startDate, @Param("endDate") LocalDateTime endDate);
+
+    // Shipment-wise: total sold value of one lot.
+    @Query("select coalesce(sum(i.lineTotal), 0) from SaleItem i where i.delivery.id = :deliveryId")
+    BigDecimal sumLineTotalByDelivery(@Param("deliveryId") Long deliveryId);
+
+    @Query("select coalesce(sum(i.lineTotal), 0) from SaleItem i where i.delivery.id = :deliveryId and i.sale.saleDate >= :startDate and i.sale.saleDate < :endDate")
+    BigDecimal sumLineTotalByDeliveryBetween(@Param("deliveryId") Long deliveryId, @Param("startDate") LocalDateTime startDate, @Param("endDate") LocalDateTime endDate);
+
+    @Query("select coalesce(sum(i.quantity), 0) from SaleItem i where i.delivery.id = :deliveryId")
+    BigDecimal sumQuantityByDelivery(@Param("deliveryId") Long deliveryId);
 }

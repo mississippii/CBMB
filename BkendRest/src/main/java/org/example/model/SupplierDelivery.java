@@ -46,6 +46,20 @@ public class SupplierDelivery {
     @Column(name = "total_quantity", nullable = false, precision = 14, scale = 3)
     private BigDecimal totalQuantity = BigDecimal.ZERO;
 
+    @Column(name = "estimated_value", nullable = false, precision = 14, scale = 2)
+    private BigDecimal estimatedValue = BigDecimal.ZERO;
+
+    @Column(name = "advance_paid", nullable = false, precision = 14, scale = 2)
+    private BigDecimal advancePaid = BigDecimal.ZERO;
+
+    /** Negotiated per shipment, after the sell. Null until agreed. */
+    @Column(name = "commission_rate", precision = 5, scale = 2)
+    private BigDecimal commissionRate;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "settlement_status", nullable = false)
+    private org.example.model.enums.SettlementStatus settlementStatus = org.example.model.enums.SettlementStatus.OPEN;
+
     @Column(columnDefinition = "TEXT")
     private String note;
 

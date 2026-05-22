@@ -47,6 +47,11 @@ public class SaleItem {
     @JoinColumn(name = "wholesaler_supplier_id", nullable = false)
     private WholesalerSupplier wholesalerSupplier;
 
+    /** The shipment (lot) this sold line draws from. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "delivery_id")
+    private SupplierDelivery delivery;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "product_id", nullable = false)
     private Product product;

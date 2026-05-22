@@ -24,4 +24,20 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
             Long productId,
             UnitType unit
     );
+
+    // Lot-scoped lookups (inventory bound to a specific shipment).
+    Optional<Inventory> findByWholesaler_IdAndDelivery_IdAndProduct_IdAndCategory_IdAndUnit(
+            Long wholesalerId,
+            Long deliveryId,
+            Long productId,
+            Long categoryId,
+            UnitType unit
+    );
+
+    Optional<Inventory> findByWholesaler_IdAndDelivery_IdAndProduct_IdAndCategoryIsNullAndUnit(
+            Long wholesalerId,
+            Long deliveryId,
+            Long productId,
+            UnitType unit
+    );
 }

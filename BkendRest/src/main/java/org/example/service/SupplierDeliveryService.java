@@ -1,35 +1,52 @@
 package org.example.service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import org.example.dto.ReceiveSupplierDeliveryItemRequest;
 import org.example.dto.ReceiveSupplierDeliveryRequest;
+import org.example.dto.SetShipmentCommissionRequest;
 import org.example.dto.SupplierDeliveryItemResponse;
 import org.example.dto.SupplierDeliveryResponse;
 import org.example.exception.BadRequestException;
+import org.example.model.AccountBalance;
+import org.example.model.AccountLedger;
 import org.example.model.Category;
 import org.example.model.Inventory;
 import org.example.model.Product;
 import org.example.model.StockLedger;
 import org.example.model.SupplierDelivery;
 import org.example.model.SupplierDeliveryItem;
+import org.example.model.SupplierSettlement;
+import org.example.model.Transaction;
 import org.example.model.Wholesaler;
 import org.example.model.WholesalerSupplier;
+import org.example.model.enums.AccountReferenceType;
 import org.example.model.enums.InventoryStatus;
+import org.example.model.enums.PartyType;
+import org.example.model.enums.PaymentMethod;
 import org.example.model.enums.PostStatus;
 import org.example.model.enums.RecordStatus;
+import org.example.model.enums.SettlementStatus;
+import org.example.model.enums.SettlementType;
 import org.example.model.enums.StockDirection;
 import org.example.model.enums.StockReferenceType;
+import org.example.model.enums.TransactionType;
 import org.example.model.enums.UnitType;
+import org.example.repository.AccountBalanceRepository;
+import org.example.repository.AccountLedgerRepository;
 import org.example.repository.CategoryRepository;
 import org.example.repository.InventoryRepository;
 import org.example.repository.ProductRepository;
+import org.example.repository.SaleItemRepository;
 import org.example.repository.StockLedgerRepository;
 import org.example.repository.SupplierDeliveryItemRepository;
 import org.example.repository.SupplierDeliveryRepository;
+import org.example.repository.SupplierSettlementRepository;
+import org.example.repository.TransactionRepository;
 import org.example.repository.WholesalerRepository;
 import org.example.repository.WholesalerSupplierRepository;
 import org.springframework.stereotype.Service;
@@ -46,6 +63,11 @@ public class SupplierDeliveryService {
     private final SupplierDeliveryRepository supplierDeliveryRepository;
     private final SupplierDeliveryItemRepository supplierDeliveryItemRepository;
     private final StockLedgerRepository stockLedgerRepository;
+    private final SaleItemRepository saleItemRepository;
+    private final AccountBalanceRepository accountBalanceRepository;
+    private final AccountLedgerRepository accountLedgerRepository;
+    private final SupplierSettlementRepository supplierSettlementRepository;
+    private final TransactionRepository transactionRepository;
 
     public SupplierDeliveryService(
             WholesalerRepository wholesalerRepository,
@@ -55,7 +77,12 @@ public class SupplierDeliveryService {
             InventoryRepository inventoryRepository,
             SupplierDeliveryRepository supplierDeliveryRepository,
             SupplierDeliveryItemRepository supplierDeliveryItemRepository,
-            StockLedgerRepository stockLedgerRepository
+            StockLedgerRepository stockLedgerRepository,
+            SaleItemRepository saleItemRepository,
+            AccountBalanceRepository accountBalanceRepository,
+            AccountLedgerRepository accountLedgerRepository,
+            SupplierSettlementRepository supplierSettlementRepository,
+            TransactionRepository transactionRepository
     ) {
         this.wholesalerRepository = wholesalerRepository;
         this.wholesalerSupplierRepository = wholesalerSupplierRepository;
@@ -65,6 +92,11 @@ public class SupplierDeliveryService {
         this.supplierDeliveryRepository = supplierDeliveryRepository;
         this.supplierDeliveryItemRepository = supplierDeliveryItemRepository;
         this.stockLedgerRepository = stockLedgerRepository;
+        this.saleItemRepository = saleItemRepository;
+        this.accountBalanceRepository = accountBalanceRepository;
+        this.accountLedgerRepository = accountLedgerRepository;
+        this.supplierSettlementRepository = supplierSettlementRepository;
+        this.transactionRepository = transactionRepository;
     }
 
 
@@ -75,6 +107,39 @@ public class SupplierDeliveryService {
                 .stream()
                 .map(this::toDeliveryResponse)
                 .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public List<SupplierDeliveryResponse> listShipmentsForSupplier(Long wholesalerId, Long supplierAccountId) {
+        findWholesaler(wholesalerId);
+        if (supplierAccountId == null) {
+            throw new BadRequestException("Supplier account is required.");
+        }
+        return supplierDeliveryRepository
+                .findByWholesaler_IdAndWholesalerSupplier_IdOrderByDeliveryDateDesc(wholesalerId, supplierAccountId)
+                .stream()
+                .map(this::toDeliveryResponse)
+                .toList();
+    }
+
+    @Transactional
+    public SupplierDeliveryResponse setCommissionRate(Long wholesalerId, SetShipmentCommissionRequest request) {
+        findWholesaler(wholesalerId);
+        if (request == null || request.deliveryId() == null) {
+            throw new BadRequestException("Shipment is required.");
+        }
+        BigDecimal rate = nonNegative(request.commissionRate(), "Commission rate cannot be negative.");
+        if (rate.compareTo(BigDecimal.valueOf(100)) > 0) {
+            throw new BadRequestException("Commission rate cannot exceed 100%.");
+        }
+        SupplierDelivery delivery = supplierDeliveryRepository.findById(request.deliveryId())
+                .orElseThrow(() -> new BadRequestException("Shipment not found."));
+        if (!delivery.getWholesaler().getId().equals(wholesalerId)) {
+            throw new BadRequestException("Shipment does not belong to this wholesaler.");
+        }
+        delivery.setCommissionRate(rate);
+        delivery = supplierDeliveryRepository.save(delivery);
+        return toDeliveryResponse(delivery);
     }
 
     @Transactional
@@ -96,10 +161,19 @@ public class SupplierDeliveryService {
             throw new BadRequestException("At least one delivery item is required.");
         }
 
+        BigDecimal estimatedValue = nonNegative(request.estimatedValue(), "Estimated value cannot be negative.");
+        BigDecimal advancePaid = nonNegative(request.advancePaid(), "Advance paid cannot be negative.");
+        BigDecimal commissionRate = request.commissionRate() == null ? null
+                : nonNegative(request.commissionRate(), "Commission rate cannot be negative.");
+
         SupplierDelivery delivery = new SupplierDelivery();
         delivery.setWholesaler(wholesaler);
         delivery.setWholesalerSupplier(wholesalerSupplier);
         delivery.setDeliveryDate(request.deliveryDate() == null ? LocalDateTime.now() : request.deliveryDate());
+        delivery.setEstimatedValue(estimatedValue);
+        delivery.setAdvancePaid(advancePaid);
+        delivery.setCommissionRate(commissionRate);
+        delivery.setSettlementStatus(SettlementStatus.OPEN);
         delivery.setNote(clean(request.note()));
         delivery.setStatus(PostStatus.POSTED);
         delivery.setTotalQuantity(BigDecimal.ZERO);
@@ -117,7 +191,68 @@ public class SupplierDeliveryService {
         delivery.setTotalQuantity(totalQuantity);
         delivery = supplierDeliveryRepository.save(delivery);
 
+        // Advance against product is money paid to the supplier up front. Record it as
+        // a product payment so it reduces the supplier payable and shows in the statement.
+        if (advancePaid.signum() > 0) {
+            postAdvancePayment(wholesaler, wholesalerSupplier, delivery, advancePaid);
+        }
+
         return toDeliveryResponse(delivery, itemResponses);
+    }
+
+    private void postAdvancePayment(
+            Wholesaler wholesaler,
+            WholesalerSupplier supplierAccount,
+            SupplierDelivery delivery,
+            BigDecimal amount
+    ) {
+        AccountBalance balance = accountBalanceRepository
+                .findByWholesaler_IdAndPartyTypeAndPartyAccountId(wholesaler.getId(), PartyType.WHOLESALER_SUPPLIER, supplierAccount.getId())
+                .orElseGet(() -> {
+                    AccountBalance b = new AccountBalance();
+                    b.setWholesaler(wholesaler);
+                    b.setPartyType(PartyType.WHOLESALER_SUPPLIER);
+                    b.setPartyAccountId(supplierAccount.getId());
+                    b.setBalance(supplierAccount.getOpeningDue() == null ? BigDecimal.ZERO : supplierAccount.getOpeningDue());
+                    return b;
+                });
+        BigDecimal previousDue = money(balance.getBalance());
+        BigDecimal dueAfter = money(previousDue.subtract(amount)); // may go negative = prepaid
+        balance.setBalance(dueAfter);
+        accountBalanceRepository.save(balance);
+
+        SupplierSettlement settlement = new SupplierSettlement();
+        settlement.setWholesaler(wholesaler);
+        settlement.setWholesalerSupplier(supplierAccount);
+        settlement.setSettlementDate(LocalDateTime.now());
+        settlement.setSettlementType(SettlementType.PRODUCT_PAYMENT);
+        settlement.setAmount(money(amount));
+        settlement.setPreviousDue(previousDue);
+        settlement.setDueAfterSettlement(dueAfter);
+        settlement.setPaymentMethod(PaymentMethod.CASH);
+        settlement.setNote("Advance for shipment #" + delivery.getId());
+        settlement = supplierSettlementRepository.save(settlement);
+
+        AccountLedger ledger = new AccountLedger();
+        ledger.setWholesaler(wholesaler);
+        ledger.setPartyType(PartyType.WHOLESALER_SUPPLIER);
+        ledger.setPartyAccountId(supplierAccount.getId());
+        ledger.setReferenceType(AccountReferenceType.SUPPLIER_SETTLEMENT);
+        ledger.setReferenceId(settlement.getId());
+        ledger.setDebit(money(amount));
+        ledger.setCredit(BigDecimal.ZERO);
+        ledger.setNote("Shipment advance #" + delivery.getId());
+        accountLedgerRepository.save(ledger);
+
+        Transaction tx = new Transaction();
+        tx.setWholesalerId(wholesaler.getId());
+        tx.setTransactionType(TransactionType.PAYMENT);
+        tx.setWholesalerSupplierId(supplierAccount.getId());
+        tx.setSaleAmount(BigDecimal.ZERO);
+        tx.setPaymentAmount(money(amount));
+        tx.setDueAmount(dueAfter);
+        tx.setDescription("Shipment #" + delivery.getId() + " advance — ৳" + money(amount).toPlainString());
+        transactionRepository.save(tx);
     }
 
 
@@ -130,6 +265,12 @@ public class SupplierDeliveryService {
     }
 
     private SupplierDeliveryResponse toDeliveryResponse(SupplierDelivery delivery, List<SupplierDeliveryItemResponse> itemResponses) {
+        BigDecimal totalSold = money(zero(saleItemRepository.sumLineTotalByDelivery(delivery.getId())));
+        BigDecimal advancePaid = money(zero(delivery.getAdvancePaid()));
+        BigDecimal rate = delivery.getCommissionRate();
+        BigDecimal commission = rate == null ? BigDecimal.ZERO
+                : money(totalSold.multiply(rate).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP));
+        BigDecimal netPayable = money(totalSold.subtract(commission).subtract(advancePaid));
         return new SupplierDeliveryResponse(
                 delivery.getId(),
                 delivery.getWholesaler().getId(),
@@ -138,6 +279,13 @@ public class SupplierDeliveryService {
                 delivery.getTotalQuantity(),
                 delivery.getStatus().name(),
                 delivery.getNote(),
+                money(zero(delivery.getEstimatedValue())),
+                advancePaid,
+                rate,
+                delivery.getSettlementStatus() == null ? SettlementStatus.OPEN.name() : delivery.getSettlementStatus().name(),
+                totalSold,
+                commission,
+                netPayable,
                 itemResponses
         );
     }
@@ -167,11 +315,12 @@ public class SupplierDeliveryService {
         deliveryItem.setNote(clean(request.note()));
         deliveryItem = supplierDeliveryItemRepository.save(deliveryItem);
 
-        Inventory inventory = findInventory(wholesaler, wholesalerSupplier, product, category, unit)
+        Inventory inventory = findInventory(wholesaler, delivery, product, category, unit)
                 .orElseGet(() -> {
                     Inventory newInventory = new Inventory();
                     newInventory.setWholesaler(wholesaler);
                     newInventory.setWholesalerSupplier(wholesalerSupplier);
+                    newInventory.setDelivery(delivery);
                     newInventory.setProduct(product);
                     newInventory.setCategory(category);
                     newInventory.setQuantityOnHand(BigDecimal.ZERO);
@@ -199,23 +348,23 @@ public class SupplierDeliveryService {
 
     private java.util.Optional<Inventory> findInventory(
             Wholesaler wholesaler,
-            WholesalerSupplier wholesalerSupplier,
+            SupplierDelivery delivery,
             Product product,
             Category category,
             UnitType unit
     ) {
         if (category == null) {
-            return inventoryRepository.findByWholesaler_IdAndWholesalerSupplier_IdAndProduct_IdAndCategoryIsNullAndUnit(
+            return inventoryRepository.findByWholesaler_IdAndDelivery_IdAndProduct_IdAndCategoryIsNullAndUnit(
                     wholesaler.getId(),
-                    wholesalerSupplier.getId(),
+                    delivery.getId(),
                     product.getId(),
                     unit
             );
         }
 
-        return inventoryRepository.findByWholesaler_IdAndWholesalerSupplier_IdAndProduct_IdAndCategory_IdAndUnit(
+        return inventoryRepository.findByWholesaler_IdAndDelivery_IdAndProduct_IdAndCategory_IdAndUnit(
                 wholesaler.getId(),
-                wholesalerSupplier.getId(),
+                delivery.getId(),
                 product.getId(),
                 category.getId(),
                 unit
@@ -293,6 +442,22 @@ public class SupplierDeliveryService {
             throw new BadRequestException(message);
         }
         return normalized;
+    }
+
+    private BigDecimal nonNegative(BigDecimal value, String message) {
+        BigDecimal normalized = value == null ? BigDecimal.ZERO : value;
+        if (normalized.signum() < 0) {
+            throw new BadRequestException(message);
+        }
+        return normalized;
+    }
+
+    private BigDecimal zero(BigDecimal value) {
+        return value == null ? BigDecimal.ZERO : value;
+    }
+
+    private BigDecimal money(BigDecimal value) {
+        return (value == null ? BigDecimal.ZERO : value).setScale(2, RoundingMode.HALF_UP);
     }
 
     private UnitType parseUnit(String value) {

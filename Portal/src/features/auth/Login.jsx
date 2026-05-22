@@ -52,10 +52,8 @@ const Login = () => {
         {/* RIGHT: Login form */}
         <section className="login-form-panel">
           <div className="login-form-card">
-            <div className="login-form-header">
-              <p className="login-eyebrow">{t('login.welcome')}</p>
-              <h2 className="login-form-title">{t('login.title')}</h2>
-              <p className="login-form-sub">{t('login.subtitle')}</p>
+            <div className="login-form-header login-form-header-simple">
+              <h2 className="login-form-title">Login</h2>
             </div>
 
             <form onSubmit={handleSubmit} className="login-form">

@@ -18,6 +18,8 @@ public record InventoryItemResponse(
         BigDecimal quantityOnHand,
         String unit,
         String status,
+        Long deliveryId,            // shipment (lot) this stock belongs to
+        LocalDateTime deliveryDate,
         LocalDateTime updatedAt
 ) {
 }

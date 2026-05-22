@@ -12,6 +12,14 @@ public record SupplierDeliveryResponse(
         BigDecimal totalQuantity,
         String status,
         String note,
+        // Shipment-wise consignment figures
+        BigDecimal estimatedValue,
+        BigDecimal advancePaid,
+        BigDecimal commissionRate,   // null until negotiated
+        String settlementStatus,
+        BigDecimal totalSold,        // sum of sold line totals for this lot
+        BigDecimal commissionAmount, // totalSold * commissionRate
+        BigDecimal netPayable,       // totalSold - commission - advancePaid
         List<SupplierDeliveryItemResponse> items
 ) {
 }

@@ -163,13 +163,20 @@ public class SaleService {
         sale = saleRepository.save(sale);
 
         WholesalerSupplier supplierAccount = inventory.getWholesalerSupplier();
-        BigDecimal commissionRate = supplierAccount.getCommissionRate() == null ? BigDecimal.ZERO : supplierAccount.getCommissionRate();
+        // Commission is negotiated per shipment, usually after the sell. If the shipment's
+        // rate is already set, snapshot it; otherwise it stays 0 here and is computed at the
+        // shipment level once the rate is agreed.
+        org.example.model.SupplierDelivery delivery = inventory.getDelivery();
+        BigDecimal commissionRate = delivery != null && delivery.getCommissionRate() != null
+                ? delivery.getCommissionRate()
+                : BigDecimal.ZERO;
         BigDecimal commissionAmount = money(netAmount.multiply(commissionRate).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP));
 
         SaleItem item = new SaleItem();
         item.setWholesaler(wholesaler);
         item.setSale(sale);
         item.setWholesalerSupplier(supplierAccount);
+        item.setDelivery(delivery);
         item.setProduct(inventory.getProduct());
         item.setCategory(inventory.getCategory());
         item.setQuantity(quantity);

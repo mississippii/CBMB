@@ -1,6 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
   Truck, UserCheck, Package, Tag, Hash, FileText, Save, RotateCcw, Calendar,
+  DollarSign, Wallet, Percent,
 } from 'lucide-react';
 import { useData } from '../../data/DataContext';
 import { useToast } from '../../shared/components/Toast';
@@ -10,6 +11,9 @@ const initialForm = {
   productId: '',
   categoryId: '',
   quantity: '',
+  estimatedValue: '',
+  advancePaid: '',
+  commissionRate: '',
   note: '',
 };
 
@@ -176,6 +180,64 @@ const AddProducts = () => {
               />
             </div>
 
+            <div className="form-field">
+              <label className="form-label">
+                <DollarSign size={13} /> Estimated Value
+                <span className="form-label-hint">of this shipment</span>
+              </label>
+              <div className="input-with-suffix">
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={formData.estimatedValue}
+                  onChange={handleField('estimatedValue')}
+                  className="input-field"
+                  placeholder="0"
+                />
+                <span className="input-suffix">৳</span>
+              </div>
+            </div>
+
+            <div className="form-field">
+              <label className="form-label">
+                <Wallet size={13} /> Advance Paid
+                <span className="form-label-hint">to supplier now</span>
+              </label>
+              <div className="input-with-suffix">
+                <input
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={formData.advancePaid}
+                  onChange={handleField('advancePaid')}
+                  className="input-field"
+                  placeholder="0"
+                />
+                <span className="input-suffix">৳</span>
+              </div>
+            </div>
+
+            <div className="form-field">
+              <label className="form-label">
+                <Percent size={13} /> Commission Rate
+                <span className="form-label-hint">set later if unsure</span>
+              </label>
+              <div className="input-with-suffix">
+                <input
+                  type="number"
+                  min="0"
+                  max="100"
+                  step="0.5"
+                  value={formData.commissionRate}
+                  onChange={handleField('commissionRate')}
+                  className="input-field"
+                  placeholder="negotiate after sell"
+                />
+                <span className="input-suffix">%</span>
+              </div>
+            </div>
+
             <div className="form-field form-field-full">
               <label className="form-label">
                 <FileText size={13} /> Note
@@ -251,7 +313,9 @@ const AddProducts = () => {
                   <th className="px-4 py-3 text-left font-semibold text-slate-700">Supplier</th>
                   <th className="px-4 py-3 text-left font-semibold text-slate-700">Items</th>
                   <th className="px-4 py-3 text-right font-semibold text-slate-700">Total Qty</th>
-                  <th className="px-4 py-3 text-left font-semibold text-slate-700">Note</th>
+                  <th className="px-4 py-3 text-right font-semibold text-slate-700">Est. Value</th>
+                  <th className="px-4 py-3 text-right font-semibold text-slate-700">Advance</th>
+                  <th className="px-4 py-3 text-center font-semibold text-slate-700">Comm.</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -280,7 +344,17 @@ const AddProducts = () => {
                       <td className="px-4 py-3 text-right font-extrabold text-slate-900">
                         {shipment.totalQuantity.toLocaleString()}
                       </td>
-                      <td className="px-4 py-3 text-slate-600">{shipment.note || '—'}</td>
+                      <td className="px-4 py-3 text-right text-slate-700">
+                        {shipment.estimatedValue ? `৳ ${shipment.estimatedValue.toLocaleString()}` : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-right text-slate-700">
+                        {shipment.advancePaid ? `৳ ${shipment.advancePaid.toLocaleString()}` : '—'}
+                      </td>
+                      <td className="px-4 py-3 text-center">
+                        {shipment.commissionRate == null
+                          ? <span className="badge badge-amber">Pending</span>
+                          : <span className="font-semibold text-slate-800">{shipment.commissionRate}%</span>}
+                      </td>
                     </tr>
                   );
                 })}
