@@ -7,9 +7,10 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 public interface CategoryRepository extends JpaRepository<Category, Long> {
 
-    List<Category> findByProduct_IdAndStatusOrderByNameAscGradeAsc(Long productId, org.example.model.enums.RecordStatus status);
+    /** Varieties of a product (flat). */
+    List<Category> findByProduct_IdAndStatusOrderByNameAsc(Long productId, org.example.model.enums.RecordStatus status);
 
     boolean existsByProduct_IdAndStatus(Long productId, org.example.model.enums.RecordStatus status);
 
-    Optional<Category> findByProduct_IdAndNameIgnoreCaseAndGrade(Long productId, String name, String grade);
+    Optional<Category> findByProduct_IdAndNameIgnoreCase(Long productId, String name);
 }

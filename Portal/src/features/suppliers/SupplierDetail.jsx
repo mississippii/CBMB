@@ -1,34 +1,21 @@
 import { useCallback, useEffect, useState } from 'react'
 import {
-  ArrowLeft, Phone, Building2, MapPin, TrendingUp, Percent, DollarSign,
-  AlertCircle, Receipt, Wallet, Package, CreditCard, Boxes, Pencil, UserCheck,
+  ArrowLeft, Phone, Building2, MapPin, Percent, DollarSign,
+  AlertCircle, Receipt, Package, Boxes, Pencil, UserCheck,
   Power, RotateCcw, FileText, Tag, Truck, Check,
 } from 'lucide-react'
 import { useData } from '../../data/DataContext'
 import { useAuth } from '../auth/AuthContext'
 import { useToast } from '../../shared/components/Toast'
 import { postJson, apiPaths } from '../../services/apiClient'
-import TransactionForm from '../sales/TransactionForm'
 
-const formatCurrency = (value) => `৳ ${(Number(value) || 0).toLocaleString()}`
-const getDateOnly = (value) => new Date(value).toISOString().split('T')[0]
-
-const KPITile = ({ icon: Icon, label, value, tone = 'default' }) => (
-  <div className={`kpi-tile kpi-tile-${tone}`}>
-    <div className="kpi-tile-icon"><Icon size={18} /></div>
-    <div className="kpi-tile-body">
-      <p className="kpi-tile-label">{label}</p>
-      <strong className="kpi-tile-value">{value}</strong>
-    </div>
-  </div>
-)
+const formatCurrency = (value) => `৳ ${Math.round(Number(value) || 0).toLocaleString()}`
 
 const SupplierDetail = ({ supplierId, onBack }) => {
-  const { suppliers, supplierProducts, transactions, getSupplierProfile, updateSupplier, setSupplierStatus, getSupplierShipments, setShipmentCommission } = useData()
+  const { suppliers, supplierProducts, transactions, getSupplierProfile, updateSupplier, setSupplierStatus, getSupplierShipments, setShipmentCommission, settleShipment } = useData()
   const { admin } = useAuth()
   const showToast = useToast()
   const [profile, setProfile] = useState(null)
-  const [showPaymentModal, setShowPaymentModal] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
   const [editForm, setEditForm] = useState({ name: '', businessName: '', location: '', commissionRate: 0 })
   const [editError, setEditError] = useState('')
@@ -40,7 +27,7 @@ const SupplierDetail = ({ supplierId, onBack }) => {
   // Supplier expense + statement
   const [showExpenseModal, setShowExpenseModal] = useState(false)
   const [categories, setCategories] = useState([])
-  const [expenseForm, setExpenseForm] = useState({ categoryId: '', amount: '', paidAmount: '', note: '' })
+  const [expenseForm, setExpenseForm] = useState({ deliveryId: '', categoryId: '', amount: '', note: '' })
   const [expenseError, setExpenseError] = useState('')
   const [isSavingExpense, setIsSavingExpense] = useState(false)
   const [statement, setStatement] = useState(null)
@@ -50,8 +37,34 @@ const SupplierDetail = ({ supplierId, onBack }) => {
   // Shipment-wise tracking
   const [shipments, setShipments] = useState([])
   const [isLoadingShipments, setIsLoadingShipments] = useState(false)
-  const [rateDrafts, setRateDrafts] = useState({})
-  const [savingRateId, setSavingRateId] = useState(null)
+  const [showCommissionModal, setShowCommissionModal] = useState(false)
+  const [commissionForm, setCommissionForm] = useState({ deliveryId: '', rate: '' })
+  const [commissionError, setCommissionError] = useState('')
+  const [isSavingCommission, setIsSavingCommission] = useState(false)
+  const [settlingId, setSettlingId] = useState(null)
+  const [showSettled, setShowSettled] = useState(false)
+  const [settleTarget, setSettleTarget] = useState(null)  // shipment awaiting confirm
+
+  const handleConfirmSettle = async () => {
+    if (!settleTarget) return
+    const shipment = settleTarget
+    setSettlingId(shipment.id)
+    try {
+      await settleShipment(shipment.id, true)
+      showToast(`Lot #${shipment.id} settled`, 'success')
+      setSettleTarget(null)
+      await loadShipments()
+      loadStatement(statementPeriod)
+      // refresh supplier balance (amountDue, etc.)
+      if (getSupplierProfile && supplierId) {
+        try { const fresh = await getSupplierProfile(supplierId); setProfile(fresh) } catch { /* ignore */ }
+      }
+    } catch (error) {
+      showToast(error.message || 'Failed to settle shipment.', 'error')
+    } finally {
+      setSettlingId(null)
+    }
+  }
 
   const loadShipments = useCallback(async () => {
     if (!supplierId || !getSupplierShipments) return
@@ -68,24 +81,34 @@ const SupplierDetail = ({ supplierId, onBack }) => {
 
   useEffect(() => { loadShipments() }, [loadShipments])
 
-  const handleSaveRate = async (shipment) => {
-    const draft = rateDrafts[shipment.id]
-    const rate = Number(draft)
-    if (draft === '' || draft == null || Number.isNaN(rate) || rate < 0 || rate > 100) {
-      showToast('Enter a commission rate between 0 and 100.', 'error')
-      return
+  const openCommissionModal = (deliveryId = '') => {
+    const lot = shipments.find((s) => String(s.id) === String(deliveryId))
+    setCommissionForm({
+      deliveryId: deliveryId ? String(deliveryId) : '',
+      rate: lot && lot.commissionRate != null ? String(lot.commissionRate) : '',
+    })
+    setCommissionError('')
+    setShowCommissionModal(true)
+  }
+
+  const handleCommissionSave = async () => {
+    if (!commissionForm.deliveryId) { setCommissionError('Select the shipment to set commission for.'); return }
+    const rate = Number(commissionForm.rate)
+    if (commissionForm.rate === '' || Number.isNaN(rate) || rate < 0 || rate > 100) {
+      setCommissionError('Enter a commission rate between 0 and 100.'); return
     }
-    setSavingRateId(shipment.id)
+    setIsSavingCommission(true)
+    setCommissionError('')
     try {
-      await setShipmentCommission(shipment.id, rate)
-      showToast(`Lot #${shipment.id} commission set to ${rate}%`, 'success')
-      setRateDrafts((prev) => { const next = { ...prev }; delete next[shipment.id]; return next })
+      await setShipmentCommission(Number(commissionForm.deliveryId), rate)
+      showToast(`Lot #${commissionForm.deliveryId} commission set to ${rate}%`, 'success')
+      setShowCommissionModal(false)
       await loadShipments()
       loadStatement(statementPeriod)
     } catch (error) {
-      showToast(error.message || 'Failed to set commission.', 'error')
+      setCommissionError(error.message || 'Failed to set commission.')
     } finally {
-      setSavingRateId(null)
+      setIsSavingCommission(false)
     }
   }
 
@@ -107,8 +130,8 @@ const SupplierDetail = ({ supplierId, onBack }) => {
 
   useEffect(() => { loadStatement(statementPeriod) }, [loadStatement, statementPeriod])
 
-  const openExpenseModal = async () => {
-    setExpenseForm({ categoryId: '', amount: '', paidAmount: '', note: '' })
+  const openExpenseModal = async (deliveryId = '') => {
+    setExpenseForm({ deliveryId: deliveryId ? String(deliveryId) : '', categoryId: '', amount: '', note: '' })
     setExpenseError('')
     setShowExpenseModal(true)
     if (categories.length === 0 && admin?.wholesalerId) {
@@ -121,23 +144,24 @@ const SupplierDetail = ({ supplierId, onBack }) => {
 
   const handleExpenseSave = async () => {
     const amount = Number(expenseForm.amount)
+    if (!expenseForm.deliveryId) { setExpenseError('Select the shipment this expense belongs to.'); return }
     if (!amount || amount <= 0) { setExpenseError('Enter a valid expense amount.'); return }
-    const paid = Number(expenseForm.paidAmount) || 0
-    if (paid > amount) { setExpenseError('Supplier-funded amount cannot exceed the total.'); return }
     if (!expenseForm.categoryId) { setExpenseError('Select an expense category.'); return }
     setIsSavingExpense(true)
     setExpenseError('')
     try {
       await postJson(apiPaths.expenseCreate(admin.wholesalerId), {
         wholesalerSupplierId: Number(supplierId),
+        deliveryId: Number(expenseForm.deliveryId),
         categoryId: Number(expenseForm.categoryId),
         amount,
-        paidAmount: paid,
+        paidAmount: 0, // wholesaler fronts the full amount → full amount is the supplier's due
         note: expenseForm.note?.trim() || null,
       })
       setShowExpenseModal(false)
       showToast('Expense recorded', 'success')
       loadStatement(statementPeriod)
+      loadShipments()
     } catch (error) {
       setExpenseError(error.message || 'Failed to record expense.')
     } finally {
@@ -217,7 +241,68 @@ const SupplierDetail = ({ supplierId, onBack }) => {
     }
   }
   const products = supplierProducts.filter((product) => product.supplierId === supplierId)
-  const pendingRateCount = shipments.filter((s) => s.commissionRate == null).length
+  const openShipments = shipments.filter((s) => s.settlementStatus !== 'SETTLED')
+  const settledShipments = shipments.filter((s) => s.settlementStatus === 'SETTLED')
+  const pendingRateCount = openShipments.filter((s) => s.commissionRate == null).length
+  const lotSoldOut = (lotId) => !supplierProducts.some((p) => p.deliveryId === lotId && Number(p.quantity) > 0)
+
+  const renderLot = (s) => {
+    const ratePending = s.commissionRate == null
+    const settled = s.settlementStatus === 'SETTLED'
+    const soldOut = lotSoldOut(s.id)
+    return (
+      <div key={s.id} className="shipment-lot-card">
+        <div className="flex items-stretch gap-3">
+          <div className="min-w-0 flex-1">
+            <div className="shipment-lot-head">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="shipment-lot-tag">{s.name || `Lot #${s.id}`}</span>
+                {s.name && <span className="text-xs text-slate-400">#{s.id}</span>}
+                <span className="text-sm text-slate-500">{s.date}</span>
+                <span className={`badge ${ratePending ? 'badge-amber' : 'badge-emerald'}`}>
+                  {ratePending ? 'Commission: pending' : `Commission: ${s.commissionRate}%`}
+                </span>
+                {soldOut && !settled && <span className="badge badge-rose">Sold out</span>}
+              </div>
+              <span className={`badge ${settled ? 'badge-emerald' : 'badge-amber'}`}>
+                {settled ? 'Settled' : 'Open'}
+              </span>
+            </div>
+
+            <div className="shipment-lot-grid">
+              <div><span>Est. Value</span><strong>{formatCurrency(s.estimatedValue)}</strong></div>
+              <div><span>Advance Paid</span><strong>{formatCurrency(s.advancePaid)}</strong></div>
+              <div><span>Total Sold</span><strong>{formatCurrency(s.totalSold)}</strong></div>
+              <div><span>Commission</span><strong>{ratePending ? '—' : formatCurrency(s.commissionAmount)}</strong></div>
+              <div><span>Other Expense</span><strong>{formatCurrency(s.expenseTotal)}</strong></div>
+              <div className="shipment-lot-net"><span>Net Payable</span><strong>{formatCurrency(s.netPayable)}</strong></div>
+            </div>
+
+            {s.expenseDue > 0 && (
+              <p className="mt-2 text-xs font-semibold text-rose-600">
+                Supplier owes {formatCurrency(s.expenseDue)} expense on this lot (separate from net payable).
+              </p>
+            )}
+          </div>
+
+          {supplier.status !== 'DISABLED' && !settled && (
+            <div className="flex shrink-0 items-center border-l border-dashed border-slate-200 pl-3">
+              <button
+                onClick={() => setSettleTarget(s)}
+                disabled={settlingId === s.id || !soldOut}
+                className={`btn-compact ${soldOut ? 'btn-compact-primary' : ''}`}
+                title={soldOut
+                  ? 'Settle this shipment (records the payments and closes it)'
+                  : 'Settle becomes available once all stock from this lot is sold'}
+              >
+                <Check size={12} /> Settle
+              </button>
+            </div>
+          )}
+        </div>
+      </div>
+    )
+  }
 
   if (!supplier) {
     return (
@@ -233,160 +318,144 @@ const SupplierDetail = ({ supplierId, onBack }) => {
     )
   }
 
-  const today = getDateOnly(new Date())
-  const supplierTransactions = profile?.transactions || transactions.filter((t) => (
-    t.supplierId === supplier.id || t.supplier === supplier.name || t.supplierPhone === supplier.contact
-  ))
-  const todaySales = supplierTransactions.filter(
-    (t) => t.transactionType === 'Sale' && getDateOnly(t.createdAt || t.date) === today
-  )
-  const fallbackTodaySalesAmount = todaySales.reduce((s, t) => s + (Number(t.totalAmount) || 0), 0)
-  const fallbackTodayCommission = todaySales.reduce((s, t) => {
-    const explicit = Number(t.commissionAmount) || 0
-    if (explicit > 0) return s + explicit
-    return s + ((Number(t.totalAmount) || 0) * (Number(supplier.commissionRate) || 0)) / 100
-  }, 0)
-  const commissionReceived = supplierTransactions
-    .filter((t) => t.transactionType === 'Payment' && String(t.note || t.paymentType || '').toLowerCase().includes('commission'))
-    .reduce((s, t) => s + (Number(t.paymentAmount) || 0), 0)
-  const fallbackOtherExpense = supplierTransactions
-    .filter((t) => t.transactionType === 'Payment' && String(t.note || t.paymentType || '').toLowerCase().includes('expense'))
-    .reduce((s, t) => s + (Number(t.paymentAmount) || 0), 0)
-  const todaySalesAmount = Number(supplier.todaySale ?? fallbackTodaySalesAmount) || 0
-  const todayCommission = Number(supplier.todayCommission ?? fallbackTodayCommission) || 0
-  const commissionDue = Number(supplier.commissionDue ?? Math.max((Number(supplier.totalCommissionEarned) || 0) - commissionReceived, 0)) || 0
-  const otherExpense = Number(supplier.otherExpense ?? fallbackOtherExpense) || 0
   const initials = supplier.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()
 
   return (
     <div className="space-y-5">
       {/* HEADER */}
-      <div className="supplier-profile-header">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-start gap-4 min-w-0">
+      <div className="supplier-profile-header" style={{ padding: '0.9rem 1.1rem' }}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
             {onBack && (
               <button type="button" onClick={onBack} className="back-arrow-btn" title="Back to suppliers">
                 <ArrowLeft size={18} />
               </button>
             )}
-            <div className="supplier-avatar">{initials}</div>
+            <div className="supplier-avatar" style={{ width: '2.75rem', height: '2.75rem', fontSize: '0.95rem' }}>{initials}</div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-2xl font-extrabold text-slate-950">{supplier.name}</h2>
-                {pendingRateCount > 0 ? (
-                  <span className="badge badge-amber">{pendingRateCount} lot{pendingRateCount === 1 ? '' : 's'} need commission</span>
-                ) : shipments.length > 0 ? (
-                  <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-bold text-[#1d63ed]">
-                    Per-shipment commission
-                  </span>
-                ) : null}
-                {supplier.status === 'DISABLED' && (
-                  <span className="badge badge-rose">Disabled</span>
+                <h2 className="text-lg font-extrabold text-slate-900 truncate">{supplier.name}</h2>
+                {supplier.status === 'DISABLED' && <span className="badge badge-rose">Disabled</span>}
+                {pendingRateCount > 0 && (
+                  <span className="badge badge-amber">{pendingRateCount} lot{pendingRateCount === 1 ? '' : 's'} need rate</span>
                 )}
               </div>
-              <div className="mt-1.5 flex flex-wrap items-center gap-x-4 gap-y-1 text-sm text-slate-600">
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
                 {supplier.businessName && (
-                  <span className="inline-flex items-center gap-1.5"><Building2 size={13} /> {supplier.businessName}</span>
+                  <span className="inline-flex items-center gap-1"><Building2 size={12} /> {supplier.businessName}</span>
                 )}
                 {supplier.location && (
-                  <span className="inline-flex items-center gap-1.5"><MapPin size={13} /> {supplier.location}</span>
+                  <span className="inline-flex items-center gap-1"><MapPin size={12} /> {supplier.location}</span>
                 )}
-                <span className="inline-flex items-center gap-1.5"><Phone size={13} /> {supplier.contact}</span>
+                <span className="inline-flex items-center gap-1"><Phone size={12} /> {supplier.contact}</span>
               </div>
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
             {supplier.status === 'DISABLED' ? (
-              <button onClick={handleReactivate} disabled={isTogglingStatus} className="btn-primary flex items-center gap-2">
+              <button onClick={handleReactivate} disabled={isTogglingStatus} className="btn-primary flex items-center gap-1.5">
                 <RotateCcw size={14} /> {isTogglingStatus ? 'Reactivating…' : 'Reactivate'}
               </button>
             ) : (
               <>
-                <button onClick={() => { setDisableError(''); setShowDisableConfirm(true); }} className="btn-secondary flex items-center gap-2" title="Disable supplier">
-                  <Power size={14} /> Disable
-                </button>
-                <button onClick={openEditModal} className="btn-secondary flex items-center gap-2">
-                  <Pencil size={14} /> Edit
-                </button>
-                <button onClick={openExpenseModal} className="btn-secondary flex items-center gap-2">
-                  <Receipt size={14} /> Expense
-                </button>
-                <button onClick={() => setShowPaymentModal(true)} className="btn-primary flex items-center gap-2">
-                  <CreditCard size={15} /> Record Payment
-                </button>
+                <button onClick={openEditModal} className="icon-btn" title="Edit supplier"><Pencil size={15} /></button>
+                <button onClick={() => { setDisableError(''); setShowDisableConfirm(true); }} className="icon-btn icon-btn-danger" title="Disable supplier"><Power size={15} /></button>
               </>
             )}
           </div>
         </div>
       </div>
 
-      {/* KPI GRID */}
-      <div className="grid grid-cols-2 gap-3 md:grid-cols-3 xl:grid-cols-6">
-        <KPITile icon={TrendingUp} label="Today Sale" value={formatCurrency(todaySalesAmount)} tone="emerald" />
-        <KPITile icon={Percent} label="Today Commission" value={formatCurrency(todayCommission)} tone="teal" />
-        <KPITile icon={DollarSign} label="Total Sale" value={formatCurrency(supplier.totalSales)} />
-        <KPITile icon={Wallet} label="Commission Due" value={formatCurrency(commissionDue)} tone="amber" />
-        <KPITile icon={AlertCircle} label="Supplier Due" value={formatCurrency(supplier.amountDue)} tone="rose" />
-        <KPITile icon={Receipt} label="Other Expense" value={formatCurrency(otherExpense)} />
-      </div>
-
-      {/* BALANCE + CRATE PANELS */}
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
-        <div className="supplier-panel">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h3 className="flex items-center gap-2"><DollarSign size={18} className="text-blue-600" /> Supplier Balance</h3>
-              <p>Sales, commission and dues movement</p>
-            </div>
-            <div className="rounded-lg bg-slate-50 px-3 py-2 text-right">
-              <p className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Transactions</p>
-              <p className="text-lg font-extrabold text-slate-900">{supplierTransactions.length.toLocaleString()}</p>
-            </div>
-          </div>
-          <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-            <div className="balance-pill balance-pill-emerald">
+      {/* TOP STATS — Total Sale = Your Income + Supplier Payable */}
+      {statement && (() => {
+        const totalSale = Number(statement.totalSale) || 0
+        const commission = Number(statement.commission) || 0
+        const expense = Number(statement.expenseDue) || 0
+        const yourIncome = commission + expense
+        const supplierPayable = Math.max(0, (Number(supplier.amountDue) || 0) - commission - expense)
+        return (
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+            <div className="stat-mini">
               <p>Total Sale</p>
-              <p>{formatCurrency(supplier.totalSales)}</p>
+              <strong>{formatCurrency(totalSale)}</strong>
             </div>
-            <div className="balance-pill balance-pill-amber">
-              <p>Commission Due</p>
-              <p>{formatCurrency(commissionDue)}</p>
+            <div className="stat-mini stat-mini-amber">
+              <p>Your Income (commission + expense)</p>
+              <strong>{formatCurrency(yourIncome)}</strong>
             </div>
-            <div className="balance-pill balance-pill-rose">
-              <p>Supplier Due</p>
-              <p>{formatCurrency(supplier.amountDue)}</p>
+            <div className="stat-mini stat-mini-rose">
+              <p>Supplier Payable (rest)</p>
+              <strong>{formatCurrency(supplierPayable)}</strong>
             </div>
           </div>
+        )
+      })()}
+
+      {/* SETTLEMENT + CRATES */}
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
+        <div className="supplier-panel">
+          <h3 className="flex items-center gap-2"><FileText size={17} className="text-blue-600" /> Settlement</h3>
+
+          {isLoadingStatement ? (
+            <p className="mt-3 text-sm text-slate-500">Loading…</p>
+          ) : statement ? (
+            <>
+              <div className="mt-3 space-y-2">
+                <div className="box-row">
+                  <span>Total Supplier Payable</span>
+                  <strong>{formatCurrency(supplier.amountDue)}</strong>
+                </div>
+                <div className="box-row">
+                  <span>Commission due to you</span>
+                  <strong className="text-amber-700">− {formatCurrency(statement.commission)}</strong>
+                </div>
+                <div className="box-row">
+                  <span>Other Expense (supplier owes)</span>
+                  <strong className="text-rose-700">− {formatCurrency(statement.expenseDue)}</strong>
+                </div>
+              </div>
+              <div className="statement-net mt-3">
+                <span>Net Payable to Supplier</span>
+                <strong>
+                  {formatCurrency(
+                    (Number(supplier.amountDue) || 0) - (Number(statement.commission) || 0) - (Number(statement.expenseDue) || 0)
+                  )}
+                </strong>
+              </div>
+            </>
+          ) : (
+            <p className="mt-3 text-sm text-slate-500">No settlement data.</p>
+          )}
         </div>
 
         <div className="supplier-panel">
-          <h3 className="flex items-center gap-2"><Boxes size={18} className="text-blue-600" /> Crate Accountability</h3>
-          <div className="mt-4 space-y-2.5">
-            <div className="box-row">
-              <span>Bangla Crates</span>
-              <strong>{supplier.boxesHoldingWooden || 0}</strong>
-            </div>
-            <div className="box-row">
-              <span>China Crates</span>
-              <strong>{supplier.boxesHoldingPlastic || 0}</strong>
-            </div>
-            <div className="box-row total">
-              <span>Total Crates Due</span>
-              <strong>{supplier.totalBoxesHolding || 0}</strong>
-            </div>
+          <h3 className="flex items-center gap-2"><Boxes size={17} className="text-blue-600" /> Crates</h3>
+          <div className="mt-3 space-y-2">
+            <div className="box-row"><span>Bangla</span><strong>{supplier.boxesHoldingWooden || 0}</strong></div>
+            <div className="box-row"><span>China</span><strong>{supplier.boxesHoldingPlastic || 0}</strong></div>
+            <div className="box-row total"><span>Total Due</span><strong>{supplier.totalBoxesHolding || 0}</strong></div>
           </div>
         </div>
       </div>
 
       {/* SHIPMENTS (per-lot consignment accounting) */}
       <div className="supplier-panel">
-        <div className="mb-4 flex items-center justify-between">
+        <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="flex items-center gap-2"><Truck size={18} className="text-blue-600" /> Shipments</h3>
-            <p>Each lot is tracked and settled separately. Commission is per shipment.</p>
+            <p>{shipments.length} lot{shipments.length === 1 ? '' : 's'} · each tracked &amp; settled separately</p>
           </div>
-          <span className="text-sm text-slate-500">{shipments.length} lot{shipments.length === 1 ? '' : 's'}</span>
+          {supplier.status !== 'DISABLED' && shipments.length > 0 && (
+            <div className="flex flex-wrap items-center gap-2">
+              <button onClick={() => openCommissionModal()} className="btn-compact">
+                <Percent size={12} /> Set Commission
+              </button>
+              <button onClick={() => openExpenseModal()} className="btn-compact">
+                <Receipt size={12} /> Add Expense
+              </button>
+            </div>
+          )}
         </div>
 
         {isLoadingShipments ? (
@@ -399,198 +468,75 @@ const SupplierDetail = ({ supplierId, onBack }) => {
           </div>
         ) : (
           <div className="space-y-3">
-            {shipments.map((s) => {
-              const ratePending = s.commissionRate == null
-              const draft = rateDrafts[s.id] ?? (ratePending ? '' : String(s.commissionRate))
-              return (
-                <div key={s.id} className="shipment-lot-card">
-                  <div className="shipment-lot-head">
-                    <div className="flex items-center gap-2">
-                      <span className="shipment-lot-tag">Lot #{s.id}</span>
-                      <span className="text-sm text-slate-500">{s.date}</span>
-                    </div>
-                    <span className={`badge ${s.settlementStatus === 'SETTLED' ? 'badge-emerald' : 'badge-amber'}`}>
-                      {s.settlementStatus === 'SETTLED' ? 'Settled' : 'Open'}
-                    </span>
-                  </div>
+            {openShipments.length === 0 ? (
+              <p className="text-sm text-slate-500">All shipments are settled.</p>
+            ) : (
+              openShipments.map(renderLot)
+            )}
 
-                  <div className="shipment-lot-grid">
-                    <div><span>Est. Value</span><strong>{formatCurrency(s.estimatedValue)}</strong></div>
-                    <div><span>Advance Paid</span><strong>{formatCurrency(s.advancePaid)}</strong></div>
-                    <div><span>Total Sold</span><strong>{formatCurrency(s.totalSold)}</strong></div>
-                    <div><span>Commission</span><strong>{ratePending ? '—' : formatCurrency(s.commissionAmount)}</strong></div>
-                    <div className="shipment-lot-net"><span>Net Payable</span><strong>{formatCurrency(s.netPayable)}</strong></div>
+            {settledShipments.length > 0 && (
+              <div className="pt-1">
+                <button
+                  type="button"
+                  onClick={() => setShowSettled((v) => !v)}
+                  className="text-sm font-semibold text-slate-500 hover:text-slate-800"
+                >
+                  {showSettled ? '▾ Hide' : '▸ Show'} settled ({settledShipments.length})
+                </button>
+                {showSettled && (
+                  <div className="mt-3 space-y-3 opacity-75">
+                    {settledShipments.map(renderLot)}
                   </div>
-
-                  <div className="shipment-lot-rate">
-                    <label><Percent size={13} /> Commission rate{ratePending && <span className="badge badge-amber ml-1">to negotiate</span>}</label>
-                    <div className="flex items-center gap-2">
-                      <div className="input-with-suffix" style={{ maxWidth: '8rem' }}>
-                        <input
-                          type="number"
-                          min="0"
-                          max="100"
-                          step="0.5"
-                          value={draft}
-                          onChange={(e) => setRateDrafts((prev) => ({ ...prev, [s.id]: e.target.value }))}
-                          className="input-field"
-                          placeholder="0"
-                        />
-                        <span className="input-suffix">%</span>
-                      </div>
-                      <button
-                        onClick={() => handleSaveRate(s)}
-                        disabled={savingRateId === s.id}
-                        className="btn-primary flex items-center gap-1.5"
-                      >
-                        <Check size={14} /> {savingRateId === s.id ? 'Saving…' : (ratePending ? 'Set Rate' : 'Update')}
-                      </button>
-                    </div>
-                  </div>
-                </div>
-              )
-            })}
+                )}
+              </div>
+            )}
           </div>
         )}
       </div>
 
-      {/* SUPPLIER STATEMENT */}
+      {/* CURRENT STOCK */}
       <div className="supplier-panel">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div>
-            <h3 className="flex items-center gap-2"><FileText size={18} className="text-blue-600" /> Supplier Statement</h3>
-            <p>Net payable after commission, product payments and expense dues</p>
-          </div>
-          <div className="period-toggle">
-            <button className={statementPeriod === 'today' ? 'active' : ''} onClick={() => setStatementPeriod('today')}>Today</button>
-            <button className={statementPeriod === 'all' ? 'active' : ''} onClick={() => setStatementPeriod('all')}>All Time</button>
-          </div>
-        </div>
-
-        {isLoadingStatement ? (
-          <p className="mt-4 text-sm text-slate-500">Loading statement…</p>
-        ) : statement ? (
-          <>
-            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-3">
-              <div className="balance-pill balance-pill-emerald">
-                <p>Total Sale</p>
-                <p>{formatCurrency(statement.totalSale)}</p>
-              </div>
-              <div className="balance-pill balance-pill-amber">
-                <p>− Commission</p>
-                <p>{formatCurrency(statement.commission)}</p>
-              </div>
-              <div className="balance-pill">
-                <p>− Product Paid</p>
-                <p>{formatCurrency(statement.productPaid)}</p>
-              </div>
-            </div>
-            <div className="statement-net">
-              <span>Net Payable to Supplier</span>
-              <strong>{formatCurrency(statement.netPayable)}</strong>
-            </div>
-
-            {/* Other expense — a SEPARATE receivable from the supplier, not netted above */}
-            <div className="mt-5 border-t border-dashed border-slate-200 pt-4">
-              <div className="mb-2 flex items-center gap-2">
-                <Receipt size={15} className="text-slate-500" />
-                <h4 className="text-sm font-bold text-slate-700">Other Expense (supplier owes separately)</h4>
-              </div>
-              <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
-                <div className="balance-pill">
-                  <p>Expense Fronted</p>
-                  <p>{formatCurrency(statement.expenseTotal)}</p>
-                </div>
-                <div className="balance-pill balance-pill-emerald">
-                  <p>Received Back</p>
-                  <p>{formatCurrency(statement.expenseReceived)}</p>
-                </div>
-                <div className="balance-pill balance-pill-rose">
-                  <p>Outstanding Due</p>
-                  <p>{formatCurrency(statement.expenseDue)}</p>
-                </div>
-              </div>
-              <p className="mt-2 text-xs text-slate-500">
-                Not deducted from the net payable. Reduces only when the supplier pays it back (Record Payment → Expense received).
-              </p>
-            </div>
-          </>
-        ) : (
-          <p className="mt-4 text-sm text-slate-500">No statement data available.</p>
-        )}
-      </div>
-
-      {/* PRODUCTS */}
-      <div className="supplier-panel">
-        <div className="mb-4 flex items-center justify-between">
-          <h3 className="flex items-center gap-2"><Package size={18} className="text-blue-600" /> Products In Stock</h3>
+        <div className="mb-3 flex items-center justify-between">
+          <h3 className="flex items-center gap-2"><Package size={17} className="text-blue-600" /> Current Stock</h3>
           <span className="text-sm text-slate-500">{products.length} item{products.length === 1 ? '' : 's'}</span>
         </div>
 
         {products.length === 0 ? (
-          <div className="empty-state !py-8">
-            <Package size={28} className="empty-state-icon" />
-            <p className="empty-state-title">No products yet</p>
-            <p className="empty-state-sub">No shipments received from this supplier.</p>
-          </div>
+          <p className="text-sm text-slate-500">No stock from this supplier right now.</p>
         ) : (
-          <>
-            {/* Mobile */}
-            <div className="space-y-2 lg:hidden">
-              {products.map((product) => {
-                const isStockOut = Number(product.quantity) <= 0
-                return (
-                  <div key={product.id} className="rounded-lg border border-slate-200 bg-white p-3">
-                    <div className="flex items-start justify-between gap-2">
-                      <div className="min-w-0">
-                        <p className="font-semibold text-slate-900 truncate">{product.productName}</p>
-                        <p className="text-xs text-slate-500">{product.category}</p>
-                      </div>
-                      <span className={`badge ${isStockOut ? 'badge-rose' : 'badge-emerald'}`}>
-                        {isStockOut ? 'Stock Out' : 'In Stock'}
-                      </span>
-                    </div>
-                    <div className="mt-2 flex items-center gap-4 text-sm">
-                      <span className="text-slate-600"><span className="font-bold text-slate-900">{product.quantity}</span> {product.unit}</span>
-                    </div>
-                  </div>
-                )
-              })}
-            </div>
-
-            {/* Desktop */}
-            <div className="hidden lg:block overflow-x-auto rounded-xl border border-slate-200">
-              <table className="w-full min-w-[600px] text-sm">
-                <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200">
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">Product</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">Category</th>
-                    <th className="px-4 py-3 text-center font-semibold text-slate-700">Qty</th>
-                    <th className="px-4 py-3 text-center font-semibold text-slate-700">Unit</th>
-                    <th className="px-4 py-3 text-center font-semibold text-slate-700">Status</th>
-                  </tr>
-                </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {products.map((product) => {
-                    const isStockOut = Number(product.quantity) <= 0
-                    return (
-                      <tr key={product.id} className="hover:bg-slate-50 transition">
-                        <td className="px-4 py-3 text-slate-800 font-medium">{product.productName}</td>
-                        <td className="px-4 py-3 text-slate-700">{product.category}</td>
-                        <td className="px-4 py-3 text-center text-slate-700 font-semibold">{product.quantity}</td>
-                        <td className="px-4 py-3 text-center text-slate-600">{product.unit}</td>
-                        <td className="px-4 py-3 text-center">
-                          <span className={`badge ${isStockOut ? 'badge-rose' : 'badge-emerald'}`}>
-                            {isStockOut ? 'Stock Out' : 'In Stock'}
-                          </span>
-                        </td>
-                      </tr>
-                    )
-                  })}
-                </tbody>
-              </table>
-            </div>
-          </>
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <table className="w-full min-w-[520px] text-sm">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200">
+                  <th className="px-3 py-2 text-left font-semibold text-slate-700">Product</th>
+                  <th className="px-3 py-2 text-left font-semibold text-slate-700">Category</th>
+                  <th className="px-3 py-2 text-left font-semibold text-slate-700">Lot</th>
+                  <th className="px-3 py-2 text-right font-semibold text-slate-700">Qty</th>
+                  <th className="px-3 py-2 text-center font-semibold text-slate-700">Status</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {products.map((product) => {
+                  const isStockOut = Number(product.quantity) <= 0
+                  return (
+                    <tr key={product.id} className="hover:bg-slate-50 transition">
+                      <td className="px-3 py-2 font-medium text-slate-800">{product.productName}</td>
+                      <td className="px-3 py-2 text-slate-600">
+                        {[product.category, product.subCategoryName].filter(Boolean).join(' › ') || '—'}
+                      </td>
+                      <td className="px-3 py-2 text-slate-500">{product.deliveryId ? `#${product.deliveryId}` : '—'}</td>
+                      <td className="px-3 py-2 text-right font-semibold text-slate-800">
+                        {product.quantity} <span className="text-xs text-slate-400">{String(product.unit || '').toUpperCase()}</span>
+                      </td>
+                      <td className="px-3 py-2 text-center">
+                        <span className={`badge ${isStockOut ? 'badge-rose' : 'badge-emerald'}`}>{isStockOut ? 'Out' : 'In'}</span>
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
         )}
       </div>
 
@@ -713,19 +659,120 @@ const SupplierDetail = ({ supplierId, onBack }) => {
         </div>
       )}
 
-      {/* PAYMENT MODAL */}
-      {showPaymentModal && (
-        <div className="modal-overlay">
-          <div className="modal-content" style={{ maxWidth: '48rem' }}>
-            <div className="modal-header">
-              <div>
-                <h2>Record Payment for {supplier.name}</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Select supplier operation type below</p>
+      {/* SETTLE CONFIRMATION */}
+      {settleTarget && (() => {
+        const t = settleTarget
+        const ratePending = t.commissionRate == null
+        const payable = Math.max(0, (Number(t.totalSold) || 0) - (Number(t.advancePaid) || 0))
+        const commission = Number(t.commissionAmount) || 0
+        const expense = Number(t.expenseDue) || 0
+        const cashOut = Math.max(0, payable - commission - expense)
+        return (
+          <div className="modal-overlay">
+            <div className="modal-content" style={{ maxWidth: '30rem' }}>
+              <div className="modal-header">
+                <div className="flex items-center gap-2.5">
+                  <div className="modal-icon-circle bg-blue-100 text-blue-700"><Check size={18} /></div>
+                  <div>
+                    <h2>Settle Lot #{t.id}?</h2>
+                    <p className="text-xs text-slate-500 mt-0.5">This records the payments and closes the shipment.</p>
+                  </div>
+                </div>
+                <button onClick={() => setSettleTarget(null)} className="modal-close-btn">✕</button>
               </div>
-              <button onClick={() => setShowPaymentModal(false)} className="modal-close-btn">✕</button>
+              <div className="modal-body">
+                {ratePending ? (
+                  <div className="status-error"><span>!</span><span>Set the commission rate before settling.</span></div>
+                ) : (
+                  <>
+                    <div className="space-y-2">
+                      <div className="box-row"><span>Product payment to supplier</span><strong>{formatCurrency(payable)}</strong></div>
+                      <div className="box-row"><span>Commission you collect</span><strong className="text-amber-700">{formatCurrency(commission)}</strong></div>
+                      <div className="box-row"><span>Expense you collect</span><strong className="text-rose-700">{formatCurrency(expense)}</strong></div>
+                    </div>
+                    <div className="statement-net mt-3">
+                      <span>Cash you hand over (net)</span>
+                      <strong>{formatCurrency(cashOut)}</strong>
+                    </div>
+                    <p className="mt-3 text-xs text-slate-500">
+                      All three movements will be recorded against this supplier. The supplier balance, commission and expense due will all update. This cannot be undone from the UI.
+                    </p>
+                  </>
+                )}
+              </div>
+              <div className="modal-footer">
+                <button onClick={() => setSettleTarget(null)} className="btn-secondary" disabled={settlingId === t.id}>Cancel</button>
+                <button
+                  onClick={handleConfirmSettle}
+                  disabled={ratePending || settlingId === t.id}
+                  className="btn-primary flex items-center gap-2"
+                >
+                  <Check size={14} /> {settlingId === t.id ? 'Settling…' : 'Yes, settle'}
+                </button>
+              </div>
             </div>
-            <div className="modal-body max-h-[70vh] overflow-y-auto">
-              <TransactionForm entryMode="payment" onClose={() => setShowPaymentModal(false)} />
+          </div>
+        )
+      })()}
+
+      {/* COMMISSION MODAL */}
+      {showCommissionModal && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: '30rem' }}>
+            <div className="modal-header">
+              <div className="flex items-center gap-2.5">
+                <div className="modal-icon-circle bg-blue-100 text-blue-700"><Percent size={18} /></div>
+                <div>
+                  <h2>Set Commission Rate</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">Negotiated rate for a shipment</p>
+                </div>
+              </div>
+              <button onClick={() => setShowCommissionModal(false)} className="modal-close-btn">✕</button>
+            </div>
+            <div className="modal-body">
+              <div className="form-grid">
+                <div className="form-field form-field-full">
+                  <label className="form-label"><Truck size={13} /> Shipment (lot) <span className="text-red-500">*</span></label>
+                  <select
+                    value={commissionForm.deliveryId}
+                    onChange={(e) => {
+                      const id = e.target.value
+                      const lot = shipments.find((s) => String(s.id) === String(id))
+                      setCommissionForm({ deliveryId: id, rate: lot && lot.commissionRate != null ? String(lot.commissionRate) : '' })
+                    }}
+                    className="input-field"
+                    autoFocus
+                  >
+                    <option value="">Select shipment…</option>
+                    {shipments.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        Lot #{s.id} · {s.date} · {s.commissionRate == null ? 'pending' : `${s.commissionRate}%`}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="form-field">
+                  <label className="form-label"><Percent size={13} /> Commission Rate <span className="text-red-500">*</span></label>
+                  <div className="input-with-suffix">
+                    <input
+                      type="number" min="0" max="100" step="0.5"
+                      value={commissionForm.rate}
+                      onChange={(e) => setCommissionForm((p) => ({ ...p, rate: e.target.value }))}
+                      className="input-field" placeholder="0"
+                    />
+                    <span className="input-suffix">%</span>
+                  </div>
+                </div>
+              </div>
+              {commissionError && (
+                <div className="status-error mt-3"><span>!</span><span>{commissionError}</span></div>
+              )}
+            </div>
+            <div className="modal-footer">
+              <button onClick={() => setShowCommissionModal(false)} className="btn-secondary" disabled={isSavingCommission}>Cancel</button>
+              <button onClick={handleCommissionSave} disabled={isSavingCommission} className="btn-primary flex items-center gap-2">
+                <Check size={14} /> {isSavingCommission ? 'Saving…' : 'Save Rate'}
+              </button>
             </div>
           </div>
         </div>
@@ -749,13 +796,28 @@ const SupplierDetail = ({ supplierId, onBack }) => {
             </div>
             <div className="modal-body">
               <div className="form-grid">
+                <div className="form-field form-field-full">
+                  <label className="form-label"><Truck size={13} /> Shipment (lot) <span className="text-red-500">*</span></label>
+                  <select
+                    value={expenseForm.deliveryId}
+                    onChange={(e) => setExpenseForm((p) => ({ ...p, deliveryId: e.target.value }))}
+                    className="input-field"
+                    autoFocus
+                  >
+                    <option value="">Select shipment…</option>
+                    {shipments.map((s) => (
+                      <option key={s.id} value={s.id}>
+                        Lot #{s.id} · {s.date}{s.totalQuantity ? ` · ${s.totalQuantity}` : ''}
+                      </option>
+                    ))}
+                  </select>
+                </div>
                 <div className="form-field">
                   <label className="form-label"><Tag size={13} /> Category <span className="text-red-500">*</span></label>
                   <select
                     value={expenseForm.categoryId}
                     onChange={(e) => setExpenseForm((p) => ({ ...p, categoryId: e.target.value }))}
                     className="input-field"
-                    autoFocus
                   >
                     <option value="">Select category…</option>
                     {categories.map((c) => (
@@ -764,7 +826,7 @@ const SupplierDetail = ({ supplierId, onBack }) => {
                   </select>
                 </div>
                 <div className="form-field">
-                  <label className="form-label"><DollarSign size={13} /> Total Amount <span className="text-red-500">*</span></label>
+                  <label className="form-label"><DollarSign size={13} /> Expense Amount <span className="text-red-500">*</span></label>
                   <div className="input-with-suffix">
                     <input
                       type="number"
@@ -777,24 +839,8 @@ const SupplierDetail = ({ supplierId, onBack }) => {
                     />
                     <span className="input-suffix">৳</span>
                   </div>
-                </div>
-                <div className="form-field">
-                  <label className="form-label"><Wallet size={13} /> Supplier Funded</label>
-                  <div className="input-with-suffix">
-                    <input
-                      type="number"
-                      min="0"
-                      step="1"
-                      value={expenseForm.paidAmount}
-                      onChange={(e) => setExpenseForm((p) => ({ ...p, paidAmount: e.target.value }))}
-                      className="input-field"
-                      placeholder="0"
-                    />
-                    <span className="input-suffix">৳</span>
-                  </div>
                   <p className="mt-1 text-xs text-slate-500">
-                    Remaining becomes a supplier due of{' '}
-                    {formatCurrency(Math.max((Number(expenseForm.amount) || 0) - (Number(expenseForm.paidAmount) || 0), 0))}
+                    You pay this now; the full amount becomes a due the supplier owes you.
                   </p>
                 </div>
                 <div className="form-field">

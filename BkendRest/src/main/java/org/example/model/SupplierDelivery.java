@@ -40,6 +40,10 @@ public class SupplierDelivery {
     @JoinColumn(name = "wholesaler_supplier_id", nullable = false)
     private WholesalerSupplier wholesalerSupplier;
 
+    /** Wholesaler-defined name for the shipment (e.g. "Lakhna70Lot"). */
+    @Column(length = 120)
+    private String name;
+
     @Column(name = "delivery_date", nullable = false)
     private LocalDateTime deliveryDate;
 

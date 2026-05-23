@@ -94,6 +94,16 @@ public class ExpenseService {
                 .findByWholesaler_IdAndId(wholesalerId, request.wholesalerSupplierId())
                 .orElseThrow(() -> new BadRequestException("Supplier account not found."));
 
+        org.example.model.SupplierDelivery delivery = null;
+        if (request.deliveryId() != null) {
+            delivery = supplierDeliveryRepository.findById(request.deliveryId())
+                    .orElseThrow(() -> new BadRequestException("Shipment not found."));
+            if (!delivery.getWholesaler().getId().equals(wholesalerId)
+                    || !delivery.getWholesalerSupplier().getId().equals(supplierAccount.getId())) {
+                throw new BadRequestException("Shipment does not belong to this supplier.");
+            }
+        }
+
         BigDecimal amount = nonNegative(request.amount(), "Expense amount cannot be negative.");
         if (amount.signum() == 0) {
             throw new BadRequestException("Expense amount must be greater than zero.");
@@ -109,6 +119,7 @@ public class ExpenseService {
         SupplierExpense expense = new SupplierExpense();
         expense.setWholesaler(wholesaler);
         expense.setWholesalerSupplier(supplierAccount);
+        expense.setDelivery(delivery);
         expense.setCategory(category);
         expense.setAmount(amount);
         expense.setPaidAmount(paid);
@@ -173,8 +184,8 @@ public class ExpenseService {
                 : zero(saleItemRepository.sumLineTotalBySupplier(wholesalerId, account.getId()));
 
         // Commission is negotiated per shipment, so aggregate it shipment-wise:
-        // commission = sum over the supplier's lots of (sold value in period * lot rate).
-        BigDecimal commission = BigDecimal.ZERO;
+        // gross commission = sum over the supplier's lots of (sold value in period * lot rate).
+        BigDecimal commissionGross = BigDecimal.ZERO;
         for (org.example.model.SupplierDelivery lot : supplierDeliveryRepository
                 .findByWholesaler_IdAndWholesalerSupplier_IdOrderByDeliveryDateDesc(wholesalerId, account.getId())) {
             BigDecimal rate = lot.getCommissionRate();
@@ -184,7 +195,14 @@ public class ExpenseService {
             BigDecimal soldInPeriod = today
                     ? zero(saleItemRepository.sumLineTotalByDeliveryBetween(lot.getId(), start, end))
                     : zero(saleItemRepository.sumLineTotalByDelivery(lot.getId()));
-            commission = commission.add(soldInPeriod.multiply(rate).divide(BigDecimal.valueOf(100), 2, java.math.RoundingMode.HALF_UP));
+            commissionGross = commissionGross.add(soldInPeriod.multiply(rate).divide(BigDecimal.valueOf(100), 2, java.math.RoundingMode.HALF_UP));
+        }
+        // Subtract commission already collected (via Payments commission-receive or Settle).
+        BigDecimal commissionReceived = zero(supplierSettlementRepository
+                .sumAmountBySupplierAndType(wholesalerId, account.getId(), SettlementType.COMMISSION_RECEIVE));
+        BigDecimal commission = commissionGross.subtract(commissionReceived);
+        if (commission.signum() < 0) {
+            commission = BigDecimal.ZERO;
         }
 
         BigDecimal productPaid = zero(supplierSettlementRepository
@@ -233,6 +251,7 @@ public class ExpenseService {
         return new ExpenseResponse(
                 e.getId(),
                 e.getWholesalerSupplier().getId(),
+                e.getDelivery() == null ? null : e.getDelivery().getId(),
                 e.getCategory().getId(),
                 e.getCategory().getName(),
                 e.getAmount(),

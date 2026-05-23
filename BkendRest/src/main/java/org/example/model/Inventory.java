@@ -56,6 +56,11 @@ public class Inventory {
     @JoinColumn(name = "category_id")
     private Category category;
 
+    /** Level-3 Lot, when the variety uses lots. Null otherwise. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "sub_category_id")
+    private SubCategory subCategory;
+
     @Column(name = "quantity_on_hand", nullable = false, precision = 14, scale = 3)
     private BigDecimal quantityOnHand = BigDecimal.ZERO;
 

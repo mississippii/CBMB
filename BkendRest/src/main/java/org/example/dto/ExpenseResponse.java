@@ -6,6 +6,7 @@ import java.time.LocalDateTime;
 public record ExpenseResponse(
         Long id,
         Long wholesalerSupplierId,
+        Long deliveryId,
         Long categoryId,
         String categoryName,
         BigDecimal amount,

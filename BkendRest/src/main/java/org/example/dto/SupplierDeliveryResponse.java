@@ -8,6 +8,7 @@ public record SupplierDeliveryResponse(
         Long id,
         Long wholesalerId,
         Long wholesalerSupplierId,
+        String name,
         LocalDateTime deliveryDate,
         BigDecimal totalQuantity,
         String status,
@@ -20,6 +21,8 @@ public record SupplierDeliveryResponse(
         BigDecimal totalSold,        // sum of sold line totals for this lot
         BigDecimal commissionAmount, // totalSold * commissionRate
         BigDecimal netPayable,       // totalSold - commission - advancePaid
+        BigDecimal expenseTotal,     // other expenses booked against this lot
+        BigDecimal expenseDue,       // expense the supplier still owes for this lot
         List<SupplierDeliveryItemResponse> items
 ) {
 }

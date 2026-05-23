@@ -49,6 +49,10 @@ public class SupplierDeliveryItem {
     @JoinColumn(name = "category_id")
     private Category category;
 
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "sub_category_id")
+    private SubCategory subCategory;
+
     @Column(nullable = false, precision = 14, scale = 3)
     private BigDecimal quantity;
 

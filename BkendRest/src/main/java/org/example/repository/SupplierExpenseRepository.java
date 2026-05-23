@@ -12,6 +12,8 @@ public interface SupplierExpenseRepository extends JpaRepository<SupplierExpense
     List<SupplierExpense> findByWholesaler_IdAndWholesalerSupplier_IdOrderByExpenseDateDesc(
             Long wholesalerId, Long wholesalerSupplierId);
 
+    List<SupplierExpense> findByDelivery_Id(Long deliveryId);
+
     @Query("""
         SELECT COALESCE(SUM(e.amount), 0) FROM SupplierExpense e
         WHERE e.wholesaler.id = :wholesalerId
@@ -22,4 +24,11 @@ public interface SupplierExpenseRepository extends JpaRepository<SupplierExpense
                                           @Param("supplierId") Long supplierId,
                                           @Param("from") LocalDateTime from,
                                           @Param("to") LocalDateTime to);
+
+    // Shipment-wise expense rollups.
+    @Query("SELECT COALESCE(SUM(e.amount), 0) FROM SupplierExpense e WHERE e.delivery.id = :deliveryId")
+    java.math.BigDecimal sumAmountByDelivery(@Param("deliveryId") Long deliveryId);
+
+    @Query("SELECT COALESCE(SUM(e.dueAmount), 0) FROM SupplierExpense e WHERE e.delivery.id = :deliveryId")
+    java.math.BigDecimal sumDueByDelivery(@Param("deliveryId") Long deliveryId);
 }

@@ -109,7 +109,14 @@ public class SaleService {
         BigDecimal quantity = positive(request.quantity(), "Quantity must be greater than zero.");
         BigDecimal unitPrice = nonNegative(request.unitPrice(), "Unit price cannot be negative.");
         BigDecimal paidAmount = nonNegative(request.paymentAmount(), "Payment amount cannot be negative.");
-        BigDecimal netAmount = money(quantity.multiply(unitPrice));
+        BigDecimal grossAmount = money(quantity.multiply(unitPrice));
+        BigDecimal discountAmount = nonNegative(request.discountAmount(), "Discount cannot be negative.");
+        if (discountAmount.compareTo(grossAmount) > 0) {
+            throw new BadRequestException("Discount cannot exceed the sale amount.");
+        }
+        // Net = gross - discount. Everything downstream (due, commission, supplier payable)
+        // works off the net (discounted) amount.
+        BigDecimal netAmount = money(grossAmount.subtract(discountAmount));
         boolean oneTimeCustomer = request.wholesalerCustomerId() == null;
         boolean crateSale = inventory.getUnit() == UnitType.BOX && !oneTimeCustomer;
         Integer banglaCratesGiven = resolveSpecificCrates(request.banglaCratesGiven());
@@ -151,8 +158,8 @@ public class SaleService {
         sale.setCustomerType(oneTimeCustomer ? "ONE_TIME" : "PERMANENT");
         sale.setSaleDate(LocalDateTime.now());
         sale.setSaleType(dueAmount.signum() == 0 ? SaleType.PAY_INSTANT : SaleType.PAY_LATER);
-        sale.setGrossAmount(netAmount);
-        sale.setDiscountAmount(BigDecimal.ZERO);
+        sale.setGrossAmount(grossAmount);
+        sale.setDiscountAmount(discountAmount);
         sale.setNetAmount(netAmount);
         sale.setPaidAmount(paidAmount);
         sale.setDueAmount(dueAmount);
@@ -179,6 +186,7 @@ public class SaleService {
         item.setDelivery(delivery);
         item.setProduct(inventory.getProduct());
         item.setCategory(inventory.getCategory());
+        item.setSubCategory(inventory.getSubCategory());
         item.setQuantity(quantity);
         item.setUnit(inventory.getUnit());
         item.setUnitPrice(unitPrice);
@@ -210,11 +218,15 @@ public class SaleService {
                 inventory.getProduct().getName(),
                 category == null ? null : category.getId(),
                 category == null ? null : category.getName(),
+                inventory.getSubCategory() == null ? null : inventory.getSubCategory().getId(),
+                inventory.getSubCategory() == null ? null : inventory.getSubCategory().getName(),
                 supplierAccount.getId(),
                 supplierAccount.getSupplier().getName(),
                 quantity,
                 inventory.getUnit().name(),
                 unitPrice,
+                grossAmount,
+                discountAmount,
                 netAmount,
                 paidAmount,
                 dueAmount,

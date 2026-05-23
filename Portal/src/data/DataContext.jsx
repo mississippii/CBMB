@@ -56,6 +56,7 @@ const createDefaultState = () => ({
   supplierProducts: [],
   shipments: [],
   catalogProducts: [],
+  subCategories: [],   // fixed system list of Lot1..Lot200
   boxInventory: EMPTY_BOX_INVENTORY,
 });
 
@@ -112,6 +113,8 @@ const mapInventoryItem = (item) => ({
   totalValue: 0,
   deliveryId: item.deliveryId || null,
   deliveryDate: item.deliveryDate || null,
+  subCategoryId: item.subCategoryId || null,
+  subCategoryName: item.subCategoryName || '',
   dateReceived: item.updatedAt?.split('T')[0] || getDateOnly(),
   status: Number(item.quantityOnHand) > 0 ? 'in_stock' : 'sold_out',
 });
@@ -162,6 +165,7 @@ const mapShipment = (shipment) => ({
   id: shipment.id,
   wholesalerId: shipment.wholesalerId,
   supplierId: shipment.wholesalerSupplierId,
+  name: shipment.name || '',
   deliveryDate: shipment.deliveryDate,
   date: shipment.deliveryDate?.split('T')[0] || getDateOnly(),
   totalQuantity: roundMoney(Number(shipment.totalQuantity) || 0),
@@ -174,14 +178,17 @@ const mapShipment = (shipment) => ({
   totalSold: roundMoney(Number(shipment.totalSold) || 0),
   commissionAmount: roundMoney(Number(shipment.commissionAmount) || 0),
   netPayable: roundMoney(Number(shipment.netPayable) || 0),
+  expenseTotal: roundMoney(Number(shipment.expenseTotal) || 0),
+  expenseDue: roundMoney(Number(shipment.expenseDue) || 0),
   items: (shipment.items || []).map((item) => ({
     id: item.id,
     inventoryId: item.inventoryId,
     productId: item.productId,
     productName: item.productName,
     categoryId: item.categoryId || null,
-    categoryName: item.categoryName || 'No Category',
-    grade: item.grade || '',
+    categoryName: item.categoryName || '',
+    subCategoryId: item.subCategoryId || null,
+    subCategoryName: item.subCategoryName || '',
     quantity: roundMoney(Number(item.quantity) || 0),
     unit: String(item.unit || '').toLowerCase(),
     note: item.note || '',
@@ -203,10 +210,14 @@ const mapTransaction = (transaction) => ({
   product: transaction.productName || null,
   categoryId: transaction.categoryId || null,
   category: transaction.categoryName || null,
+  subCategoryId: transaction.subCategoryId || null,
+  subCategoryName: transaction.subCategoryName || '',
   quantity: Number(transaction.quantity) || 0,
   unit: String(transaction.unit || '').toLowerCase(),
   unitPrice: Number(transaction.unitPrice) || 0,
   totalAmount: Number(transaction.saleAmount) || 0,
+  grossAmount: Number(transaction.grossAmount) || 0,
+  discountAmount: Number(transaction.discountAmount) || 0,
   paymentAmount: Number(transaction.paymentAmount) || 0,
   customerNewDue: Number(transaction.dueAmount) || 0,
   boxesReturned: Number(transaction.boxesReturned) || 0,
@@ -244,6 +255,7 @@ export const DataProvider = ({ children }) => {
   const [supplierProducts, setSupplierProducts] = useState(initialState.supplierProducts);
   const [shipments, setShipments] = useState(initialState.shipments);
   const [catalogProducts, setCatalogProducts] = useState(initialState.catalogProducts);
+  const [subCategories, setSubCategories] = useState(initialState.subCategories);
   const [boxInventory, setBoxInventory] = useState(initialState.boxInventory);
   const [isLoading, setIsLoading] = useState(false);
   const [dataError, setDataError] = useState('');
@@ -257,6 +269,7 @@ export const DataProvider = ({ children }) => {
         setSupplierProducts([]);
         setShipments([]);
         setCatalogProducts([]);
+        setSubCategories([]);
         setBoxInventory(createDefaultState().boxInventory);
         setDataError('');
         setIsLoading(false);
@@ -269,10 +282,11 @@ export const DataProvider = ({ children }) => {
       setIsLoading(true);
       setDataError('');
       try {
-        const [supplierAccounts, customerAccounts, productCatalog, inventoryItems, boxDashboard, transactionItems, shipmentItems] = await Promise.all([
+        const [supplierAccounts, customerAccounts, productCatalog, subCatalog, inventoryItems, boxDashboard, transactionItems, shipmentItems] = await Promise.all([
           loadSection('Suppliers', () => postJson(apiPaths.wholesalerSuppliersList(admin.wholesalerId)), []),
           loadSection('Customers', () => postJson(apiPaths.wholesalerCustomersList(admin.wholesalerId)), []),
           loadSection('Products', () => postJson(apiPaths.productsList), []),
+          loadSection('SubCategories', () => postJson(apiPaths.adminSubCategoriesList), []),
           loadSection('Inventory', () => postJson(apiPaths.inventoryList(admin.wholesalerId)), []),
           loadSection('Crates', () => postJson(apiPaths.boxesDashboard(admin.wholesalerId)), EMPTY_BOX_INVENTORY),
           loadSection('Transactions', () => postJson(apiPaths.transactionsList(admin.wholesalerId)), []),
@@ -286,6 +300,7 @@ export const DataProvider = ({ children }) => {
         setSupplierProducts(asArray(inventoryItems.data).map(mapInventoryItem));
         setShipments(asArray(shipmentItems.data).map(mapShipment));
         setCatalogProducts(asArray(productCatalog.data));
+        setSubCategories(asArray(subCatalog.data));
         setBoxInventory(mapBoxDashboard(boxDashboard.data));
         setDataError('');
       } catch (error) {
@@ -391,76 +406,74 @@ export const DataProvider = ({ children }) => {
     }
 
     const supplierId = Number(productData.supplierId);
-    const productId = Number(productData.productId);
-    const categoryId = productData.categoryId ? Number(productData.categoryId) : null;
-    const quantity = toPositiveNumber(productData.quantity);
+    const productId = productData.productId ? Number(productData.productId) : null;
+    const unit = String(productData.unit || '').trim().toUpperCase();
     const supplier = suppliers.find((item) => item.id === supplierId);
-    const catalogProduct = catalogProducts.find((item) => Number(item.id) === productId);
-    const productCategories = catalogProduct?.categories || [];
-    const category = categoryId
-      ? productCategories.find((item) => Number(item.id) === categoryId)
-      : null;
 
-    if (!supplier) {
-      throw new Error('Supplier not found.');
-    }
-    if (!catalogProduct) {
-      throw new Error('Please select a valid product.');
-    }
-    if (productCategories.length > 0 && !category) {
-      throw new Error('Please select a valid category for this product.');
-    }
-    if (!quantity) {
-      throw new Error('Please provide valid quantity.');
-    }
+    if (!supplier) throw new Error('Supplier not found.');
+    if (!productId) throw new Error('Please pick a product from the catalog.');
+    if (!unit) throw new Error('Please pick a unit (KG, PCS, BOX, DOZEN, BAG, MOUND).');
 
-    const unit = String(catalogProduct.defaultUnit || 'PCS').toLowerCase();
+    // Build items[] from lines. Each line: { categoryId, subCategoryId, quantity }.
+    const rawLines = Array.isArray(productData.lines) ? productData.lines : [];
+    const items = rawLines
+      .map((line) => ({
+        categoryId: line.categoryId ? Number(line.categoryId) : null,
+        subCategoryId: line.subCategoryId ? Number(line.subCategoryId) : null,
+        quantity: toPositiveNumber(line.quantity),
+      }))
+      .filter((it) => it.quantity > 0);
+    if (items.length === 0) throw new Error('Add at least one line with a quantity.');
+
+    const shipmentName = String(productData.name || '').trim();
+    if (!shipmentName) throw new Error('Shipment name is required.');
+
     const delivery = await postJson(apiPaths.supplierDeliveriesCreate(admin.wholesalerId), {
       wholesalerSupplierId: supplierId,
+      name: shipmentName,
       estimatedValue: Number(productData.estimatedValue) || 0,
       advancePaid: Number(productData.advancePaid) || 0,
       commissionRate: productData.commissionRate === '' || productData.commissionRate == null
         ? null
         : Number(productData.commissionRate),
       note: productData.note?.trim() || '',
-      items: [
-        {
-          productId,
-          categoryId,
-          quantity,
-          note: productData.note?.trim() || '',
-        },
-      ],
+      items: items.map((it) => ({
+        productId,
+        categoryId: it.categoryId,
+        subCategoryId: it.subCategoryId,
+        quantity: it.quantity,
+        unit,
+        note: productData.note?.trim() || '',
+      })),
     });
 
-    const deliveryItem = delivery.items?.[0];
-    const inventoryQuantity = roundMoney(Number(deliveryItem?.inventoryQuantityOnHand) || quantity);
-    const productName = deliveryItem?.productName || catalogProduct.name;
-    const categoryName = deliveryItem?.categoryName || category?.name || 'No Category';
-
-    // Inventory is lot-scoped: every delivery creates its own inventory row.
-    const productAfterDelivery = {
-      id: deliveryItem?.inventoryId || getNextId(supplierProducts),
-      inventoryId: deliveryItem?.inventoryId,
-      deliveryItemId: deliveryItem?.id,
+    // Each delivery item becomes its own lot-scoped inventory row.
+    const newProducts = (delivery.items || []).map((di) => ({
+      id: di.inventoryId || getNextId(supplierProducts),
+      inventoryId: di.inventoryId,
+      deliveryItemId: di.id,
       deliveryId: delivery.id,
       deliveryDate: delivery.deliveryDate,
-      productId,
-      categoryId,
+      productId: di.productId,
+      categoryId: di.categoryId || null,
+      subCategoryId: di.subCategoryId || null,
+      subCategoryName: di.subCategoryName || '',
       supplierId,
-      productName,
-      category: categoryName,
-      unit,
-      quantity: inventoryQuantity,
+      productName: di.productName,
+      category: di.categoryName || 'No Category',
+      unit: String(di.unit || unit).toLowerCase(),
+      quantity: roundMoney(Number(di.inventoryQuantityOnHand) || Number(di.quantity) || 0),
       unitPrice: 0,
       totalValue: 0,
       dateReceived: delivery.deliveryDate?.split('T')[0] || getDateOnly(),
-      status: 'in_stock',
-    };
+      status: Number(di.inventoryQuantityOnHand) > 0 ? 'in_stock' : 'sold_out',
+    }));
 
     const newShipment = mapShipment(delivery);
     setShipments((prev) => [newShipment, ...prev]);
+    setSupplierProducts((prev) => [...prev, ...newProducts]);
 
+    const totalQty = items.reduce((sum, it) => sum + it.quantity, 0);
     const newTransaction = {
       id: getNextId(transactions),
       date: getDateOnly(),
@@ -468,19 +481,18 @@ export const DataProvider = ({ children }) => {
       transactionType: 'SupplierDelivery',
       supplier: supplier.name,
       supplierId: supplier.id,
-      product: productAfterDelivery.productName,
-      productId: productAfterDelivery.id,
-      category: productAfterDelivery.category,
-      quantity,
+      product: newProducts[0]?.productName || '',
+      productId: newProducts[0]?.id,
+      category: '',
+      quantity: totalQty,
       unitPrice: 0,
-      unit: productAfterDelivery.unit,
+      unit: unit.toLowerCase(),
       totalAmount: 0,
       note: productData.note?.trim() || '',
     };
-
-    setSupplierProducts((prev) => [...prev, productAfterDelivery]);
     setTransactions((prev) => [...prev, newTransaction]);
-    return productAfterDelivery;
+
+    return newProducts;
   };
 
   const getSupplierShipments = async (supplierAccountId) => {
@@ -496,6 +508,17 @@ export const DataProvider = ({ children }) => {
     const data = await postJson(apiPaths.shipmentSetCommission(admin.wholesalerId), {
       deliveryId: Number(deliveryId),
       commissionRate: Number(commissionRate),
+    });
+    const updated = mapShipment(data);
+    setShipments((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+    return updated;
+  };
+
+  const settleShipment = async (deliveryId, settled = true) => {
+    if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
+    const data = await postJson(apiPaths.shipmentSettle(admin.wholesalerId), {
+      deliveryId: Number(deliveryId),
+      settled,
     });
     const updated = mapShipment(data);
     setShipments((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
@@ -543,6 +566,7 @@ export const DataProvider = ({ children }) => {
     const inventoryId = Number(saleData.productId);
     const quantity = toPositiveNumber(saleData.quantity);
     const unitPrice = toPositiveNumber(saleData.unitPrice);
+    const discountAmount = roundMoney(Math.max(0, Number(saleData.discountAmount) || 0));
     const paymentAmount = roundMoney(Math.max(0, Number(saleData.paymentAmount) || 0));
     const selectedInventory = supplierProducts.find((product) => product.id === inventoryId);
 
@@ -563,6 +587,7 @@ export const DataProvider = ({ children }) => {
       inventoryId,
       quantity,
       unitPrice,
+      discountAmount,
       paymentAmount,
       cratesGiven: Number(saleData.cratesGiven) || 0,
       banglaCratesGiven: Number(saleData.banglaCratesGiven) || 0,
@@ -646,6 +671,8 @@ export const DataProvider = ({ children }) => {
       quantity: Number(response.quantity) || quantity,
       unitPrice: Number(response.unitPrice) || unitPrice,
       totalAmount: Number(response.netAmount) || 0,
+      grossAmount: Number(response.grossAmount) || 0,
+      discountAmount: Number(response.discountAmount) || 0,
       paymentAmount: Number(response.paidAmount) || 0,
       customer: response.customerName || null,
       customerPhone: response.customerPhone || null,
@@ -1078,6 +1105,7 @@ export const DataProvider = ({ children }) => {
         shipments,
         boxInventory,
         catalogProducts,
+        subCategories,
         isLoading,
         dataError,
         addSupplier,
@@ -1098,6 +1126,7 @@ export const DataProvider = ({ children }) => {
         addSupplierProduct,
         getSupplierShipments,
         setShipmentCommission,
+        settleShipment,
         writeOffStock,
         updateBoxInventory,
         addBoxes,

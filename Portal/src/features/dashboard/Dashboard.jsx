@@ -1,34 +1,35 @@
 import { useEffect, useState } from 'react';
 import {
   LayoutGrid, Package, Truck, Users, UserCheck,
-  ArrowLeftRight, CreditCard,
+  ArrowLeftRight, CreditCard, ShoppingCart,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import Navbar from '../../shared/components/Navbar';
 import CratesDashboard from '../crates/CratesDashboard';
 import SuppliersList from '../suppliers/SuppliersList';
 import CustomersList from '../customers/CustomersList';
-import TransactionForm from '../sales/TransactionForm';
 import TransactionsList from '../transactions/TransactionsList';
-import AddProducts from '../inventory/AddProducts';
+import ShipmentsPage from '../shipments/ShipmentsPage';
+import SalesPage from '../sales/SalesPage';
+import PaymentsPage from '../payments/PaymentsPage';
 import StoreInventory from '../inventory/StoreInventory';
 import { useData } from '../../data/DataContext';
 
 const tabs = [
   { id: 'inventory',     label: 'Inventory',     icon: LayoutGrid },
-  { id: 'add-products',  label: 'Shipment',       icon: Truck },
-  { id: 'suppliers',     label: 'Suppliers',      icon: UserCheck },
-  { id: 'customers',     label: 'Customers',      icon: Users },
   { id: 'dashboard',     label: 'Crates',        icon: Package },
-  { id: 'transactions',  label: 'Transactions',   icon: ArrowLeftRight },
-  { id: 'payment',       label: 'Payments',       icon: CreditCard },
+  { id: 'shipments',     label: 'Shipments',     icon: Truck },
+  { id: 'suppliers',     label: 'Suppliers',     icon: UserCheck },
+  { id: 'customers',     label: 'Customers',     icon: Users },
+  { id: 'sales',         label: 'Sales',         icon: ShoppingCart },
+  { id: 'payment',       label: 'Payments',      icon: CreditCard },
+  { id: 'transactions',  label: 'Transactions',  icon: ArrowLeftRight },
 ];
 
 const Dashboard = () => {
   const { admin: wholesaler } = useAuth();
   const { isLoading, dataError } = useData();
   const [activeTab, setActiveTab] = useState('inventory');
-  const [showTransactionModal, setShowTransactionModal] = useState(false);
   const [showLoadFallback, setShowLoadFallback] = useState(false);
 
   useEffect(() => {
@@ -66,31 +67,8 @@ const Dashboard = () => {
           </div>
         </div>
 
-        {showTransactionModal && (
-          <div className="modal-overlay">
-            <div className="modal-content" style={{ maxWidth: '48rem' }}>
-              <div className="modal-header">
-                <h2>Record New Sale</h2>
-                <button onClick={() => setShowTransactionModal(false)} className="modal-close-btn">✕</button>
-              </div>
-              <div className="modal-body max-h-[70vh] overflow-y-auto">
-                <TransactionForm entryMode="sale" onClose={() => setShowTransactionModal(false)} />
-              </div>
-            </div>
-          </div>
-        )}
-
         <div className="workspace-layout">
           <aside className="workspace-sidebar">
-            <div className="sidebar-header">
-              <button
-                onClick={() => setShowTransactionModal(true)}
-                className="btn-primary w-full"
-              >
-                + New Sale
-              </button>
-            </div>
-
             <nav className="sidebar-nav">
               {tabs.map(({ id, label, icon: Icon }) => (
                 <button
@@ -131,13 +109,14 @@ const Dashboard = () => {
                     <small>{dataError}</small>
                   </div>
                 )}
-                {activeTab === 'inventory'    && <StoreInventory onAddProducts={() => setActiveTab('add-products')} />}
+                {activeTab === 'sales'        && <SalesPage />}
+                {activeTab === 'inventory'    && <StoreInventory />}
                 {activeTab === 'dashboard'    && <CratesDashboard />}
-                {activeTab === 'add-products' && <AddProducts />}
+                {activeTab === 'shipments'    && <ShipmentsPage />}
                 {activeTab === 'suppliers'    && <SuppliersList />}
                 {activeTab === 'customers'    && <CustomersList />}
                 {activeTab === 'transactions' && <TransactionsList />}
-                {activeTab === 'payment'      && <TransactionForm entryMode="payment" />}
+                {activeTab === 'payment'      && <PaymentsPage />}
               </div>
             )}
           </main>

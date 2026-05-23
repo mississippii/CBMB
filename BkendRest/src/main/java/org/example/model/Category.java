@@ -16,11 +16,16 @@ import org.example.model.enums.RecordStatus;
 import lombok.Getter;
 import lombok.Setter;
 
+/**
+ * Level-2: a variety under a product (e.g. Mango → Amrapali).
+ * If `usesLots` is true, every inventory/sale row under this variety carries
+ * a sub_category_id pointing into the fixed Lot1..LotN enumeration.
+ */
 @Getter
 @Setter
 @Entity
 @Table(name = "categories",
-        uniqueConstraints = @jakarta.persistence.UniqueConstraint(name = "uk_categories_product_name_grade", columnNames = {"product_id", "name", "grade"}),
+        uniqueConstraints = @jakarta.persistence.UniqueConstraint(name = "uk_categories_product_name", columnNames = {"product_id", "name"}),
         indexes = @jakarta.persistence.Index(name = "idx_categories_product_status", columnList = "product_id,status"))
 public class Category {
 
@@ -35,8 +40,8 @@ public class Category {
     @Column(nullable = false, length = 120)
     private String name;
 
-    @Column(nullable = false, length = 80)
-    private String grade = "";
+    @Column(name = "uses_lots", nullable = false)
+    private boolean usesLots = false;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)

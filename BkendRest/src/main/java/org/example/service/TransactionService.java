@@ -86,6 +86,9 @@ public class TransactionService {
         SaleItem item = transaction.getSaleId() == null
                 ? null
                 : saleItemRepository.findFirstBySale_Id(transaction.getSaleId()).orElse(null);
+        Sale sale = transaction.getSaleId() == null
+                ? null
+                : saleRepository.findById(transaction.getSaleId()).orElse(null);
         Payment payment = transaction.getPaymentId() == null
                 ? null
                 : paymentRepository.findFirstByWholesalerIdAndId(transaction.getWholesalerId(), transaction.getPaymentId()).orElse(null);
@@ -104,10 +107,14 @@ public class TransactionService {
                 item == null ? null : item.getProduct().getName(),
                 item == null || item.getCategory() == null ? null : item.getCategory().getId(),
                 item == null || item.getCategory() == null ? null : item.getCategory().getName(),
+                item == null || item.getSubCategory() == null ? null : item.getSubCategory().getId(),
+                item == null || item.getSubCategory() == null ? null : item.getSubCategory().getName(),
                 item == null ? null : item.getQuantity(),
                 item == null ? null : item.getUnit().name(),
                 item == null ? null : item.getUnitPrice(),
                 transaction.getSaleAmount(),
+                sale == null ? null : sale.getGrossAmount(),
+                sale == null ? null : sale.getDiscountAmount(),
                 transaction.getPaymentAmount(),
                 transaction.getDueAmount(),
                 payment == null ? 0 : payment.getBoxesReturned(),

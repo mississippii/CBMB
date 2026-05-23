@@ -10,23 +10,17 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
 
     List<Inventory> findByWholesaler_IdOrderByUpdatedAtDesc(Long wholesalerId);
 
-    Optional<Inventory> findByWholesaler_IdAndWholesalerSupplier_IdAndProduct_IdAndCategory_IdAndUnit(
+    /** Lot-scoped lookup keyed by (delivery, product, category, sub_category, unit). */
+    Optional<Inventory> findByWholesaler_IdAndDelivery_IdAndProduct_IdAndCategory_IdAndSubCategory_IdAndUnit(
             Long wholesalerId,
-            Long wholesalerSupplierId,
+            Long deliveryId,
             Long productId,
             Long categoryId,
+            Long subCategoryId,
             UnitType unit
     );
 
-    Optional<Inventory> findByWholesaler_IdAndWholesalerSupplier_IdAndProduct_IdAndCategoryIsNullAndUnit(
-            Long wholesalerId,
-            Long wholesalerSupplierId,
-            Long productId,
-            UnitType unit
-    );
-
-    // Lot-scoped lookups (inventory bound to a specific shipment).
-    Optional<Inventory> findByWholesaler_IdAndDelivery_IdAndProduct_IdAndCategory_IdAndUnit(
+    Optional<Inventory> findByWholesaler_IdAndDelivery_IdAndProduct_IdAndCategory_IdAndSubCategoryIsNullAndUnit(
             Long wholesalerId,
             Long deliveryId,
             Long productId,
@@ -34,10 +28,12 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
             UnitType unit
     );
 
-    Optional<Inventory> findByWholesaler_IdAndDelivery_IdAndProduct_IdAndCategoryIsNullAndUnit(
+    Optional<Inventory> findByWholesaler_IdAndDelivery_IdAndProduct_IdAndCategoryIsNullAndSubCategoryIsNullAndUnit(
             Long wholesalerId,
             Long deliveryId,
             Long productId,
             UnitType unit
     );
+
+    boolean existsByDelivery_IdAndQuantityOnHandGreaterThan(Long deliveryId, java.math.BigDecimal quantity);
 }

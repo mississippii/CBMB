@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 
 public record CreateExpenseRequest(
         Long wholesalerSupplierId,
+        Long deliveryId,        // shipment this expense belongs to (optional)
         Long categoryId,
         String categoryName,   // if categoryId not given, find/create by name
         BigDecimal amount,     // total expense cost

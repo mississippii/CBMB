@@ -1,9 +1,20 @@
--- CBTrading initial schema.
--- Source of truth: ARCHITECTURE.md
--- MySQL 8 / InnoDB
+-- ---------------------------------------------------------------------------
+-- CBTrading — single-file schema (consolidates V1 + V3 + V4 + V5 + V6).
+-- MySQL 8 / InnoDB. Run on an empty database.
+--
+-- If you intend to keep using Flyway afterwards, also baseline it so it
+-- doesn't try to re-apply the migrations:
+--   spring.flyway.baseline-on-migrate = true
+--   spring.flyway.baseline-version    = 6
+-- ---------------------------------------------------------------------------
+
 SET NAMES utf8mb4;
-SET FOREIGN_KEY_CHECKS=0;
-SET UNIQUE_CHECKS=0;
+SET FOREIGN_KEY_CHECKS = 0;
+SET UNIQUE_CHECKS      = 0;
+
+-- =============================================================
+-- Users / wholesalers / parties
+-- =============================================================
 
 CREATE TABLE `users` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -35,9 +46,11 @@ CREATE TABLE `wholesalers` (
     ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB;
 
+-- V3 added `business_name`.
 CREATE TABLE `suppliers` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `name` varchar(150) NOT NULL,
+  `business_name` varchar(160) DEFAULT NULL,
   `phone` varchar(30) NOT NULL,
   `address` text,
   `status` enum('ACTIVE','DISABLED') NOT NULL DEFAULT 'ACTIVE',
@@ -98,45 +111,67 @@ CREATE TABLE `wholesaler_customers` (
     ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB;
 
+-- =============================================================
+-- Product catalog
+-- =============================================================
+
+-- Product is just a name now. Unit is chosen per shipment / sale line.
 CREATE TABLE `products` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `name` varchar(160) NOT NULL,
-  `default_unit` enum('PCS','KG','DOZEN','BOX','BAG','MOUND') NOT NULL DEFAULT 'PCS',
-  `unit_type` enum('COUNT','WEIGHT') NOT NULL DEFAULT 'COUNT',
   `status` enum('ACTIVE','DISABLED') NOT NULL DEFAULT 'ACTIVE',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_products_name` (`name`),
-  KEY `idx_products_status_name` (`status`,`name`),
-  CONSTRAINT `chk_products_unit_type` CHECK (
-    (`unit_type` = 'WEIGHT' AND `default_unit` IN ('KG','MOUND'))
-    OR
-    (`unit_type` = 'COUNT' AND `default_unit` IN ('PCS','DOZEN','BOX','BAG'))
-  )
+  KEY `idx_products_status_name` (`status`,`name`)
 ) ENGINE=InnoDB;
 
+-- Level-2: a variety under a product (e.g. Mango → Amrapali).
+-- A variety can optionally "use lots" — if so, every sale/inventory row under it
+-- carries a sub_category_id pointing to one of the system-fixed Lot1..LotN rows.
 CREATE TABLE `categories` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `product_id` bigint unsigned NOT NULL,
   `name` varchar(120) NOT NULL,
-  `grade` varchar(80) NOT NULL DEFAULT '',
+  `uses_lots` tinyint(1) NOT NULL DEFAULT '0',
   `status` enum('ACTIVE','DISABLED') NOT NULL DEFAULT 'ACTIVE',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
-  UNIQUE KEY `uk_categories_product_name_grade` (`product_id`,`name`,`grade`),
+  UNIQUE KEY `uk_categories_product_name` (`product_id`,`name`),
   KEY `idx_categories_product_status` (`product_id`,`status`),
   CONSTRAINT `fk_categories_product` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`)
     ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB;
 
+-- Level-3: system-fixed enumeration shared across every variety that uses lots.
+-- Seeded once at install with Lot1..Lot200. Admin never modifies these.
+CREATE TABLE `sub_categories` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `name` varchar(40) NOT NULL,
+  `sort_order` int NOT NULL DEFAULT '0',
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_sub_categories_name` (`name`),
+  KEY `idx_sub_categories_sort` (`sort_order`)
+) ENGINE=InnoDB;
+
+-- =============================================================
+-- Shipments (V4 added estimated_value/advance_paid/commission_rate/settlement_status,
+-- V6 added the name column)
+-- =============================================================
+
 CREATE TABLE `supplier_deliveries` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `wholesaler_id` bigint unsigned NOT NULL,
   `wholesaler_supplier_id` bigint unsigned NOT NULL,
+  `name` varchar(120) DEFAULT NULL,
   `delivery_date` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `total_quantity` decimal(14,3) NOT NULL DEFAULT '0.000',
+  `estimated_value` decimal(14,2) NOT NULL DEFAULT '0.00',
+  `advance_paid` decimal(14,2) NOT NULL DEFAULT '0.00',
+  `commission_rate` decimal(5,2) DEFAULT NULL,
+  `settlement_status` enum('OPEN','SETTLED') NOT NULL DEFAULT 'OPEN',
   `note` text,
   `status` enum('POSTED','CANCELLED') NOT NULL DEFAULT 'POSTED',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -160,6 +195,7 @@ CREATE TABLE `supplier_delivery_items` (
   `delivery_id` bigint unsigned NOT NULL,
   `product_id` bigint unsigned NOT NULL,
   `category_id` bigint unsigned DEFAULT NULL,
+  `sub_category_id` bigint unsigned DEFAULT NULL,
   `quantity` decimal(14,3) NOT NULL,
   `unit` enum('PCS','KG','DOZEN','BOX','BAG','MOUND') NOT NULL DEFAULT 'PCS',
   `note` text,
@@ -168,7 +204,10 @@ CREATE TABLE `supplier_delivery_items` (
   KEY `idx_delivery_items_delivery` (`delivery_id`),
   KEY `idx_delivery_items_wholesaler_product` (`wholesaler_id`,`product_id`),
   KEY `idx_delivery_items_wholesaler_category` (`wholesaler_id`,`category_id`),
+  KEY `idx_delivery_items_sub_category` (`sub_category_id`),
   CONSTRAINT `fk_delivery_items_category` FOREIGN KEY (`category_id`) REFERENCES `categories` (`id`)
+    ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `fk_delivery_items_sub_category` FOREIGN KEY (`sub_category_id`) REFERENCES `sub_categories` (`id`)
     ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `fk_delivery_items_delivery` FOREIGN KEY (`delivery_id`) REFERENCES `supplier_deliveries` (`id`)
     ON DELETE RESTRICT ON UPDATE CASCADE,
@@ -179,12 +218,15 @@ CREATE TABLE `supplier_delivery_items` (
   CONSTRAINT `chk_delivery_items_quantity_positive` CHECK (`quantity` > 0)
 ) ENGINE=InnoDB;
 
+-- Inventory is lot-scoped (delivery_id) AND lot-numbered (sub_category_id when the variety uses lots).
 CREATE TABLE `inventory` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `wholesaler_id` bigint unsigned NOT NULL,
   `wholesaler_supplier_id` bigint unsigned NOT NULL,
+  `delivery_id` bigint unsigned DEFAULT NULL,
   `product_id` bigint unsigned NOT NULL,
   `category_id` bigint unsigned DEFAULT NULL,
+  `sub_category_id` bigint unsigned DEFAULT NULL,
   `quantity_on_hand` decimal(14,3) NOT NULL DEFAULT '0.000',
   `unit` enum('PCS','KG','DOZEN','BOX','BAG','MOUND') NOT NULL DEFAULT 'PCS',
   `status` enum('ACTIVE','STOCK_OUT','DISABLED') NOT NULL DEFAULT 'ACTIVE',
@@ -192,11 +234,17 @@ CREATE TABLE `inventory` (
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_inventory_item`
-    (`wholesaler_id`,`wholesaler_supplier_id`,`product_id`,`category_id`,`unit`),
+    (`wholesaler_id`,`wholesaler_supplier_id`,`delivery_id`,`product_id`,`category_id`,`sub_category_id`,`unit`),
   KEY `idx_inventory_wholesaler_status` (`wholesaler_id`,`status`),
   KEY `idx_inventory_supplier` (`wholesaler_supplier_id`),
+  KEY `idx_inventory_delivery` (`delivery_id`),
   KEY `idx_inventory_product_category` (`product_id`,`category_id`),
+  KEY `idx_inventory_sub_category` (`sub_category_id`),
   CONSTRAINT `fk_inventory_category` FOREIGN KEY (`category_id`) REFERENCES `categories` (`id`)
+    ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `fk_inventory_sub_category` FOREIGN KEY (`sub_category_id`) REFERENCES `sub_categories` (`id`)
+    ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `fk_inventory_delivery` FOREIGN KEY (`delivery_id`) REFERENCES `supplier_deliveries` (`id`)
     ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `fk_inventory_product` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`)
     ON DELETE RESTRICT ON UPDATE CASCADE,
@@ -234,6 +282,10 @@ CREATE TABLE `stock_ledger` (
     ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `chk_stock_ledger_quantity_positive` CHECK (`quantity` > 0)
 ) ENGINE=InnoDB;
+
+-- =============================================================
+-- Sales / Payments
+-- =============================================================
 
 CREATE TABLE `sales` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -273,13 +325,16 @@ CREATE TABLE `sales` (
   CONSTRAINT `chk_sales_customer_type` CHECK (`customer_type` IN ('PERMANENT','ONE_TIME'))
 ) ENGINE=InnoDB;
 
+-- V4: sale_items.delivery_id (each sold line is tagged with the lot).
 CREATE TABLE `sale_items` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `wholesaler_id` bigint unsigned NOT NULL,
   `sale_id` bigint unsigned NOT NULL,
   `wholesaler_supplier_id` bigint unsigned NOT NULL,
+  `delivery_id` bigint unsigned DEFAULT NULL,
   `product_id` bigint unsigned NOT NULL,
   `category_id` bigint unsigned DEFAULT NULL,
+  `sub_category_id` bigint unsigned DEFAULT NULL,
   `quantity` decimal(14,3) NOT NULL,
   `unit` enum('PCS','KG','DOZEN','BOX','BAG','MOUND') NOT NULL DEFAULT 'PCS',
   `unit_price` decimal(14,2) NOT NULL DEFAULT '0.00',
@@ -290,9 +345,15 @@ CREATE TABLE `sale_items` (
   PRIMARY KEY (`id`),
   KEY `idx_sale_items_sale` (`sale_id`),
   KEY `idx_sale_items_supplier` (`wholesaler_id`,`wholesaler_supplier_id`),
+  KEY `idx_sale_items_delivery` (`delivery_id`),
   KEY `idx_sale_items_product` (`wholesaler_id`,`product_id`),
   KEY `idx_sale_items_category` (`wholesaler_id`,`category_id`),
+  KEY `idx_sale_items_sub_category` (`sub_category_id`),
   CONSTRAINT `fk_sale_items_category` FOREIGN KEY (`category_id`) REFERENCES `categories` (`id`)
+    ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `fk_sale_items_sub_category` FOREIGN KEY (`sub_category_id`) REFERENCES `sub_categories` (`id`)
+    ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `fk_sale_items_delivery` FOREIGN KEY (`delivery_id`) REFERENCES `supplier_deliveries` (`id`)
     ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `fk_sale_items_product` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`)
     ON DELETE RESTRICT ON UPDATE CASCADE,
@@ -370,6 +431,10 @@ PARTITION BY RANGE COLUMNS(created_at) (
   PARTITION pmax VALUES LESS THAN (MAXVALUE)
 );
 
+-- =============================================================
+-- Supplier settlements, expenses, balances
+-- =============================================================
+
 CREATE TABLE `supplier_settlements` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `wholesaler_id` bigint unsigned NOT NULL,
@@ -411,10 +476,12 @@ CREATE TABLE `expense_categories` (
     ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB;
 
+-- V5: supplier_expenses.delivery_id (attach an expense to a shipment).
 CREATE TABLE `supplier_expenses` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `wholesaler_id` bigint unsigned NOT NULL,
   `wholesaler_supplier_id` bigint unsigned NOT NULL,
+  `delivery_id` bigint unsigned DEFAULT NULL,
   `category_id` bigint unsigned NOT NULL,
   `amount` decimal(14,2) NOT NULL DEFAULT '0.00',
   `paid_amount` decimal(14,2) NOT NULL DEFAULT '0.00',
@@ -428,8 +495,12 @@ CREATE TABLE `supplier_expenses` (
     (`wholesaler_id`,`wholesaler_supplier_id`,`expense_date`),
   KEY `idx_supplier_expense_category_date`
     (`wholesaler_id`,`category_id`,`expense_date`),
+  KEY `idx_supplier_expenses_delivery` (`delivery_id`),
   CONSTRAINT `fk_supplier_expenses_category`
     FOREIGN KEY (`category_id`) REFERENCES `expense_categories` (`id`)
+    ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `fk_supplier_expenses_delivery`
+    FOREIGN KEY (`delivery_id`) REFERENCES `supplier_deliveries` (`id`)
     ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `fk_supplier_expenses_wholesaler`
     FOREIGN KEY (`wholesaler_id`) REFERENCES `wholesalers` (`id`)
@@ -463,6 +534,10 @@ CREATE TABLE `other_due_balances` (
     FOREIGN KEY (`wholesaler_supplier_id`) REFERENCES `wholesaler_suppliers` (`id`)
     ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB;
+
+-- =============================================================
+-- Crates (boxes)
+-- =============================================================
 
 CREATE TABLE `box_types` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -551,6 +626,10 @@ CREATE TABLE `box_ledger` (
   ),
   CONSTRAINT `chk_box_ledger_quantity_positive` CHECK (`quantity` > 0)
 ) ENGINE=InnoDB;
+
+-- =============================================================
+-- Account ledger / balances / transactions log
+-- =============================================================
 
 CREATE TABLE `account_balances` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -641,6 +720,10 @@ PARTITION BY RANGE COLUMNS(created_at) (
   PARTITION pmax VALUES LESS THAN (MAXVALUE)
 );
 
+-- =============================================================
+-- JPA id generator backing table (seeds for hi-lo / table generators)
+-- =============================================================
+
 CREATE TABLE `jpa_id_generators` (
   `sequence_name` varchar(255) NOT NULL,
   `next_val` bigint NOT NULL,
@@ -651,5 +734,17 @@ INSERT INTO `jpa_id_generators` (`sequence_name`, `next_val`) VALUES
   ('payments', 0),
   ('transactions', 0);
 
-SET UNIQUE_CHECKS=1;
-SET FOREIGN_KEY_CHECKS=1;
+-- =============================================================
+-- Seed Lot1..Lot200 (system-fixed Level-3 enumeration).
+-- Generated via a recursive CTE so we don't have 200 inline values.
+-- =============================================================
+INSERT INTO `sub_categories` (`name`, `sort_order`)
+WITH RECURSIVE lots(n) AS (
+  SELECT 1
+  UNION ALL
+  SELECT n + 1 FROM lots WHERE n < 200
+)
+SELECT CONCAT('Lot', n), n FROM lots;
+
+SET UNIQUE_CHECKS      = 1;
+SET FOREIGN_KEY_CHECKS = 1;

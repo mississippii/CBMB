@@ -13,8 +13,9 @@ public record InventoryItemResponse(
         Long productId,
         String productName,
         Long categoryId,
-        String categoryName,
-        String grade,
+        String categoryName,        // variety name, e.g. "Amrapali"
+        Long subCategoryId,         // null if variety doesn't use lots
+        String subCategoryName,     // e.g. "Lot5"
         BigDecimal quantityOnHand,
         String unit,
         String status,

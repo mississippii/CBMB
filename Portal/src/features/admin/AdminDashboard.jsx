@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Users, ShieldCheck, ShieldOff, Calendar, Plus, Search, KeyRound,
   Building2, User, Mail, Phone, MapPin, Lock, Database,
-  ChevronLeft, ChevronRight, MoreVertical, X, LifeBuoy,
+  ChevronLeft, ChevronRight, ChevronDown, Pencil, FolderPlus, Tag, MoreVertical, X, LifeBuoy,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { useLang } from '../../shared/contexts/LanguageContext';
@@ -66,38 +66,49 @@ const AdminDashboard = () => {
   const [supportSearched, setSupportSearched] = useState(false);
   const [supportLoading, setSupportLoading] = useState(false);
 
-  // Product create
+  // Product catalog
   const [showProductModal, setShowProductModal] = useState(false);
-  const [productForm, setProductForm] = useState({
-    name: '', unitType: 'COUNT', defaultUnit: 'PCS', categories: [{ name: '', grade: '' }],
-  });
+  const [productForm, setProductForm] = useState({ name: '', categories: [{ name: '' }] });
   const [productError, setProductError] = useState('');
   const [productSaving, setProductSaving] = useState(false);
+  const [catalog, setCatalog] = useState([]);
+  const [catalogLoading, setCatalogLoading] = useState(false);
+  // Per-product UI state — expanded ids, in-flight category form state.
+  const [expanded, setExpanded] = useState({});
+  const [catEditor, setCatEditor] = useState(null); // { mode:'add'|'rename', productId, parentId?, categoryId?, value }
+  const [catSaving, setCatSaving] = useState(false);
 
-  const UNIT_BY_TYPE = {
-    COUNT: ['PCS', 'DOZEN', 'BOX', 'BAG'],
-    WEIGHT: ['KG', 'MOUND'],
+  const loadCatalog = async () => {
+    setCatalogLoading(true);
+    try {
+      const list = await postJson(apiPaths.adminProductsList);
+      setCatalog(Array.isArray(list) ? list : []);
+    } catch (err) {
+      showToast(err.message || 'Failed to load catalog.', 'error');
+    } finally {
+      setCatalogLoading(false);
+    }
   };
 
+  useEffect(() => {
+    if (activeTab === 'support') loadCatalog();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeTab]);
+
   const openProductModal = () => {
-    setProductForm({ name: '', unitType: 'COUNT', defaultUnit: 'PCS', categories: [{ name: '', grade: '' }] });
+    setProductForm({ name: '', categories: [{ name: '' }] });
     setProductError('');
     setShowProductModal(true);
   };
   const closeProductModal = () => { setShowProductModal(false); setProductError(''); };
 
-  const handleUnitTypeChange = (unitType) => {
-    setProductForm((p) => ({ ...p, unitType, defaultUnit: UNIT_BY_TYPE[unitType][0] }));
-  };
-
-  const updateCategory = (idx, field, value) => {
+  const updateCategory = (idx, value) => {
     setProductForm((p) => ({
       ...p,
-      categories: p.categories.map((c, i) => (i === idx ? { ...c, [field]: value } : c)),
+      categories: p.categories.map((c, i) => (i === idx ? { ...c, name: value } : c)),
     }));
   };
-
-  const addCategoryRow = () => setProductForm((p) => ({ ...p, categories: [...p.categories, { name: '', grade: '' }] }));
+  const addCategoryRow = () => setProductForm((p) => ({ ...p, categories: [...p.categories, { name: '' }] }));
   const removeCategoryRow = (idx) => setProductForm((p) => ({ ...p, categories: p.categories.filter((_, i) => i !== idx) }));
 
   const handleCreateProduct = async (e) => {
@@ -106,16 +117,47 @@ const AdminDashboard = () => {
     setProductSaving(true); setProductError('');
     try {
       const cleanCats = productForm.categories
-        .map((c) => ({ name: c.name.trim(), grade: (c.grade || '').trim() }))
+        .map((c) => ({ name: (c.name || '').trim() }))
         .filter((c) => c.name);
-      const payload = { ...productForm, name: productForm.name.trim(), categories: cleanCats };
+      const payload = { name: productForm.name.trim(), categories: cleanCats };
       const created = await postJson(apiPaths.adminProductsCreate, payload);
-      showToast(t('product.created').replace('{name}', created.name), 'success');
+      showToast(`Product "${created.name}" created`, 'success');
       closeProductModal();
+      loadCatalog();
     } catch (err) {
       setProductError(err.message || 'Failed to create product.');
     } finally {
       setProductSaving(false);
+    }
+  };
+
+  const handleCategorySave = async () => {
+    if (!catEditor) return;
+    const name = String(catEditor.value || '').trim();
+    if (!name) { showToast('Variety name is required.', 'error'); return; }
+    setCatSaving(true);
+    try {
+      if (catEditor.mode === 'add') {
+        await postJson(apiPaths.adminCategoriesCreate, {
+          productId: catEditor.productId,
+          name,
+          usesLots: !!catEditor.usesLots,
+        });
+        showToast('Variety added', 'success');
+      } else {
+        await postJson(apiPaths.adminCategoriesUpdate, {
+          categoryId: catEditor.categoryId,
+          name,
+          usesLots: catEditor.usesLots,
+        });
+        showToast('Variety updated', 'success');
+      }
+      setCatEditor(null);
+      loadCatalog();
+    } catch (err) {
+      showToast(err.message || 'Failed.', 'error');
+    } finally {
+      setCatSaving(false);
     }
   };
 
@@ -371,7 +413,117 @@ const AdminDashboard = () => {
                   <Plus size={15} /> {t('product.add')}
                 </button>
               </div>
+
+              {catalogLoading ? (
+                <p className="mt-3 text-sm text-slate-500">Loading catalog…</p>
+              ) : catalog.length === 0 ? (
+                <p className="mt-3 text-sm text-slate-500">No products yet. Click "Add Product" to start.</p>
+              ) : (
+                <div className="mt-3 space-y-2">
+                  {catalog.map((product) => {
+                    const isOpen = !!expanded[product.id];
+                    const varieties = product.categories || [];
+                    return (
+                      <div key={product.id} className="rounded-xl border border-slate-200 bg-white">
+                        <div className="flex items-center justify-between gap-2 p-3">
+                          <button
+                            type="button"
+                            onClick={() => setExpanded((e) => ({ ...e, [product.id]: !e[product.id] }))}
+                            className="flex flex-1 items-center gap-2 text-left min-w-0"
+                          >
+                            {isOpen ? <ChevronDown size={14} className="text-slate-500" /> : <ChevronRight size={14} className="text-slate-500" />}
+                            <span className="font-bold text-slate-900 truncate">{product.name}</span>
+                            <span className="badge badge-teal">{varieties.length} variet{varieties.length === 1 ? 'y' : 'ies'}</span>
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setCatEditor({ mode: 'add', productId: product.id, value: '', usesLots: false })}
+                            className="btn-compact"
+                            title="Add variety"
+                          >
+                            <FolderPlus size={12} /> Add variety
+                          </button>
+                        </div>
+                        {isOpen && varieties.length > 0 && (
+                          <div className="border-t border-slate-100 p-3 pt-2">
+                            <ul className="space-y-1">
+                              {varieties.map((v) => (
+                                <li key={v.id} className="group flex items-center gap-2 py-0.5">
+                                  <Tag size={11} className="text-slate-400 shrink-0" />
+                                  <span className="text-sm text-slate-800 truncate">{v.name}</span>
+                                  {v.usesLots && <span className="badge badge-amber">uses Lot1..200</span>}
+                                  <button
+                                    type="button"
+                                    onClick={() => setCatEditor({ mode: 'rename', productId: product.id, categoryId: v.id, value: v.name, usesLots: v.usesLots })}
+                                    className="icon-btn !w-7 !h-7 ml-auto opacity-0 transition group-hover:opacity-100"
+                                    title="Rename / toggle lots"
+                                  >
+                                    <Pencil size={12} />
+                                  </button>
+                                </li>
+                              ))}
+                            </ul>
+                          </div>
+                        )}
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
             </div>
+
+            {/* Category add/rename modal */}
+            {catEditor && (
+              <div className="modal-overlay">
+                <div className="modal-content" style={{ maxWidth: '24rem' }}>
+                  <div className="modal-header">
+                    <div className="flex items-center gap-2.5">
+                      <div className="modal-icon-circle bg-blue-100 text-blue-700">
+                        {catEditor.mode === 'add' ? <FolderPlus size={18} /> : <Pencil size={18} />}
+                      </div>
+                      <div>
+                        <h2>{catEditor.mode === 'add' ? 'Add category' : 'Rename category'}</h2>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          {catEditor.mode === 'add' ? 'New variety under this product' : 'Rename or toggle lot usage'}
+                        </p>
+                      </div>
+                    </div>
+                    <button onClick={() => setCatEditor(null)} className="modal-close-btn">✕</button>
+                  </div>
+                  <div className="modal-body">
+                    <div className="form-field">
+                      <label className="form-label"><Tag size={13} /> Variety name <span className="text-red-500">*</span></label>
+                      <input
+                        type="text"
+                        value={catEditor.value}
+                        onChange={(e) => setCatEditor((c) => ({ ...c, value: e.target.value }))}
+                        className="input-field"
+                        placeholder="e.g. Amrapali"
+                        autoFocus
+                      />
+                    </div>
+                    <label className="mt-3 flex items-start gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!!catEditor.usesLots}
+                        onChange={(e) => setCatEditor((c) => ({ ...c, usesLots: e.target.checked }))}
+                        className="mt-0.5"
+                      />
+                      <span>
+                        <span className="block text-sm font-semibold text-slate-800">This variety uses Lot1..Lot200</span>
+                        <span className="block text-xs text-slate-500">Wholesalers will pick one of the 200 lots when receiving a shipment of this variety.</span>
+                      </span>
+                    </label>
+                  </div>
+                  <div className="modal-footer">
+                    <button onClick={() => setCatEditor(null)} className="btn-secondary" disabled={catSaving}>Cancel</button>
+                    <button onClick={handleCategorySave} className="btn-primary flex items-center gap-2" disabled={catSaving}>
+                      {catSaving ? '…' : (catEditor.mode === 'add' ? 'Add' : 'Save')}
+                    </button>
+                  </div>
+                </div>
+              </div>
+            )}
           </div>
         )}
 
@@ -688,92 +840,35 @@ const AdminDashboard = () => {
                     />
                   </Field>
 
-                  {/* Unit type segmented */}
-                  <div className="form-field">
-                    <label className="form-label">{t('product.unitType')} <span className="text-red-500">*</span></label>
-                    <div className="unit-type-grid">
-                      <button
-                        type="button"
-                        onClick={() => handleUnitTypeChange('COUNT')}
-                        className={`unit-type-btn ${productForm.unitType === 'COUNT' ? 'active' : ''}`}
-                      >
-                        <span className="unit-type-icon">#</span>
-                        <div className="text-left">
-                          <p className="font-bold">{t('product.unitType.count')}</p>
-                          <p className="text-xs opacity-75">{t('product.unitType.count.hint')}</p>
-                        </div>
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => handleUnitTypeChange('WEIGHT')}
-                        className={`unit-type-btn ${productForm.unitType === 'WEIGHT' ? 'active' : ''}`}
-                      >
-                        <span className="unit-type-icon">kg</span>
-                        <div className="text-left">
-                          <p className="font-bold">{t('product.unitType.weight')}</p>
-                          <p className="text-xs opacity-75">{t('product.unitType.weight.hint')}</p>
-                        </div>
-                      </button>
-                    </div>
-                  </div>
-
-                  {/* Default unit */}
-                  <div className="form-field">
-                    <label className="form-label">{t('product.defaultUnit')} <span className="text-red-500">*</span></label>
-                    <div className="unit-pills">
-                      {UNIT_BY_TYPE[productForm.unitType].map((u) => (
-                        <button
-                          type="button"
-                          key={u}
-                          onClick={() => setProductForm((p) => ({ ...p, defaultUnit: u }))}
-                          className={`unit-pill ${productForm.defaultUnit === u ? 'active' : ''}`}
-                        >
-                          {u}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-
-                  {/* Categories */}
+                  {/* Top-level categories (optional seeds — deeper levels added from the catalog list) */}
                   <div className="form-field">
                     <label className="form-label">
-                      {t('product.categories')}
-                      <span className="form-label-hint">{t('product.categories.sub')}</span>
+                      Top-level categories
+                      <span className="form-label-hint">optional · add sub-categories later from the catalog list</span>
                     </label>
                     <div className="space-y-2">
                       {productForm.categories.map((cat, idx) => (
-                        <div key={idx} className="category-row">
+                        <div key={idx} className="flex items-center gap-2">
                           <input
                             type="text"
                             value={cat.name}
-                            onChange={(e) => updateCategory(idx, 'name', e.target.value)}
-                            placeholder={t('product.cat.name.placeholder')}
-                            className="input-field flex-1"
-                          />
-                          <input
-                            type="text"
-                            value={cat.grade}
-                            onChange={(e) => updateCategory(idx, 'grade', e.target.value)}
-                            placeholder={t('product.cat.grade.placeholder')}
+                            onChange={(e) => updateCategory(idx, e.target.value)}
+                            placeholder="e.g. Lakhna"
                             className="input-field flex-1"
                           />
                           <button
                             type="button"
                             onClick={() => removeCategoryRow(idx)}
-                            className="category-remove-btn"
+                            className="icon-btn"
                             disabled={productForm.categories.length === 1}
-                            aria-label={t('product.cat.remove')}
+                            aria-label="Remove"
                           >
                             <X size={14} />
                           </button>
                         </div>
                       ))}
-                      <button
-                        type="button"
-                        onClick={addCategoryRow}
-                        className="btn-secondary flex items-center gap-1.5 text-xs !py-1.5"
-                      >
-                        <Plus size={13} /> {t('product.cat.add')}
+                      <button type="button" onClick={addCategoryRow} className="btn-compact">
+                        <Plus size={12} /> Add another
                       </button>
                     </div>
                   </div>

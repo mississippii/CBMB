@@ -64,4 +64,22 @@ public class AdminController {
     public ProductCatalogResponse createProduct(@RequestBody CreateProductRequest request) {
         return productService.createProduct(request);
     }
+
+    @PostMapping("/categories/create")
+    @ResponseStatus(HttpStatus.CREATED)
+    public org.example.dto.CategoryCatalogResponse createCategory(
+            @RequestBody org.example.dto.CreateCategoryRequest request) {
+        return productService.createCategory(request);
+    }
+
+    @PostMapping("/categories/update")
+    public org.example.dto.CategoryCatalogResponse updateCategory(
+            @RequestBody org.example.dto.UpdateCategoryRequest request) {
+        return productService.updateCategory(request);
+    }
+
+    @PostMapping("/sub-categories/list")
+    public java.util.List<org.example.dto.SubCategoryResponse> listSubCategories() {
+        return productService.listSubCategories();
+    }
 }

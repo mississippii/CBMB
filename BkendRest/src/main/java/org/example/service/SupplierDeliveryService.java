@@ -68,6 +68,8 @@ public class SupplierDeliveryService {
     private final AccountLedgerRepository accountLedgerRepository;
     private final SupplierSettlementRepository supplierSettlementRepository;
     private final TransactionRepository transactionRepository;
+    private final org.example.repository.SupplierExpenseRepository supplierExpenseRepository;
+    private final org.example.repository.SubCategoryRepository subCategoryRepository;
 
     public SupplierDeliveryService(
             WholesalerRepository wholesalerRepository,
@@ -82,7 +84,9 @@ public class SupplierDeliveryService {
             AccountBalanceRepository accountBalanceRepository,
             AccountLedgerRepository accountLedgerRepository,
             SupplierSettlementRepository supplierSettlementRepository,
-            TransactionRepository transactionRepository
+            TransactionRepository transactionRepository,
+            org.example.repository.SupplierExpenseRepository supplierExpenseRepository,
+            org.example.repository.SubCategoryRepository subCategoryRepository
     ) {
         this.wholesalerRepository = wholesalerRepository;
         this.wholesalerSupplierRepository = wholesalerSupplierRepository;
@@ -97,6 +101,8 @@ public class SupplierDeliveryService {
         this.accountLedgerRepository = accountLedgerRepository;
         this.supplierSettlementRepository = supplierSettlementRepository;
         this.transactionRepository = transactionRepository;
+        this.supplierExpenseRepository = supplierExpenseRepository;
+        this.subCategoryRepository = subCategoryRepository;
     }
 
 
@@ -142,6 +148,139 @@ public class SupplierDeliveryService {
         return toDeliveryResponse(delivery);
     }
 
+    /**
+     * Settle = real financial close. Records three settlements at once:
+     *   1) PRODUCT_PAYMENT  for the lot's payable (totalSold − advancePaid)  → reduces supplier balance
+     *   2) COMMISSION_RECEIVE for the lot's commission                       → income, no balance change
+     *   3) EXPENSE_RECEIVE  for the lot's outstanding expense due             → also zeros the SupplierExpense dues
+     * Then flips status to SETTLED. Settle is one-way: re-open is refused (history preserved).
+     */
+    @Transactional
+    public SupplierDeliveryResponse setSettlementStatus(Long wholesalerId, org.example.dto.SettleShipmentRequest request) {
+        findWholesaler(wholesalerId);
+        if (request == null || request.deliveryId() == null) {
+            throw new BadRequestException("Shipment is required.");
+        }
+        boolean settle = request.settled() == null || request.settled();
+        if (!settle) {
+            throw new BadRequestException("Re-opening a settled shipment is not supported. Use manual payment adjustments instead.");
+        }
+        SupplierDelivery delivery = supplierDeliveryRepository.findById(request.deliveryId())
+                .orElseThrow(() -> new BadRequestException("Shipment not found."));
+        if (!delivery.getWholesaler().getId().equals(wholesalerId)) {
+            throw new BadRequestException("Shipment does not belong to this wholesaler.");
+        }
+        if (delivery.getSettlementStatus() == SettlementStatus.SETTLED) {
+            throw new BadRequestException("Shipment is already settled.");
+        }
+        if (delivery.getCommissionRate() == null) {
+            throw new BadRequestException("Set the commission rate before settling this shipment.");
+        }
+        if (inventoryRepository.existsByDelivery_IdAndQuantityOnHandGreaterThan(delivery.getId(), BigDecimal.ZERO)) {
+            throw new BadRequestException("Cannot settle: this shipment still has unsold stock.");
+        }
+
+        Wholesaler wholesaler = delivery.getWholesaler();
+        WholesalerSupplier supplierAccount = delivery.getWholesalerSupplier();
+
+        BigDecimal totalSold   = money(zero(saleItemRepository.sumLineTotalByDelivery(delivery.getId())));
+        BigDecimal advance     = money(zero(delivery.getAdvancePaid()));
+        BigDecimal rate        = delivery.getCommissionRate();
+        BigDecimal commission  = money(totalSold.multiply(rate).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP));
+        BigDecimal expenseDue  = money(zero(supplierExpenseRepository.sumDueByDelivery(delivery.getId())));
+        BigDecimal payable     = totalSold.subtract(advance);
+        if (payable.signum() < 0) payable = BigDecimal.ZERO;
+
+        if (payable.signum() > 0) {
+            recordShipmentSettlement(wholesaler, supplierAccount, delivery, SettlementType.PRODUCT_PAYMENT, payable, true,
+                    "Shipment #" + delivery.getId() + " settlement — product payable");
+        }
+        if (commission.signum() > 0) {
+            recordShipmentSettlement(wholesaler, supplierAccount, delivery, SettlementType.COMMISSION_RECEIVE, commission, false,
+                    "Shipment #" + delivery.getId() + " settlement — commission received");
+        }
+        if (expenseDue.signum() > 0) {
+            recordShipmentSettlement(wholesaler, supplierAccount, delivery, SettlementType.EXPENSE_RECEIVE, expenseDue, false,
+                    "Shipment #" + delivery.getId() + " settlement — expense received");
+            // Mark each SupplierExpense for this lot as fully paid back.
+            for (org.example.model.SupplierExpense e : supplierExpenseRepository.findByDelivery_Id(delivery.getId())) {
+                BigDecimal due = e.getDueAmount() == null ? BigDecimal.ZERO : e.getDueAmount();
+                if (due.signum() > 0) {
+                    BigDecimal paid = e.getPaidAmount() == null ? BigDecimal.ZERO : e.getPaidAmount();
+                    e.setPaidAmount(paid.add(due));
+                    e.setDueAmount(BigDecimal.ZERO);
+                    supplierExpenseRepository.save(e);
+                }
+            }
+        }
+
+        delivery.setSettlementStatus(SettlementStatus.SETTLED);
+        delivery = supplierDeliveryRepository.save(delivery);
+        return toDeliveryResponse(delivery);
+    }
+
+    private void recordShipmentSettlement(
+            Wholesaler wholesaler,
+            WholesalerSupplier supplierAccount,
+            SupplierDelivery delivery,
+            SettlementType type,
+            BigDecimal amount,
+            boolean reducesPayable,
+            String note
+    ) {
+        AccountBalance balance = accountBalanceRepository
+                .findByWholesaler_IdAndPartyTypeAndPartyAccountId(wholesaler.getId(), PartyType.WHOLESALER_SUPPLIER, supplierAccount.getId())
+                .orElseGet(() -> {
+                    AccountBalance b = new AccountBalance();
+                    b.setWholesaler(wholesaler);
+                    b.setPartyType(PartyType.WHOLESALER_SUPPLIER);
+                    b.setPartyAccountId(supplierAccount.getId());
+                    b.setBalance(supplierAccount.getOpeningDue() == null ? BigDecimal.ZERO : supplierAccount.getOpeningDue());
+                    return b;
+                });
+        BigDecimal previousDue = money(balance.getBalance());
+        BigDecimal dueAfter = reducesPayable ? money(previousDue.subtract(amount)) : previousDue;
+        if (reducesPayable) {
+            balance.setBalance(dueAfter);
+            accountBalanceRepository.save(balance);
+        }
+
+        SupplierSettlement settlement = new SupplierSettlement();
+        settlement.setWholesaler(wholesaler);
+        settlement.setWholesalerSupplier(supplierAccount);
+        settlement.setSettlementDate(LocalDateTime.now());
+        settlement.setSettlementType(type);
+        settlement.setAmount(amount);
+        settlement.setPreviousDue(previousDue);
+        settlement.setDueAfterSettlement(dueAfter);
+        settlement.setPaymentMethod(PaymentMethod.CASH);
+        settlement.setNote(note);
+        settlement = supplierSettlementRepository.save(settlement);
+
+        if (reducesPayable) {
+            AccountLedger ledger = new AccountLedger();
+            ledger.setWholesaler(wholesaler);
+            ledger.setPartyType(PartyType.WHOLESALER_SUPPLIER);
+            ledger.setPartyAccountId(supplierAccount.getId());
+            ledger.setReferenceType(AccountReferenceType.SUPPLIER_SETTLEMENT);
+            ledger.setReferenceId(settlement.getId());
+            ledger.setDebit(amount);
+            ledger.setCredit(BigDecimal.ZERO);
+            ledger.setNote(note);
+            accountLedgerRepository.save(ledger);
+        }
+
+        Transaction tx = new Transaction();
+        tx.setWholesalerId(wholesaler.getId());
+        tx.setTransactionType(TransactionType.PAYMENT);
+        tx.setWholesalerSupplierId(supplierAccount.getId());
+        tx.setSaleAmount(BigDecimal.ZERO);
+        tx.setPaymentAmount(amount);
+        tx.setDueAmount(dueAfter);
+        tx.setDescription(note);
+        transactionRepository.save(tx);
+    }
+
     @Transactional
     public SupplierDeliveryResponse receiveSupplierDelivery(Long wholesalerId, ReceiveSupplierDeliveryRequest request) {
         Wholesaler wholesaler = findWholesaler(wholesalerId);
@@ -166,9 +305,15 @@ public class SupplierDeliveryService {
         BigDecimal commissionRate = request.commissionRate() == null ? null
                 : nonNegative(request.commissionRate(), "Commission rate cannot be negative.");
 
+        String shipmentName = clean(request.name());
+        if (shipmentName == null || shipmentName.isBlank()) {
+            throw new BadRequestException("Shipment name is required.");
+        }
+
         SupplierDelivery delivery = new SupplierDelivery();
         delivery.setWholesaler(wholesaler);
         delivery.setWholesalerSupplier(wholesalerSupplier);
+        delivery.setName(shipmentName);
         delivery.setDeliveryDate(request.deliveryDate() == null ? LocalDateTime.now() : request.deliveryDate());
         delivery.setEstimatedValue(estimatedValue);
         delivery.setAdvancePaid(advancePaid);
@@ -271,10 +416,13 @@ public class SupplierDeliveryService {
         BigDecimal commission = rate == null ? BigDecimal.ZERO
                 : money(totalSold.multiply(rate).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP));
         BigDecimal netPayable = money(totalSold.subtract(commission).subtract(advancePaid));
+        BigDecimal expenseTotal = money(zero(supplierExpenseRepository.sumAmountByDelivery(delivery.getId())));
+        BigDecimal expenseDue = money(zero(supplierExpenseRepository.sumDueByDelivery(delivery.getId())));
         return new SupplierDeliveryResponse(
                 delivery.getId(),
                 delivery.getWholesaler().getId(),
                 delivery.getWholesalerSupplier().getId(),
+                delivery.getName(),
                 delivery.getDeliveryDate(),
                 delivery.getTotalQuantity(),
                 delivery.getStatus().name(),
@@ -286,6 +434,8 @@ public class SupplierDeliveryService {
                 totalSold,
                 commission,
                 netPayable,
+                expenseTotal,
+                expenseDue,
                 itemResponses
         );
     }
@@ -297,25 +447,26 @@ public class SupplierDeliveryService {
             ReceiveSupplierDeliveryItemRequest request
     ) {
         BigDecimal quantity = positive(request.quantity(), "Quantity must be greater than zero.");
-        UnitType requestedUnit = parseUnit(request.unit());
-        Product product = resolveProduct(request);
-        UnitType unit = clean(request.unit()) == null ? product.getDefaultUnit() : requestedUnit;
-        if (product.getDefaultUnit() != unit) {
-            throw new BadRequestException("Delivery unit must match the selected product unit.");
+        if (clean(request.unit()) == null) {
+            throw new BadRequestException("Unit is required for the delivery line.");
         }
+        UnitType unit = parseUnit(request.unit());
+        Product product = resolveProduct(request);
         Category category = resolveCategory(request, product);
+        org.example.model.SubCategory subCategory = resolveSubCategory(request, category);
 
         SupplierDeliveryItem deliveryItem = new SupplierDeliveryItem();
         deliveryItem.setWholesaler(wholesaler);
         deliveryItem.setDelivery(delivery);
         deliveryItem.setProduct(product);
         deliveryItem.setCategory(category);
+        deliveryItem.setSubCategory(subCategory);
         deliveryItem.setQuantity(quantity);
         deliveryItem.setUnit(unit);
         deliveryItem.setNote(clean(request.note()));
         deliveryItem = supplierDeliveryItemRepository.save(deliveryItem);
 
-        Inventory inventory = findInventory(wholesaler, delivery, product, category, unit)
+        Inventory inventory = findInventory(wholesaler, delivery, product, category, subCategory, unit)
                 .orElseGet(() -> {
                     Inventory newInventory = new Inventory();
                     newInventory.setWholesaler(wholesaler);
@@ -323,6 +474,7 @@ public class SupplierDeliveryService {
                     newInventory.setDelivery(delivery);
                     newInventory.setProduct(product);
                     newInventory.setCategory(category);
+                    newInventory.setSubCategory(subCategory);
                     newInventory.setQuantityOnHand(BigDecimal.ZERO);
                     newInventory.setUnit(unit);
                     return newInventory;
@@ -351,60 +503,56 @@ public class SupplierDeliveryService {
             SupplierDelivery delivery,
             Product product,
             Category category,
+            org.example.model.SubCategory subCategory,
             UnitType unit
     ) {
         if (category == null) {
-            return inventoryRepository.findByWholesaler_IdAndDelivery_IdAndProduct_IdAndCategoryIsNullAndUnit(
-                    wholesaler.getId(),
-                    delivery.getId(),
-                    product.getId(),
-                    unit
-            );
+            return inventoryRepository.findByWholesaler_IdAndDelivery_IdAndProduct_IdAndCategoryIsNullAndSubCategoryIsNullAndUnit(
+                    wholesaler.getId(), delivery.getId(), product.getId(), unit);
         }
-
-        return inventoryRepository.findByWholesaler_IdAndDelivery_IdAndProduct_IdAndCategory_IdAndUnit(
-                wholesaler.getId(),
-                delivery.getId(),
-                product.getId(),
-                category.getId(),
-                unit
-        );
+        if (subCategory == null) {
+            return inventoryRepository.findByWholesaler_IdAndDelivery_IdAndProduct_IdAndCategory_IdAndSubCategoryIsNullAndUnit(
+                    wholesaler.getId(), delivery.getId(), product.getId(), category.getId(), unit);
+        }
+        return inventoryRepository.findByWholesaler_IdAndDelivery_IdAndProduct_IdAndCategory_IdAndSubCategory_IdAndUnit(
+                wholesaler.getId(), delivery.getId(), product.getId(), category.getId(), subCategory.getId(), unit);
     }
 
     private Product resolveProduct(ReceiveSupplierDeliveryItemRequest request) {
-        if (request.productId() != null) {
-            return productRepository.findById(request.productId())
-                    .orElseThrow(() -> new BadRequestException("Product not found."));
+        if (request.productId() == null) {
+            throw new BadRequestException("Product is required (pick from catalog).");
         }
-
-        String productName = requireText(request.productName(), "Product name is required.");
-        return productRepository.findByNameIgnoreCase(productName)
-                .orElseThrow(() -> new BadRequestException("Product must exist before receiving supplier stock."));
+        return productRepository.findById(request.productId())
+                .orElseThrow(() -> new BadRequestException("Product not found."));
     }
 
+    /** Look up the variety (Level-2) for this line, if any. */
     private Category resolveCategory(ReceiveSupplierDeliveryItemRequest request, Product product) {
-        if (request.categoryId() != null) {
-            Category category = categoryRepository.findById(request.categoryId())
-                    .orElseThrow(() -> new BadRequestException("Category not found."));
-            if (!category.getProduct().getId().equals(product.getId())) {
-                throw new BadRequestException("Category does not belong to the selected product.");
+        if (request.categoryId() == null) {
+            return null;
+        }
+        Category cat = categoryRepository.findById(request.categoryId())
+                .orElseThrow(() -> new BadRequestException("Variety not found."));
+        if (!cat.getProduct().getId().equals(product.getId())) {
+            throw new BadRequestException("Variety does not belong to the selected product.");
+        }
+        return cat;
+    }
+
+    /** Look up the lot (Level-3), validating consistency with the variety's usesLots flag. */
+    private org.example.model.SubCategory resolveSubCategory(
+            ReceiveSupplierDeliveryItemRequest request, Category category) {
+        if (request.subCategoryId() == null) {
+            if (category != null && category.isUsesLots()) {
+                throw new BadRequestException("Variety \"" + category.getName() + "\" requires a lot (Lot1..LotN).");
             }
-            return category;
+            return null;
         }
-
-        String categoryName = clean(request.categoryName());
-        if (categoryName != null) {
-            String grade = clean(request.grade());
-            String categoryGrade = grade == null ? "" : grade;
-            return categoryRepository.findByProduct_IdAndNameIgnoreCaseAndGrade(product.getId(), categoryName, categoryGrade)
-                    .orElseThrow(() -> new BadRequestException("Category must exist before receiving supplier stock."));
+        if (category == null || !category.isUsesLots()) {
+            throw new BadRequestException("Lot can only be set on a variety that uses lots.");
         }
-
-        if (categoryRepository.existsByProduct_IdAndStatus(product.getId(), RecordStatus.ACTIVE)) {
-            throw new BadRequestException("Category is required for this product.");
-        }
-
-        return null;
+        return subCategoryRepository.findById(request.subCategoryId())
+                .orElseThrow(() -> new BadRequestException("Lot not found."));
     }
 
     private Wholesaler findWholesaler(Long wholesalerId) {
@@ -421,6 +569,7 @@ public class SupplierDeliveryService {
     ) {
         Category category = deliveryItem.getCategory();
         Product product = deliveryItem.getProduct();
+        org.example.model.SubCategory sub = deliveryItem.getSubCategory();
         return new SupplierDeliveryItemResponse(
                 deliveryItem.getId(),
                 inventory == null ? null : inventory.getId(),
@@ -428,7 +577,8 @@ public class SupplierDeliveryService {
                 product.getName(),
                 category == null ? null : category.getId(),
                 category == null ? null : category.getName(),
-                category == null ? null : category.getGrade(),
+                sub == null ? null : sub.getId(),
+                sub == null ? null : sub.getName(),
                 deliveryItem.getQuantity(),
                 deliveryItem.getUnit().name(),
                 inventory == null ? deliveryItem.getQuantity() : inventory.getQuantityOnHand(),

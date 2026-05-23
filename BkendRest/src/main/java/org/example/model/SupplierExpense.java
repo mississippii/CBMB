@@ -37,6 +37,11 @@ public class SupplierExpense {
     @JoinColumn(name = "wholesaler_supplier_id", nullable = false)
     private WholesalerSupplier wholesalerSupplier;
 
+    /** The shipment (lot) this expense belongs to. Null = general supplier expense. */
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "delivery_id")
+    private SupplierDelivery delivery;
+
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "category_id", nullable = false)
     private ExpenseCategory category;

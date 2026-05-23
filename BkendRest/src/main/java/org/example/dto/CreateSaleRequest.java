@@ -9,6 +9,7 @@ public record CreateSaleRequest(
         Long inventoryId,
         BigDecimal quantity,
         BigDecimal unitPrice,
+        BigDecimal discountAmount,
         BigDecimal paymentAmount,
         String crateType,
         Integer cratesGiven,

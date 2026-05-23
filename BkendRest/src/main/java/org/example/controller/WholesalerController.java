@@ -8,6 +8,7 @@ import org.example.dto.CustomerProfileResponse;
 import org.example.dto.ProfileRequest;
 import org.example.dto.ReceiveSupplierDeliveryRequest;
 import org.example.dto.SetShipmentCommissionRequest;
+import org.example.dto.SettleShipmentRequest;
 import org.example.dto.SupplierAccountResponse;
 import org.example.dto.SupplierProfileResponse;
 import org.example.dto.SupplierDeliveryResponse;
@@ -158,5 +159,13 @@ public class WholesalerController {
             @RequestBody SetShipmentCommissionRequest request
     ) {
         return supplierDeliveryService.setCommissionRate(wholesalerId, request);
+    }
+
+    @PostMapping("/shipments/settle")
+    public SupplierDeliveryResponse settleShipment(
+            @PathVariable Long wholesalerId,
+            @RequestBody SettleShipmentRequest request
+    ) {
+        return supplierDeliveryService.setSettlementStatus(wholesalerId, request);
     }
 }
