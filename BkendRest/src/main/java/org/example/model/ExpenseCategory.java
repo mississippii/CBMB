@@ -12,6 +12,7 @@ import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
 import java.time.LocalDateTime;
+import org.example.model.enums.ExpenseCategoryKind;
 import org.example.model.enums.RecordStatus;
 import lombok.Getter;
 import lombok.Setter;
@@ -34,6 +35,10 @@ public class ExpenseCategory {
 
     @Column(nullable = false, length = 120)
     private String name;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private ExpenseCategoryKind kind = ExpenseCategoryKind.BOTH;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)

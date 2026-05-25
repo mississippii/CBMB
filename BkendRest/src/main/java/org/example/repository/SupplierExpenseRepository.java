@@ -15,6 +15,24 @@ public interface SupplierExpenseRepository extends JpaRepository<SupplierExpense
     List<SupplierExpense> findByDelivery_Id(Long deliveryId);
 
     @Query("""
+        SELECT e FROM SupplierExpense e
+        WHERE e.wholesaler.id = :wholesalerId
+          AND e.wholesalerSupplier.id = :supplierId
+          AND e.dueAmount > 0
+        ORDER BY e.expenseDate ASC, e.id ASC
+        """)
+    List<SupplierExpense> findOutstandingBySupplier(@Param("wholesalerId") Long wholesalerId,
+                                                    @Param("supplierId") Long supplierId);
+
+    @Query("""
+        SELECT COALESCE(SUM(e.dueAmount), 0) FROM SupplierExpense e
+        WHERE e.wholesaler.id = :wholesalerId
+          AND e.wholesalerSupplier.id = :supplierId
+        """)
+    java.math.BigDecimal sumOutstandingBySupplier(@Param("wholesalerId") Long wholesalerId,
+                                                   @Param("supplierId") Long supplierId);
+
+    @Query("""
         SELECT COALESCE(SUM(e.amount), 0) FROM SupplierExpense e
         WHERE e.wholesaler.id = :wholesalerId
           AND e.wholesalerSupplier.id = :supplierId
@@ -31,4 +49,17 @@ public interface SupplierExpenseRepository extends JpaRepository<SupplierExpense
 
     @Query("SELECT COALESCE(SUM(e.dueAmount), 0) FROM SupplierExpense e WHERE e.delivery.id = :deliveryId")
     java.math.BigDecimal sumDueByDelivery(@Param("deliveryId") Long deliveryId);
+
+    /**
+     * Per (supplier, category) outstanding-due rollup used by the balance audit
+     * to reconcile other_due_balances against the underlying expense rows.
+     * Each row: { Long wholesalerSupplierId, Long categoryId, BigDecimal sumDue }.
+     */
+    @Query("""
+        SELECT e.wholesalerSupplier.id, e.category.id, COALESCE(SUM(e.dueAmount), 0)
+        FROM SupplierExpense e
+        WHERE e.wholesaler.id = :wholesalerId
+        GROUP BY e.wholesalerSupplier.id, e.category.id
+        """)
+    List<Object[]> findOutstandingGroupedBySupplierAndCategory(@Param("wholesalerId") Long wholesalerId);
 }

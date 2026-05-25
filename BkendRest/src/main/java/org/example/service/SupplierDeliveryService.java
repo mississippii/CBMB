@@ -66,10 +66,12 @@ public class SupplierDeliveryService {
     private final SaleItemRepository saleItemRepository;
     private final AccountBalanceRepository accountBalanceRepository;
     private final AccountLedgerRepository accountLedgerRepository;
+    private final AccountBalanceService accountBalanceService;
     private final SupplierSettlementRepository supplierSettlementRepository;
     private final TransactionRepository transactionRepository;
     private final org.example.repository.SupplierExpenseRepository supplierExpenseRepository;
     private final org.example.repository.SubCategoryRepository subCategoryRepository;
+    private final ExpensePaydownService expensePaydownService;
 
     public SupplierDeliveryService(
             WholesalerRepository wholesalerRepository,
@@ -83,10 +85,12 @@ public class SupplierDeliveryService {
             SaleItemRepository saleItemRepository,
             AccountBalanceRepository accountBalanceRepository,
             AccountLedgerRepository accountLedgerRepository,
+            AccountBalanceService accountBalanceService,
             SupplierSettlementRepository supplierSettlementRepository,
             TransactionRepository transactionRepository,
             org.example.repository.SupplierExpenseRepository supplierExpenseRepository,
-            org.example.repository.SubCategoryRepository subCategoryRepository
+            org.example.repository.SubCategoryRepository subCategoryRepository,
+            ExpensePaydownService expensePaydownService
     ) {
         this.wholesalerRepository = wholesalerRepository;
         this.wholesalerSupplierRepository = wholesalerSupplierRepository;
@@ -99,10 +103,12 @@ public class SupplierDeliveryService {
         this.saleItemRepository = saleItemRepository;
         this.accountBalanceRepository = accountBalanceRepository;
         this.accountLedgerRepository = accountLedgerRepository;
+        this.accountBalanceService = accountBalanceService;
         this.supplierSettlementRepository = supplierSettlementRepository;
         this.transactionRepository = transactionRepository;
         this.supplierExpenseRepository = supplierExpenseRepository;
         this.subCategoryRepository = subCategoryRepository;
+        this.expensePaydownService = expensePaydownService;
     }
 
 
@@ -202,16 +208,10 @@ public class SupplierDeliveryService {
         if (expenseDue.signum() > 0) {
             recordShipmentSettlement(wholesaler, supplierAccount, delivery, SettlementType.EXPENSE_RECEIVE, expenseDue, false,
                     "Shipment #" + delivery.getId() + " settlement — expense received");
-            // Mark each SupplierExpense for this lot as fully paid back.
-            for (org.example.model.SupplierExpense e : supplierExpenseRepository.findByDelivery_Id(delivery.getId())) {
-                BigDecimal due = e.getDueAmount() == null ? BigDecimal.ZERO : e.getDueAmount();
-                if (due.signum() > 0) {
-                    BigDecimal paid = e.getPaidAmount() == null ? BigDecimal.ZERO : e.getPaidAmount();
-                    e.setPaidAmount(paid.add(due));
-                    e.setDueAmount(BigDecimal.ZERO);
-                    supplierExpenseRepository.save(e);
-                }
-            }
+            // Pay down this lot's outstanding expenses (decrements SupplierExpense.dueAmount
+            // and other_due_balances.due_amount). Replaces the previous inline loop which
+            // missed other_due_balances and left it overstated.
+            expensePaydownService.payDownForDelivery(delivery.getId(), expenseDue);
         }
 
         delivery.setSettlementStatus(SettlementStatus.SETTLED);
@@ -228,16 +228,8 @@ public class SupplierDeliveryService {
             boolean reducesPayable,
             String note
     ) {
-        AccountBalance balance = accountBalanceRepository
-                .findByWholesaler_IdAndPartyTypeAndPartyAccountId(wholesaler.getId(), PartyType.WHOLESALER_SUPPLIER, supplierAccount.getId())
-                .orElseGet(() -> {
-                    AccountBalance b = new AccountBalance();
-                    b.setWholesaler(wholesaler);
-                    b.setPartyType(PartyType.WHOLESALER_SUPPLIER);
-                    b.setPartyAccountId(supplierAccount.getId());
-                    b.setBalance(supplierAccount.getOpeningDue() == null ? BigDecimal.ZERO : supplierAccount.getOpeningDue());
-                    return b;
-                });
+        AccountBalance balance = accountBalanceService.getOrCreate(
+                wholesaler, PartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), supplierAccount.getOpeningDue());
         BigDecimal previousDue = money(balance.getBalance());
         BigDecimal dueAfter = reducesPayable ? money(previousDue.subtract(amount)) : previousDue;
         if (reducesPayable) {
@@ -351,16 +343,8 @@ public class SupplierDeliveryService {
             SupplierDelivery delivery,
             BigDecimal amount
     ) {
-        AccountBalance balance = accountBalanceRepository
-                .findByWholesaler_IdAndPartyTypeAndPartyAccountId(wholesaler.getId(), PartyType.WHOLESALER_SUPPLIER, supplierAccount.getId())
-                .orElseGet(() -> {
-                    AccountBalance b = new AccountBalance();
-                    b.setWholesaler(wholesaler);
-                    b.setPartyType(PartyType.WHOLESALER_SUPPLIER);
-                    b.setPartyAccountId(supplierAccount.getId());
-                    b.setBalance(supplierAccount.getOpeningDue() == null ? BigDecimal.ZERO : supplierAccount.getOpeningDue());
-                    return b;
-                });
+        AccountBalance balance = accountBalanceService.getOrCreate(
+                wholesaler, PartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), supplierAccount.getOpeningDue());
         BigDecimal previousDue = money(balance.getBalance());
         BigDecimal dueAfter = money(previousDue.subtract(amount)); // may go negative = prepaid
         balance.setBalance(dueAfter);
@@ -618,7 +602,7 @@ public class SupplierDeliveryService {
         try {
             return UnitType.valueOf(cleaned.trim().toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException ex) {
-            throw new BadRequestException("Invalid unit. Allowed values: PCS, KG, DOZEN, BOX, BAG, MOUND.");
+            throw new BadRequestException("Invalid unit. Allowed values: PCS, KG, DOZEN, CRATE, BAG, MOUND.");
         }
     }
 

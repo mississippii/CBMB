@@ -43,7 +43,7 @@ VITE_API_BASE_URL
 If the variable is not provided, it falls back to:
 
 ```text
-http://192.168.0.177:8080
+http://localhost:8080
 ```
 
 ## Run Commands

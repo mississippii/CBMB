@@ -53,6 +53,7 @@ public class PaymentService {
     private final WholesalerSupplierRepository wholesalerSupplierRepository;
     private final AccountBalanceRepository accountBalanceRepository;
     private final AccountLedgerRepository accountLedgerRepository;
+    private final AccountBalanceService accountBalanceService;
     private final PaymentRepository paymentRepository;
     private final SupplierSettlementRepository supplierSettlementRepository;
     private final TransactionRepository transactionRepository;
@@ -60,6 +61,7 @@ public class PaymentService {
     private final BoxInventoryRepository boxInventoryRepository;
     private final BoxBalanceRepository boxBalanceRepository;
     private final BoxLedgerRepository boxLedgerRepository;
+    private final ExpensePaydownService expensePaydownService;
 
     public PaymentService(
             WholesalerRepository wholesalerRepository,
@@ -67,19 +69,22 @@ public class PaymentService {
             WholesalerSupplierRepository wholesalerSupplierRepository,
             AccountBalanceRepository accountBalanceRepository,
             AccountLedgerRepository accountLedgerRepository,
+            AccountBalanceService accountBalanceService,
             PaymentRepository paymentRepository,
             SupplierSettlementRepository supplierSettlementRepository,
             TransactionRepository transactionRepository,
             BoxTypeRepository boxTypeRepository,
             BoxInventoryRepository boxInventoryRepository,
             BoxBalanceRepository boxBalanceRepository,
-            BoxLedgerRepository boxLedgerRepository
+            BoxLedgerRepository boxLedgerRepository,
+            ExpensePaydownService expensePaydownService
     ) {
         this.wholesalerRepository = wholesalerRepository;
         this.wholesalerCustomerRepository = wholesalerCustomerRepository;
         this.wholesalerSupplierRepository = wholesalerSupplierRepository;
         this.accountBalanceRepository = accountBalanceRepository;
         this.accountLedgerRepository = accountLedgerRepository;
+        this.accountBalanceService = accountBalanceService;
         this.paymentRepository = paymentRepository;
         this.supplierSettlementRepository = supplierSettlementRepository;
         this.transactionRepository = transactionRepository;
@@ -87,6 +92,7 @@ public class PaymentService {
         this.boxInventoryRepository = boxInventoryRepository;
         this.boxBalanceRepository = boxBalanceRepository;
         this.boxLedgerRepository = boxLedgerRepository;
+        this.expensePaydownService = expensePaydownService;
     }
 
     @Transactional
@@ -171,7 +177,15 @@ public class PaymentService {
 
     @Transactional
     public PaymentOperationResponse receiveSupplierExpense(Long wholesalerId, SupplierSettlementRequest request) {
-        return settleSupplierMoney(wholesalerId, request, SettlementType.EXPENSE_RECEIVE, false, "Supplier expense money received");
+        if (request != null && request.wholesalerSupplierId() != null && request.amount() != null) {
+            BigDecimal outstanding = expensePaydownService.outstandingForSupplier(wholesalerId, request.wholesalerSupplierId());
+            if (request.amount().compareTo(outstanding) > 0) {
+                throw new BadRequestException("Amount exceeds outstanding expense due of ৳" + outstanding.toPlainString() + ".");
+            }
+        }
+        PaymentOperationResponse response = settleSupplierMoney(wholesalerId, request, SettlementType.EXPENSE_RECEIVE, false, "Supplier expense money received");
+        expensePaydownService.payDownForSupplier(wholesalerId, request.wholesalerSupplierId(), request.amount());
+        return response;
     }
 
     @Transactional
@@ -436,12 +450,12 @@ public class PaymentService {
 
     private PaymentType resolvePaymentType(BigDecimal cashAmount, int boxesReturned) {
         if (cashAmount.signum() > 0 && boxesReturned > 0) {
-            return PaymentType.CASH_AND_BOX_RETURN;
+            return PaymentType.CASH_AND_CRATE_RETURN;
         }
         if (cashAmount.signum() > 0) {
             return PaymentType.CASH_RECEIVE;
         }
-        return PaymentType.BOX_RETURN;
+        return PaymentType.CRATE_RETURN;
     }
 
     private PaymentMethod resolveCustomerPaymentMethod(PaymentMethod method, BigDecimal cashAmount) {
@@ -487,16 +501,7 @@ public class PaymentService {
     }
 
     private AccountBalance getOrCreateBalance(Wholesaler wholesaler, PartyType partyType, Long partyAccountId, BigDecimal openingDue) {
-        return accountBalanceRepository
-                .findByWholesaler_IdAndPartyTypeAndPartyAccountId(wholesaler.getId(), partyType, partyAccountId)
-                .orElseGet(() -> {
-                    AccountBalance balance = new AccountBalance();
-                    balance.setWholesaler(wholesaler);
-                    balance.setPartyType(partyType);
-                    balance.setPartyAccountId(partyAccountId);
-                    balance.setBalance(money(openingDue == null ? BigDecimal.ZERO : openingDue));
-                    return balance;
-                });
+        return accountBalanceService.getOrCreate(wholesaler, partyType, partyAccountId, openingDue);
     }
 
     private Wholesaler findWholesaler(Long wholesalerId) {

@@ -12,7 +12,7 @@ const EMPTY_FORM = {
   phone: '',
   address: '',
   openingDue: '',
-  boxJamanot: '',
+  crateJamanot: '',
 };
 
 const CustomersList = () => {
@@ -82,7 +82,7 @@ const CustomersList = () => {
       }
       if (filterDue === 'with-due' && Number(c.amountDue || 0) <= 0) return false;
       if (filterDue === 'no-due' && Number(c.amountDue || 0) > 0) return false;
-      if (filterDue === 'holding-crates' && Number(c.totalBoxesHolding || 0) <= 0) return false;
+      if (filterDue === 'holding-crates' && Number(c.totalCratesHolding || 0) <= 0) return false;
       return true;
     })
     .sort((a, b) => {
@@ -91,8 +91,8 @@ const CustomersList = () => {
         case 'name-desc':      return b.name.localeCompare(a.name);
         case 'due-desc':       return Number(b.amountDue || 0) - Number(a.amountDue || 0);
         case 'due-asc':        return Number(a.amountDue || 0) - Number(b.amountDue || 0);
-        case 'crates-desc':    return Number(b.totalBoxesHolding || 0) - Number(a.totalBoxesHolding || 0);
-        case 'jamanot-desc':   return Number(b.boxJamanot || 0) - Number(a.boxJamanot || 0);
+        case 'crates-desc':    return Number(b.totalCratesHolding || 0) - Number(a.totalCratesHolding || 0);
+        case 'jamanot-desc':   return Number(b.crateJamanot || 0) - Number(a.crateJamanot || 0);
         default: return 0;
       }
     });
@@ -244,8 +244,8 @@ const CustomersList = () => {
                     <input
                       type="number"
                       min="0"
-                      value={formData.boxJamanot}
-                      onChange={handleField('boxJamanot')}
+                      value={formData.crateJamanot}
+                      onChange={handleField('crateJamanot')}
                       className="input-field !pl-8"
                       placeholder="0"
                     />
@@ -327,11 +327,11 @@ const CustomersList = () => {
                     </div>
                     <div className="rounded-lg bg-blue-50 px-2 py-2">
                       <p className="text-slate-500">Jamanot</p>
-                      <p className="font-bold text-blue-700">৳{Number(c.boxJamanot || 0).toLocaleString()}</p>
+                      <p className="font-bold text-blue-700">৳{Number(c.crateJamanot || 0).toLocaleString()}</p>
                     </div>
                     <div className="rounded-lg bg-slate-50 px-2 py-2">
                       <p className="text-slate-500">Crates</p>
-                      <p className="font-bold text-slate-800">{c.totalBoxesHolding || 0}</p>
+                      <p className="font-bold text-slate-800">{c.totalCratesHolding || 0}</p>
                     </div>
                   </div>
                 </div>
@@ -371,10 +371,10 @@ const CustomersList = () => {
                       </td>
                       <td className="px-4 py-3 text-slate-700">{c.phone}</td>
                       <td className="px-4 py-3 text-center font-semibold text-slate-700">
-                        {c.totalBoxesHolding || 0}
+                        {c.totalCratesHolding || 0}
                       </td>
                       <td className="px-4 py-3 text-right font-semibold text-blue-700">
-                        ৳{Number(c.boxJamanot || 0).toLocaleString()}
+                        ৳{Number(c.crateJamanot || 0).toLocaleString()}
                       </td>
                       <td className="px-4 py-3 text-right font-bold text-red-600">
                         ৳{Number(c.amountDue || 0).toLocaleString()}

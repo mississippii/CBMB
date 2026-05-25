@@ -17,7 +17,7 @@ spring:
 
 server:
   port: 8080
-  address: 192.168.0.177
+  address: localhost
 
 springdoc:
   swagger-ui:

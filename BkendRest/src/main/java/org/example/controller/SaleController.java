@@ -1,8 +1,13 @@
 package org.example.controller;
 
 import org.example.dto.CreateSaleRequest;
+import org.example.dto.SaleCancellationResponse;
 import org.example.dto.SaleResponse;
+import org.example.dto.SalesAggregateRequest;
+import org.example.dto.SalesAggregateResponse;
+import org.example.service.SaleCancellationService;
 import org.example.service.SaleService;
+import org.example.service.SalesAggregateService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -18,9 +23,14 @@ import org.springframework.web.bind.annotation.RestController;
 public class SaleController {
 
     private final SaleService saleService;
+    private final SalesAggregateService salesAggregateService;
+    private final SaleCancellationService saleCancellationService;
 
-    public SaleController(SaleService saleService) {
+    public SaleController(SaleService saleService, SalesAggregateService salesAggregateService,
+                          SaleCancellationService saleCancellationService) {
         this.saleService = saleService;
+        this.salesAggregateService = salesAggregateService;
+        this.saleCancellationService = saleCancellationService;
     }
 
     @PostMapping("/create")
@@ -30,5 +40,23 @@ public class SaleController {
             @RequestBody CreateSaleRequest request
     ) {
         return saleService.createSale(wholesalerId, request);
+    }
+
+    @PostMapping("/aggregate")
+    public SalesAggregateResponse aggregate(
+            @PathVariable Long wholesalerId,
+            @RequestBody(required = false) SalesAggregateRequest request
+    ) {
+        return salesAggregateService.aggregate(wholesalerId, request);
+    }
+
+    @PostMapping("/{saleId}/cancel")
+    public SaleCancellationResponse cancelSale(
+            @PathVariable Long wholesalerId,
+            @PathVariable Long saleId,
+            @RequestBody(required = false) java.util.Map<String, String> body
+    ) {
+        String reason = body == null ? null : body.get("reason");
+        return saleCancellationService.cancelSale(wholesalerId, saleId, reason);
     }
 }

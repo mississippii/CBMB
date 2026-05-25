@@ -2,9 +2,11 @@ package org.example.controller;
 
 import org.example.dto.CustomerCrateBorrowRequest;
 import org.example.dto.CustomerSettlementRequest;
+import org.example.dto.PaymentCancellationResponse;
 import org.example.dto.PaymentOperationResponse;
 import org.example.dto.SupplierCrateRequest;
 import org.example.dto.SupplierSettlementRequest;
+import org.example.service.PaymentCancellationService;
 import org.example.service.PaymentService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.CrossOrigin;
@@ -21,9 +23,11 @@ import org.springframework.web.bind.annotation.RestController;
 public class PaymentController {
 
     private final PaymentService paymentService;
+    private final PaymentCancellationService paymentCancellationService;
 
-    public PaymentController(PaymentService paymentService) {
+    public PaymentController(PaymentService paymentService, PaymentCancellationService paymentCancellationService) {
         this.paymentService = paymentService;
+        this.paymentCancellationService = paymentCancellationService;
     }
 
     @PostMapping("/customer/settle")
@@ -87,5 +91,25 @@ public class PaymentController {
             @RequestBody SupplierCrateRequest request
     ) {
         return paymentService.returnSupplierCrates(wholesalerId, request);
+    }
+
+    @PostMapping("/customer/{paymentId}/cancel")
+    public PaymentCancellationResponse cancelCustomerPayment(
+            @PathVariable Long wholesalerId,
+            @PathVariable Long paymentId,
+            @RequestBody(required = false) java.util.Map<String, String> body
+    ) {
+        String reason = body == null ? null : body.get("reason");
+        return paymentCancellationService.cancelCustomerPayment(wholesalerId, paymentId, reason);
+    }
+
+    @PostMapping("/supplier/{settlementId}/cancel")
+    public PaymentCancellationResponse cancelSupplierSettlement(
+            @PathVariable Long wholesalerId,
+            @PathVariable Long settlementId,
+            @RequestBody(required = false) java.util.Map<String, String> body
+    ) {
+        String reason = body == null ? null : body.get("reason");
+        return paymentCancellationService.cancelSupplierSettlement(wholesalerId, settlementId, reason);
     }
 }

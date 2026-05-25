@@ -8,8 +8,8 @@ import { useToast } from '../../shared/components/Toast';
 import { postJson, apiPaths } from '../../services/apiClient';
 import { useAuth } from '../auth/AuthContext';
 
-const EMPTY_PURCHASE = { boxType: 'BANGLA', quantity: '' };
-const EMPTY_LOSS = { boxType: 'BANGLA', quantity: '', reason: 'lost' };
+const EMPTY_PURCHASE = { crateType: 'BANGLA', quantity: '' };
+const EMPTY_LOSS = { crateType: 'BANGLA', quantity: '', reason: 'lost' };
 const EMPTY_SUPPLIER = { supplierId: '', direction: 'give', banglaCrates: '', chinaCrates: '', note: '' };
 const EMPTY_CUSTOMER = { customerId: '', direction: 'borrow', banglaCrates: '', chinaCrates: '', jamanotAmount: '', note: '' };
 
@@ -29,7 +29,7 @@ const KPI = ({ icon: Icon, label, value, tone = 'default' }) => (
 );
 
 const BoxDashboard = () => {
-  const { boxInventory, suppliers, customers, addBoxes, markBoxesLost, recordAccountTransaction, refreshTransactions } = useData();
+  const { crateInventory, suppliers, customers, addCrates, markCratesLost, recordAccountTransaction, refreshTransactions } = useData();
   const { admin } = useAuth();
   const showToast = useToast();
 
@@ -55,11 +55,11 @@ const BoxDashboard = () => {
   const [isSavingCustomer, setIsSavingCustomer] = useState(false);
 
   // Stats — "Active" excludes lost since lost is permanent loss
-  const totalOwned = Number(boxInventory.totalBoxesOwned) || 0;
-  const inShop = Number(boxInventory.boxesInShop) || 0;
-  const withCustomers = Number(boxInventory.boxesWithCustomers) || 0;
-  const withSuppliers = Number(boxInventory.boxesWithSuppliers) || 0;
-  const lost = Number(boxInventory.boxesLostDamaged) || 0;
+  const totalOwned = Number(crateInventory.totalCratesOwned) || 0;
+  const inShop = Number(crateInventory.cratesInShop) || 0;
+  const withCustomers = Number(crateInventory.cratesWithCustomers) || 0;
+  const withSuppliers = Number(crateInventory.cratesWithSuppliers) || 0;
+  const lost = Number(crateInventory.cratesLostDamaged) || 0;
   const active = Math.max(totalOwned - lost, 0); // adjusted total — lost is gone
 
   const safe = Math.max(active, 1);
@@ -77,7 +77,7 @@ const BoxDashboard = () => {
     if (!admin?.wholesalerId) return;
     setLossLoading(true);
     try {
-      const data = await postJson(apiPaths.boxesLossStats(admin.wholesalerId), { months });
+      const data = await postJson(apiPaths.cratesLossStats(admin.wholesalerId), { months });
       setLossStats(data);
     } catch {
       setLossStats(null);
@@ -88,9 +88,9 @@ const BoxDashboard = () => {
 
   useEffect(() => { loadLossStats(lossRange); }, [lossRange, loadLossStats]);
 
-  const boxTypes = [
-    { key: 'bangla', label: 'Bangla', data: boxInventory.bangla || {} },
-    { key: 'china', label: 'China', data: boxInventory.china || {} },
+  const crateTypes = [
+    { key: 'bangla', label: 'Bangla', data: crateInventory.bangla || {} },
+    { key: 'china', label: 'China', data: crateInventory.china || {} },
   ];
 
   // Handlers
@@ -99,8 +99,8 @@ const BoxDashboard = () => {
     if (qty <= 0) { setPurchaseError('Enter a quantity greater than 0.'); return; }
     setIsSavingPurchase(true); setPurchaseError('');
     try {
-      await addBoxes(purchaseForm.boxType, qty);
-      showToast(`Added ${qty} ${purchaseForm.boxType} crates`, 'success');
+      await addCrates(purchaseForm.crateType, qty);
+      showToast(`Added ${qty} ${purchaseForm.crateType} crates`, 'success');
       setPurchaseForm(EMPTY_PURCHASE);
       setShowPurchaseModal(false);
     } catch (err) {
@@ -115,8 +115,8 @@ const BoxDashboard = () => {
     if (qty <= 0) { setLossError('Enter a quantity greater than 0.'); return; }
     setIsSavingLoss(true); setLossError('');
     try {
-      await markBoxesLost(lossForm.boxType, qty, lossForm.reason);
-      showToast(`Marked ${qty} ${lossForm.boxType} crates as ${lossForm.reason}`, 'warning');
+      await markCratesLost(lossForm.crateType, qty, lossForm.reason);
+      showToast(`Marked ${qty} ${lossForm.crateType} crates as ${lossForm.reason}`, 'warning');
       setLossForm(EMPTY_LOSS);
       setShowLossModal(false);
     } catch (err) {
@@ -252,7 +252,7 @@ const BoxDashboard = () => {
 
           {/* Type Breakdown */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-3 mt-5">
-            {boxTypes.map((type) => (
+            {crateTypes.map((type) => (
               <div key={type.key} className="type-card">
                 <div className="flex items-center justify-between">
                   <p className="type-card-title">{type.label}</p>
@@ -484,8 +484,8 @@ const BoxDashboard = () => {
                       <button
                         type="button"
                         key={t.value}
-                        onClick={() => setPurchaseForm((p) => ({ ...p, boxType: t.value }))}
-                        className={`unit-type-btn ${purchaseForm.boxType === t.value ? 'active' : ''}`}
+                        onClick={() => setPurchaseForm((p) => ({ ...p, crateType: t.value }))}
+                        className={`unit-type-btn ${purchaseForm.crateType === t.value ? 'active' : ''}`}
                       >
                         <span className="unit-type-icon">{t.value === 'BANGLA' ? 'BA' : 'CH'}</span>
                         <div className="text-left">
@@ -538,8 +538,8 @@ const BoxDashboard = () => {
                       <button
                         type="button"
                         key={t.value}
-                        onClick={() => setLossForm((p) => ({ ...p, boxType: t.value }))}
-                        className={`unit-type-btn ${lossForm.boxType === t.value ? 'active' : ''}`}
+                        onClick={() => setLossForm((p) => ({ ...p, crateType: t.value }))}
+                        className={`unit-type-btn ${lossForm.crateType === t.value ? 'active' : ''}`}
                       >
                         <span className="unit-type-icon">{t.value === 'BANGLA' ? 'BA' : 'CH'}</span>
                         <div className="text-left"><p className="font-bold">{t.label}</p></div>
@@ -611,7 +611,7 @@ const BoxDashboard = () => {
                     <option value="">Choose permanent customer…</option>
                     {customers.map((c) => (
                       <option key={c.id} value={c.id}>
-                        {c.name} (holds {c.totalBoxesHolding || 0} · ৳{Number(c.jamanotBalance || 0).toLocaleString()})
+                        {c.name} (holds {c.totalCratesHolding || 0} · ৳{Number(c.jamanotBalance || 0).toLocaleString()})
                       </option>
                     ))}
                   </select>
@@ -730,7 +730,7 @@ const BoxDashboard = () => {
                     <option value="">Choose supplier…</option>
                     {suppliers.map((s) => (
                       <option key={s.id} value={s.id}>
-                        {s.name} (holds {s.totalBoxesHolding || 0})
+                        {s.name} (holds {s.totalCratesHolding || 0})
                       </option>
                     ))}
                   </select>

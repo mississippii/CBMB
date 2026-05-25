@@ -9,10 +9,10 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
-import org.example.dto.BoxDashboardResponse;
-import org.example.dto.BoxInventoryTypeResponse;
-import org.example.dto.BoxLossStatsResponse;
-import org.example.dto.BoxQuantityRequest;
+import org.example.dto.CrateDashboardResponse;
+import org.example.dto.CrateInventoryTypeResponse;
+import org.example.dto.CrateLossStatsResponse;
+import org.example.dto.CrateQuantityRequest;
 import org.example.exception.BadRequestException;
 import org.example.model.BoxInventory;
 import org.example.model.BoxLedger;
@@ -33,7 +33,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 @Service
-public class BoxService {
+public class CrateService {
 
     private final WholesalerRepository wholesalerRepository;
     private final BoxTypeRepository boxTypeRepository;
@@ -41,7 +41,7 @@ public class BoxService {
     private final BoxLedgerRepository boxLedgerRepository;
     private final TransactionRepository transactionRepository;
 
-    public BoxService(
+    public CrateService(
             WholesalerRepository wholesalerRepository,
             BoxTypeRepository boxTypeRepository,
             BoxInventoryRepository boxInventoryRepository,
@@ -56,22 +56,22 @@ public class BoxService {
     }
 
     @Transactional
-    public BoxDashboardResponse getDashboard(Long wholesalerId) {
+    public CrateDashboardResponse getDashboard(Long wholesalerId) {
         Wholesaler wholesaler = findWholesaler(wholesalerId);
         ensureDefaultBoxTypes(wholesaler);
-        List<BoxInventoryTypeResponse> typeResponses = boxTypeRepository
+        List<CrateInventoryTypeResponse> typeResponses = boxTypeRepository
                 .findByWholesaler_IdAndStatusOrderByNameAsc(wholesalerId, RecordStatus.ACTIVE)
                 .stream()
                 .map((boxType) -> toTypeResponse(wholesalerId, boxType))
                 .toList();
 
-        int totalOwned = typeResponses.stream().mapToInt(BoxInventoryTypeResponse::total).sum();
-        int inHand = typeResponses.stream().mapToInt(BoxInventoryTypeResponse::inHand).sum();
-        int withCustomers = typeResponses.stream().mapToInt(BoxInventoryTypeResponse::withCustomers).sum();
-        int withSuppliers = typeResponses.stream().mapToInt(BoxInventoryTypeResponse::withSuppliers).sum();
-        int lostDamaged = typeResponses.stream().mapToInt(BoxInventoryTypeResponse::lostDamaged).sum();
+        int totalOwned = typeResponses.stream().mapToInt(CrateInventoryTypeResponse::total).sum();
+        int inHand = typeResponses.stream().mapToInt(CrateInventoryTypeResponse::inHand).sum();
+        int withCustomers = typeResponses.stream().mapToInt(CrateInventoryTypeResponse::withCustomers).sum();
+        int withSuppliers = typeResponses.stream().mapToInt(CrateInventoryTypeResponse::withSuppliers).sum();
+        int lostDamaged = typeResponses.stream().mapToInt(CrateInventoryTypeResponse::lostDamaged).sum();
 
-        return new BoxDashboardResponse(
+        return new CrateDashboardResponse(
                 wholesalerId,
                 totalOwned,
                 inHand,
@@ -83,7 +83,7 @@ public class BoxService {
     }
 
     @Transactional(readOnly = true)
-    public BoxLossStatsResponse getLossStats(Long wholesalerId, Integer monthsInput) {
+    public CrateLossStatsResponse getLossStats(Long wholesalerId, Integer monthsInput) {
         findWholesaler(wholesalerId);
         int months = (monthsInput == null || monthsInput <= 0 || monthsInput > 24) ? 3 : monthsInput;
 
@@ -107,22 +107,22 @@ public class BoxService {
             else if ("CHINA".equals(boxType)) entry[1] += qty;
         }
 
-        List<BoxLossStatsResponse.MonthBucket> buckets = new ArrayList<>();
+        List<CrateLossStatsResponse.MonthBucket> buckets = new ArrayList<>();
         long totalBangla = 0, totalChina = 0;
         for (Map.Entry<String, long[]> e : map.entrySet()) {
             long b = e.getValue()[0];
             long c = e.getValue()[1];
             totalBangla += b;
             totalChina += c;
-            buckets.add(new BoxLossStatsResponse.MonthBucket(e.getKey(), b, c, b + c));
+            buckets.add(new CrateLossStatsResponse.MonthBucket(e.getKey(), b, c, b + c));
         }
-        return new BoxLossStatsResponse(months, totalBangla + totalChina, totalBangla, totalChina, buckets);
+        return new CrateLossStatsResponse(months, totalBangla + totalChina, totalBangla, totalChina, buckets);
     }
 
     @Transactional
-    public BoxDashboardResponse addBoxes(Long wholesalerId, BoxQuantityRequest request) {
+    public CrateDashboardResponse addBoxes(Long wholesalerId, CrateQuantityRequest request) {
         Wholesaler wholesaler = findWholesaler(wholesalerId);
-        BoxType boxType = findBoxType(wholesalerId, request.boxType());
+        BoxType boxType = findBoxType(wholesalerId, request.crateType());
         int quantity = positiveQuantity(request.quantity());
         BoxInventory inventory = findOrCreateInventory(wholesaler, boxType);
 
@@ -136,9 +136,9 @@ public class BoxService {
     }
 
     @Transactional
-    public BoxDashboardResponse markLostOrDamaged(Long wholesalerId, BoxQuantityRequest request) {
+    public CrateDashboardResponse markLostOrDamaged(Long wholesalerId, CrateQuantityRequest request) {
         Wholesaler wholesaler = findWholesaler(wholesalerId);
-        BoxType boxType = findBoxType(wholesalerId, request.boxType());
+        BoxType boxType = findBoxType(wholesalerId, request.crateType());
         int quantity = positiveQuantity(request.quantity());
         BoxInventory inventory = findOrCreateInventory(wholesaler, boxType);
 
@@ -167,7 +167,7 @@ public class BoxService {
         transactionRepository.save(transaction);
     }
 
-    private BoxInventoryTypeResponse toTypeResponse(Long wholesalerId, BoxType boxType) {
+    private CrateInventoryTypeResponse toTypeResponse(Long wholesalerId, BoxType boxType) {
         BoxInventory inventory = boxInventoryRepository
                 .findByWholesaler_IdAndBoxType_Id(wholesalerId, boxType.getId())
                 .orElse(null);
@@ -177,7 +177,7 @@ public class BoxService {
         int withSuppliers = value(inventory, BoxInventory::getWithSuppliers);
         int lostDamaged = value(inventory, BoxInventory::getLostDamaged);
 
-        return new BoxInventoryTypeResponse(
+        return new CrateInventoryTypeResponse(
                 boxType.getId(),
                 boxType.getName(),
                 inHand + withCustomers + withSuppliers + lostDamaged,

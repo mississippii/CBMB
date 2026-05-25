@@ -1,4 +1,4 @@
-const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://192.168.0.177:8080';
+const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
 
 const buildUrl = (path) => {
   const normalizedPath = path.startsWith('/') ? path : '/' + path;
@@ -61,10 +61,15 @@ export const apiPaths = {
   inventoryWriteOff: (wholesalerId) => '/wholesalers/' + wholesalerId + '/inventory/write-off',
   transactionsList: (wholesalerId) => '/wholesalers/' + wholesalerId + '/transactions/list',
   salesCreate: (wholesalerId) => '/wholesalers/' + wholesalerId + '/sales/create',
-  boxesDashboard: (wholesalerId) => '/wholesalers/' + wholesalerId + '/boxes/dashboard',
-  boxesPurchaseCreate: (wholesalerId) => '/wholesalers/' + wholesalerId + '/boxes/purchase/create',
-  boxesLostDamagedCreate: (wholesalerId) => '/wholesalers/' + wholesalerId + '/boxes/lost-damaged/create',
-  boxesLossStats: (wholesalerId) => '/wholesalers/' + wholesalerId + '/boxes/loss-stats',
+  salesAggregate: (wholesalerId) => '/wholesalers/' + wholesalerId + '/sales/aggregate',
+  salesCancel: (wholesalerId, saleId) => '/wholesalers/' + wholesalerId + '/sales/' + saleId + '/cancel',
+  dashboardSummary: (wholesalerId) => '/wholesalers/' + wholesalerId + '/dashboard/summary',
+  paymentsCustomerCancel: (wholesalerId, paymentId) => '/wholesalers/' + wholesalerId + '/payments/customer/' + paymentId + '/cancel',
+  paymentsSupplierCancel: (wholesalerId, settlementId) => '/wholesalers/' + wholesalerId + '/payments/supplier/' + settlementId + '/cancel',
+  cratesDashboard: (wholesalerId) => '/wholesalers/' + wholesalerId + '/crates/dashboard',
+  cratesPurchaseCreate: (wholesalerId) => '/wholesalers/' + wholesalerId + '/crates/purchase/create',
+  cratesLostDamagedCreate: (wholesalerId) => '/wholesalers/' + wholesalerId + '/crates/lost-damaged/create',
+  cratesLossStats: (wholesalerId) => '/wholesalers/' + wholesalerId + '/crates/loss-stats',
   paymentsCustomerSettle: (wholesalerId) => '/wholesalers/' + wholesalerId + '/payments/customer/settle',
   paymentsCustomerCrateBorrow: (wholesalerId) => '/wholesalers/' + wholesalerId + '/payments/customer/crate-borrow',
   paymentsSupplierProductPay: (wholesalerId) => '/wholesalers/' + wholesalerId + '/payments/supplier/product-pay',
@@ -72,4 +77,8 @@ export const apiPaths = {
   paymentsSupplierExpenseReceive: (wholesalerId) => '/wholesalers/' + wholesalerId + '/payments/supplier/expense-receive',
   paymentsSupplierCrateGive: (wholesalerId) => '/wholesalers/' + wholesalerId + '/payments/supplier/crate-give',
   paymentsSupplierCrateReturn: (wholesalerId) => '/wholesalers/' + wholesalerId + '/payments/supplier/crate-return',
+  shopExpenseCategories: (wholesalerId) => '/wholesalers/' + wholesalerId + '/shop-expenses/categories',
+  shopExpenseCreate: (wholesalerId) => '/wholesalers/' + wholesalerId + '/shop-expenses/create',
+  shopExpenseList: (wholesalerId) => '/wholesalers/' + wholesalerId + '/shop-expenses/list',
+  shopExpenseCancel: (wholesalerId, expenseId) => '/wholesalers/' + wholesalerId + '/shop-expenses/' + expenseId + '/cancel',
 };

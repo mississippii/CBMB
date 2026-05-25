@@ -20,4 +20,6 @@ public interface BoxBalanceRepository extends JpaRepository<BoxBalance, Long> {
             PartyType partyType,
             Long partyAccountId
     );
+
+    List<BoxBalance> findByWholesaler_Id(Long wholesalerId);
 }

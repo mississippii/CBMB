@@ -72,6 +72,10 @@ public class Inventory {
     @Column(nullable = false)
     private InventoryStatus status = InventoryStatus.ACTIVE;
 
+    @jakarta.persistence.Version
+    @Column(nullable = false)
+    private Long version = 0L;
+
     @Column(name = "created_at", insertable = false, updatable = false)
     private LocalDateTime createdAt;
 

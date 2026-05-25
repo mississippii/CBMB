@@ -336,8 +336,8 @@ const SuppliersList = () => {
                         <p className="font-bold text-blue-700">{supplier.commissionRate}%</p>
                       </div>
                       <div className="rounded-lg bg-slate-50 px-2 py-2">
-                        <p className="text-slate-500">Box Due</p>
-                        <p className="font-bold text-slate-800">{supplier.totalBoxesHolding}</p>
+                        <p className="text-slate-500">Crate Due</p>
+                        <p className="font-bold text-slate-800">{supplier.totalCratesHolding}</p>
                       </div>
                     </div>
                     {categories.length > 0 && (
@@ -358,7 +358,7 @@ const SuppliersList = () => {
                     <th className="px-4 py-3 text-left font-semibold text-slate-700">Phone</th>
                     <th className="px-4 py-3 text-right font-semibold text-slate-700">Amount Due</th>
                     <th className="px-4 py-3 text-center font-semibold text-slate-700">Commission</th>
-                    <th className="px-4 py-3 text-center font-semibold text-slate-700">Box Due</th>
+                    <th className="px-4 py-3 text-center font-semibold text-slate-700">Crate Due</th>
                     <th className="px-4 py-3 text-center font-semibold text-slate-700">Action</th>
                   </tr>
                 </thead>
@@ -389,7 +389,7 @@ const SuppliersList = () => {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-center font-semibold text-slate-700">
-                        {supplier.totalBoxesHolding}
+                        {supplier.totalCratesHolding}
                       </td>
                       <td className="px-4 py-3 text-center">
                         <button

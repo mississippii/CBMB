@@ -50,10 +50,18 @@ public class TransactionService {
 
     @Transactional(readOnly = true)
     public List<TransactionResponse> listTransactions(Long wholesalerId) {
+        return listTransactions(wholesalerId, null, null);
+    }
+
+    @Transactional(readOnly = true)
+    public List<TransactionResponse> listTransactions(Long wholesalerId, java.time.LocalDateTime from, java.time.LocalDateTime to) {
         if (wholesalerId == null || !wholesalerRepository.existsById(wholesalerId)) {
             throw new BadRequestException("Wholesaler not found.");
         }
-        return transactionRepository.findByWholesalerIdOrderByCreatedAtDesc(wholesalerId)
+        if (from != null && to != null && !from.isBefore(to)) {
+            throw new BadRequestException("from must be before to.");
+        }
+        return transactionRepository.findByWholesalerIdInPeriod(wholesalerId, from, to)
                 .stream()
                 .map(this::toResponse)
                 .toList();

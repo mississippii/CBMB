@@ -4,7 +4,7 @@ public enum UnitType {
     PCS,
     KG,
     DOZEN,
-    BOX,
+    CRATE,
     BAG,
     MOUND
 }

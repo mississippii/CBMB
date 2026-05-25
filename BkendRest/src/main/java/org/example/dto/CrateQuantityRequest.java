@@ -1,7 +1,7 @@
 package org.example.dto;
 
-public record BoxQuantityRequest(
-        String boxType,
+public record CrateQuantityRequest(
+        String crateType,
         Integer quantity,
         String reason,
         String note

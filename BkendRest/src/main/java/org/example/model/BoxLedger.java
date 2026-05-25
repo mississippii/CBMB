@@ -29,10 +29,14 @@ import lombok.Setter;
         })
 @org.hibernate.annotations.Check(constraints = "((party_type = 'WHOLESALER' and party_account_id is null) or (party_type in ('WHOLESALER_CUSTOMER','WHOLESALER_SUPPLIER') and party_account_id is not null))")
 @org.hibernate.annotations.Check(constraints = "quantity > 0")
+@jakarta.persistence.IdClass(org.example.model.id.BoxLedgerId.class)
 public class BoxLedger {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @jakarta.persistence.TableGenerator(name = "box_ledger_id_gen", table = "jpa_id_generators",
+            pkColumnName = "sequence_name", valueColumnName = "next_val",
+            pkColumnValue = "box_ledger", allocationSize = 1)
+    @GeneratedValue(strategy = GenerationType.TABLE, generator = "box_ledger_id_gen")
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
@@ -67,6 +71,12 @@ public class BoxLedger {
     @Column(columnDefinition = "TEXT")
     private String note;
 
-    @Column(name = "created_at", insertable = false, updatable = false)
+    @Id
+    @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
+
+    @jakarta.persistence.PrePersist
+    void prePersist() {
+        if (createdAt == null) createdAt = LocalDateTime.now();
+    }
 }

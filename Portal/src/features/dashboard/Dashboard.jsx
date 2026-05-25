@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import {
   LayoutGrid, Package, Truck, Users, UserCheck,
-  ArrowLeftRight, CreditCard, ShoppingCart,
+  ArrowLeftRight, CreditCard, ShoppingCart, BarChart3, Wallet,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import Navbar from '../../shared/components/Navbar';
@@ -13,6 +13,8 @@ import ShipmentsPage from '../shipments/ShipmentsPage';
 import SalesPage from '../sales/SalesPage';
 import PaymentsPage from '../payments/PaymentsPage';
 import StoreInventory from '../inventory/StoreInventory';
+import ReportsPage from '../reports/ReportsPage';
+import ShopExpensesPage from '../expenses/ShopExpensesPage';
 import { useData } from '../../data/DataContext';
 
 const tabs = [
@@ -24,6 +26,8 @@ const tabs = [
   { id: 'sales',         label: 'Sales',         icon: ShoppingCart },
   { id: 'payment',       label: 'Payments',      icon: CreditCard },
   { id: 'transactions',  label: 'Transactions',  icon: ArrowLeftRight },
+  { id: 'shopExpenses',  label: 'Shop Expenses', icon: Wallet },
+  { id: 'reports',       label: 'Reports',       icon: BarChart3 },
 ];
 
 const Dashboard = () => {
@@ -117,6 +121,8 @@ const Dashboard = () => {
                 {activeTab === 'customers'    && <CustomersList />}
                 {activeTab === 'transactions' && <TransactionsList />}
                 {activeTab === 'payment'      && <PaymentsPage />}
+                {activeTab === 'shopExpenses' && <ShopExpensesPage />}
+                {activeTab === 'reports'      && <ReportsPage />}
               </div>
             )}
           </main>

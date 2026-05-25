@@ -49,6 +49,10 @@ public class BoxInventory {
     @Column(name = "lost_damaged", nullable = false)
     private Integer lostDamaged = 0;
 
+    @jakarta.persistence.Version
+    @Column(nullable = false)
+    private Long version = 0L;
+
     @Column(name = "updated_at", insertable = false, updatable = false)
     private LocalDateTime updatedAt;
 }

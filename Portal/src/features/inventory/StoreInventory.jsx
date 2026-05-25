@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
-import { AlertTriangle, ChevronDown, ChevronRight, Truck } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, Filter, Truck } from 'lucide-react';
 import { useData } from '../../data/DataContext';
 import { useToast } from '../../shared/components/Toast';
+import OverviewPage from '../overview/OverviewPage';
 
 const WRITE_OFF_REASONS = ['Damaged', 'Spoiled / Rotten', 'Shortage', 'Other'];
 
@@ -80,6 +81,20 @@ const StoreInventory = () => {
     setSet(next);
   };
 
+  // Per-product table filters: { [productName]: { variety, supplier } }. 'all' = no filter.
+  const [productFilters, setProductFilters] = useState({});
+  const getFilter = (name) => productFilters[name] || { variety: 'all', supplier: 'all' };
+  const setFilter = (name, patch) =>
+    setProductFilters((s) => ({ ...s, [name]: { ...getFilter(name), ...patch } }));
+  // Applying a filter auto-expands the card so the user sees the result.
+  const applyFilter = (name, patch) => {
+    setFilter(name, patch);
+    setExpandedProducts((s) => {
+      if (s.has(name)) return s;
+      const next = new Set(s); next.add(name); return next;
+    });
+  };
+
   const openWriteOff = (product) => {
     setWriteOff({ product });
     setWoForm({ quantity: '', reason: WRITE_OFF_REASONS[0], note: '' });
@@ -136,12 +151,6 @@ const StoreInventory = () => {
     [supplierById, supplierProducts],
   );
 
-  const today = new Date().toISOString().split('T')[0];
-  const todaySales = transactions.filter(
-    (transaction) =>
-      transaction.transactionType === 'Sale' && getDateOnly(transaction.createdAt || transaction.date) === today,
-  );
-
   // KPIs count distinct PRODUCTS (not lot rows). A product is "available" if any of
   // its lots has stock > 0; "stock out" if every lot is empty.
   const productGroups = useMemo(() => {
@@ -160,7 +169,6 @@ const StoreInventory = () => {
     availableCount: productGroups.filter((g) => g.qty > 0).length,
     stockOutCount: productGroups.filter((g) => g.qty <= 0).length,
     totalQuantity: products.reduce((sum, product) => sum + product.quantity, 0),
-    todaySales: todaySales.reduce((sum, transaction) => sum + (Number(transaction.totalAmount) || 0), 0),
   };
 
   // Group only by Product. Each product carries:
@@ -206,37 +214,8 @@ const StoreInventory = () => {
   }, [products]);
 
   return (
-    <div className="store-inventory">
-      <section className="inventory-hero">
-        <div>
-          <span className="box-eyebrow">Store Inventory</span>
-          <h3>Available products</h3>
-          <p>Current product stock by supplier, category, and quantity.</p>
-        </div>
-      </section>
-
-      <section className="inventory-kpi-grid">
-        <div className="metric-tile">
-          <p>Total Products</p>
-          <strong>{summary.productCount}</strong>
-        </div>
-        <div className="metric-tile">
-          <p>Available</p>
-          <strong>{summary.availableCount}</strong>
-        </div>
-        <div className="metric-tile danger">
-          <p>Stock Out</p>
-          <strong>{summary.stockOutCount}</strong>
-        </div>
-        <div className="metric-tile">
-          <p>Total Quantity</p>
-          <strong>{formatNumber(summary.totalQuantity)}</strong>
-        </div>
-        <div className="metric-tile">
-          <p>Today Sales</p>
-          <strong>{formatCurrency(summary.todaySales)}</strong>
-        </div>
-      </section>
+    <div className="store-inventory space-y-4">
+      <OverviewPage />
 
       <section className="supplier-panel inventory-panel">
         <div className="inventory-panel-header">
@@ -244,7 +223,14 @@ const StoreInventory = () => {
             <h3>Products In Store</h3>
             <p>Stock out products stay visible so the wholesaler can restock them.</p>
           </div>
-          <span>{summary.availableCount} available</span>
+          <div className="flex flex-wrap items-center gap-2 text-[11px] font-bold">
+            <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-700">{summary.productCount} products</span>
+            <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-emerald-700">{summary.availableCount} in</span>
+            {summary.stockOutCount > 0 && (
+              <span className="rounded-full bg-rose-100 px-2.5 py-1 text-rose-700">{summary.stockOutCount} out</span>
+            )}
+            <span className="rounded-full bg-blue-50 px-2.5 py-1 text-blue-700">{formatNumber(summary.totalQuantity)} total</span>
+          </div>
         </div>
 
         {products.length === 0 ? (
@@ -258,74 +244,153 @@ const StoreInventory = () => {
               const unitU = String(p.unit || '').toUpperCase();
               const showVarietyCol = p.varietyCount > 0;
               const showLotCol = p.hasLots;
+              const filter = getFilter(p.name);
+
+              // Unique varieties (categories) & suppliers in this product — for the filter dropdowns.
+              const varietyOpts = Array.from(new Set(p.rows.map((r) => r.category).filter(Boolean))).sort();
+              const supOpts = Array.from(new Set(p.rows.map((r) => r.supplierName).filter(Boolean))).sort();
+              const filteredRows = p.rows.filter((r) =>
+                (filter.variety === 'all' || r.category === filter.variety) &&
+                (filter.supplier === 'all' || r.supplierName === filter.supplier),
+              );
+              const isFiltered = filter.variety !== 'all' || filter.supplier !== 'all';
               return (
                 <div key={p.name} className={`rounded-2xl border bg-white transition overflow-hidden ${pOpen ? 'border-blue-200 shadow-sm' : 'border-slate-200 hover:border-slate-300'}`}>
                   {/* PRODUCT HEADER */}
-                  <button
-                    type="button"
-                    onClick={() => toggle(expandedProducts, setExpandedProducts, p.name)}
-                    className={`flex w-full items-center gap-3 px-4 py-3 text-left ${pOpen ? 'bg-blue-50/50' : 'hover:bg-slate-50'}`}
-                  >
-                    {(() => {
-                      const emoji = emojiForProduct(p.name);
-                      return (
-                        <span className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ${pOpen ? 'bg-blue-50 ring-2 ring-blue-300' : 'bg-slate-100 ring-1 ring-slate-200'}`}>
-                          {emoji ? (
-                            <span className="text-3xl leading-none" aria-hidden>{emoji}</span>
-                          ) : (
-                            <span className="text-lg font-extrabold text-slate-600">
-                              {p.name.charAt(0).toUpperCase()}
-                            </span>
-                          )}
-                        </span>
-                      );
-                    })()}
-                    <div className="min-w-0 flex-1">
-                      <div className="flex items-baseline gap-2">
-                        <h4 className="text-base font-extrabold text-slate-900 truncate">{p.name}</h4>
-                        <span className="text-xs text-slate-500">
-                          {p.varietyCount > 0 && (
-                            <>{p.varietyCount} variet{p.varietyCount === 1 ? 'y' : 'ies'} · </>
-                          )}
-                          {p.rows.length} row{p.rows.length === 1 ? '' : 's'} · {p.suppliers.length} supplier{p.suppliers.length === 1 ? '' : 's'}
-                        </span>
-                      </div>
-                      <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                        {p.suppliers.map((s) => (
-                          <span key={s.name} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
-                            <Truck size={10} /> {s.name}
-                            <span className="text-slate-500 font-medium">· {formatNumber(s.qty)} {unitU}</span>
+                  <div className={`flex items-center gap-3 px-4 py-3 ${pOpen ? 'bg-blue-50/50' : 'hover:bg-slate-50'}`}>
+                    {/* Left clickable area — toggle expand */}
+                    <button
+                      type="button"
+                      onClick={() => toggle(expandedProducts, setExpandedProducts, p.name)}
+                      className="flex min-w-0 flex-1 items-center gap-3 text-left"
+                    >
+                      {(() => {
+                        const emoji = emojiForProduct(p.name);
+                        return (
+                          <span className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ${pOpen ? 'bg-blue-50 ring-2 ring-blue-300' : 'bg-slate-100 ring-1 ring-slate-200'}`}>
+                            {emoji ? (
+                              <span className="text-3xl leading-none" aria-hidden>{emoji}</span>
+                            ) : (
+                              <span className="text-lg font-extrabold text-slate-600">
+                                {p.name.charAt(0).toUpperCase()}
+                              </span>
+                            )}
                           </span>
-                        ))}
+                        );
+                      })()}
+                      <div className="min-w-0 flex-1">
+                        <div className="flex items-baseline gap-2">
+                          <h4 className="text-base font-extrabold text-slate-900 truncate">{p.name}</h4>
+                          <span className="text-xs text-slate-500">
+                            {p.varietyCount > 0 && (
+                              <>{p.varietyCount} variet{p.varietyCount === 1 ? 'y' : 'ies'} · </>
+                            )}
+                            {p.rows.length} row{p.rows.length === 1 ? '' : 's'} · {p.suppliers.length} supplier{p.suppliers.length === 1 ? '' : 's'}
+                          </span>
+                        </div>
+                        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+                          {p.suppliers.map((s) => (
+                            <span key={s.name} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                              <Truck size={10} /> {s.name}
+                              <span className="text-slate-500 font-medium">· {formatNumber(s.qty)} {unitU}</span>
+                            </span>
+                          ))}
+                        </div>
                       </div>
-                    </div>
-                    <div className="shrink-0 text-right">
+                    </button>
+
+                    {/* Qty summary */}
+                    <button
+                      type="button"
+                      onClick={() => toggle(expandedProducts, setExpandedProducts, p.name)}
+                      className="shrink-0 text-right"
+                    >
                       <div className="text-lg font-extrabold text-slate-900 leading-none">{formatNumber(p.qty)}</div>
                       <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mt-0.5">{unitU} remaining</div>
-                    </div>
-                    <span className="ml-2 shrink-0 text-slate-400">
+                    </button>
+
+                    {/* Right-most: filters (only render if there are multiple options in either dim) */}
+                    {(varietyOpts.length > 1 || supOpts.length > 1) && (
+                      <div className="shrink-0 flex items-center gap-1.5" onClick={(e) => e.stopPropagation()}>
+                        <span className={`flex h-7 w-7 items-center justify-center rounded-lg ${isFiltered ? 'bg-blue-100 text-blue-700' : 'bg-slate-100 text-slate-500'}`} title="Filter">
+                          <Filter size={13} />
+                        </span>
+                        {varietyOpts.length > 1 && (
+                          <select
+                            value={filter.variety}
+                            onChange={(e) => applyFilter(p.name, { variety: e.target.value })}
+                            title="Filter by variety"
+                            className={`rounded-md border bg-white px-2 py-1 text-xs font-semibold focus:border-blue-500 focus:outline-none ${filter.variety !== 'all' ? 'border-blue-400 text-blue-700' : 'border-slate-300 text-slate-700'}`}
+                          >
+                            <option value="all">All varieties ({varietyOpts.length})</option>
+                            {varietyOpts.map((v) => <option key={v} value={v}>{v}</option>)}
+                          </select>
+                        )}
+                        {supOpts.length > 1 && (
+                          <select
+                            value={filter.supplier}
+                            onChange={(e) => applyFilter(p.name, { supplier: e.target.value })}
+                            title="Filter by supplier"
+                            className={`rounded-md border bg-white px-2 py-1 text-xs font-semibold focus:border-blue-500 focus:outline-none ${filter.supplier !== 'all' ? 'border-blue-400 text-blue-700' : 'border-slate-300 text-slate-700'}`}
+                          >
+                            <option value="all">All suppliers ({supOpts.length})</option>
+                            {supOpts.map((s) => <option key={s} value={s}>{s}</option>)}
+                          </select>
+                        )}
+                        {isFiltered && (
+                          <button
+                            type="button"
+                            onClick={() => setFilter(p.name, { variety: 'all', supplier: 'all' })}
+                            className="rounded-md bg-slate-100 px-2 py-1 text-[11px] font-semibold text-slate-600 hover:bg-slate-200"
+                          >
+                            Clear
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    <button
+                      type="button"
+                      onClick={() => toggle(expandedProducts, setExpandedProducts, p.name)}
+                      className="ml-1 shrink-0 text-slate-400"
+                      aria-label={pOpen ? 'Collapse' : 'Expand'}
+                    >
                       {pOpen ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-                    </span>
-                  </button>
+                    </button>
+                  </div>
 
                   {/* ONE UNIFIED TABLE — Variety / Lot columns hidden when the product doesn't use them */}
                   {pOpen && (
                     <div className="border-t border-blue-100 bg-slate-50/40 px-4 py-3">
+                      {isFiltered && (
+                        <p className="mb-2 text-[11px] text-slate-500">
+                          Showing <strong className="text-blue-700">{filteredRows.length}</strong> of {p.rows.length} rows
+                          {filter.variety !== 'all' && <> · variety <strong>{filter.variety}</strong></>}
+                          {filter.supplier !== 'all' && <> · supplier <strong>{filter.supplier}</strong></>}
+                        </p>
+                      )}
                       <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
                         <table className="w-full text-sm">
                           <thead>
                             <tr className="bg-slate-50 border-b border-slate-200">
-                              {showVarietyCol && <th className="px-3 py-2 text-center text-[11px] font-bold uppercase tracking-wider text-slate-500">Variety</th>}
-                              {showLotCol && <th className="px-3 py-2 text-center text-[11px] font-bold uppercase tracking-wider text-slate-500">Lot</th>}
-                              <th className="px-3 py-2 text-center text-[11px] font-bold uppercase tracking-wider text-slate-500">Qty</th>
-                              <th className="px-3 py-2 text-center text-[11px] font-bold uppercase tracking-wider text-slate-500">Supplier</th>
-                              <th className="px-3 py-2 text-center text-[11px] font-bold uppercase tracking-wider text-slate-500">Shipment</th>
-                              <th className="px-3 py-2 text-center text-[11px] font-bold uppercase tracking-wider text-slate-500">Status</th>
-                              <th className="px-3 py-2 text-center text-[11px] font-bold uppercase tracking-wider text-slate-500">Action</th>
+                              {showVarietyCol && <th className="px-3 py-2 !text-center text-[11px] font-bold uppercase tracking-wider text-slate-500">Variety</th>}
+                              {showLotCol && <th className="px-3 py-2 !text-center text-[11px] font-bold uppercase tracking-wider text-slate-500">Lot</th>}
+                              <th className="px-3 py-2 !text-center text-[11px] font-bold uppercase tracking-wider text-slate-500">Qty</th>
+                              <th className="px-3 py-2 !text-center text-[11px] font-bold uppercase tracking-wider text-slate-500">Supplier</th>
+                              <th className="px-3 py-2 !text-center text-[11px] font-bold uppercase tracking-wider text-slate-500">Shipment</th>
+                              <th className="px-3 py-2 !text-center text-[11px] font-bold uppercase tracking-wider text-slate-500">Status</th>
+                              <th className="px-3 py-2 !text-center text-[11px] font-bold uppercase tracking-wider text-slate-500">Action</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
-                            {p.rows.map((lot) => {
+                            {filteredRows.length === 0 && (
+                              <tr>
+                                <td colSpan={2 + (showVarietyCol ? 1 : 0) + (showLotCol ? 1 : 0) + 4} className="px-3 py-4 !text-center text-xs text-slate-400">
+                                  No rows match the current filter.
+                                </td>
+                              </tr>
+                            )}
+                            {filteredRows.map((lot) => {
                               const isOut = lot.quantity <= 0;
                               const shipName = lot.deliveryId
                                 ? (shipmentNameById.get(Number(lot.deliveryId)) || `Lot #${lot.deliveryId}`)
@@ -333,12 +398,12 @@ const StoreInventory = () => {
                               return (
                                 <tr key={lot.id} className="hover:bg-slate-50 transition">
                                   {showVarietyCol && (
-                                    <td className="px-3 py-2 text-center text-slate-800">
+                                    <td className="px-3 py-2 !text-center text-slate-800">
                                       {lot.category || <span className="text-slate-300">—</span>}
                                     </td>
                                   )}
                                   {showLotCol && (
-                                    <td className="px-3 py-2 text-center">
+                                    <td className="px-3 py-2 !text-center">
                                       {lot.subCategoryName ? (
                                         <span className={`font-bold ${isOut ? 'text-slate-400' : 'text-blue-700'}`}>{lot.subCategoryName}</span>
                                       ) : (
@@ -346,20 +411,20 @@ const StoreInventory = () => {
                                       )}
                                     </td>
                                   )}
-                                  <td className="px-3 py-2 text-center">
+                                  <td className="px-3 py-2 !text-center">
                                     <span className={isOut ? 'text-slate-400' : 'font-bold text-slate-800'}>
                                       {formatNumber(lot.quantity)}
                                     </span>
                                     <span className="ml-1 text-xs text-slate-500">{String(lot.unit || '').toUpperCase()}</span>
                                   </td>
-                                  <td className="px-3 py-2 text-center text-slate-700">{lot.supplierName}</td>
-                                  <td className="px-3 py-2 text-center text-slate-700">{shipName}</td>
-                                  <td className="px-3 py-2 text-center">
+                                  <td className="px-3 py-2 !text-center text-slate-700">{lot.supplierName}</td>
+                                  <td className="px-3 py-2 !text-center text-slate-700">{shipName}</td>
+                                  <td className="px-3 py-2 !text-center">
                                     <span className={`stock-pill ${isOut ? 'out' : ''}`}>
                                       {isOut ? 'Out' : 'In stock'}
                                     </span>
                                   </td>
-                                  <td className="px-3 py-2 text-center">
+                                  <td className="px-3 py-2 !text-center">
                                     <button
                                       type="button"
                                       className="btn-compact"

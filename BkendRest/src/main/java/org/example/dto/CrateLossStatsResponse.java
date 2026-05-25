@@ -2,7 +2,7 @@ package org.example.dto;
 
 import java.util.List;
 
-public record BoxLossStatsResponse(
+public record CrateLossStatsResponse(
         int months,
         long totalLost,
         long totalBangla,

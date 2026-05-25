@@ -15,7 +15,7 @@ const renderCustomerTransactionDetails = (transaction) => {
   if (transaction.transactionType === 'Payment') {
     const parts = []
     if (Number(transaction.paymentAmount) > 0) parts.push('Cash received')
-    if (Number(transaction.boxesReturned) > 0) parts.push('Crates returned: ' + transaction.boxesReturned)
+    if (Number(transaction.cratesReturned) > 0) parts.push('Crates returned: ' + transaction.cratesReturned)
     if (Number(transaction.boxJamanotChange) !== 0) {
       parts.push('Jamanot: ' + formatCurrency(Math.abs(Number(transaction.boxJamanotChange))))
     }
@@ -160,7 +160,7 @@ const CustomerDetail = ({ customerId, onBack }) => {
         </div>
         <div className="metric-tile">
           <p>Crate Jamanot</p>
-          <strong>{formatCurrency(customer.boxJamanot || 0)}</strong>
+          <strong>{formatCurrency(customer.crateJamanot || 0)}</strong>
         </div>
       </div>
 
@@ -221,22 +221,22 @@ const CustomerDetail = ({ customerId, onBack }) => {
           <div className="mt-4 space-y-3">
             <div className="box-row">
               <span>Bangla</span>
-              <strong>{customer.boxesHoldingWooden || 0}</strong>
+              <strong>{customer.cratesHoldingWooden || 0}</strong>
             </div>
             <div className="box-row">
               <span>China</span>
-              <strong>{customer.boxesHoldingPlastic || 0}</strong>
+              <strong>{customer.cratesHoldingPlastic || 0}</strong>
             </div>
             <div className="box-row total">
               <span>Total Crates Due</span>
-              <strong>{customer.totalBoxesHolding || 0}</strong>
+              <strong>{customer.totalCratesHolding || 0}</strong>
             </div>
           </div>
 
           <div className="mt-5 rounded-xl bg-emerald-50 p-4">
             <p className="text-[11px] font-bold uppercase tracking-wider text-[#1d63ed]">Crate Jamanot</p>
             <p className="mt-1 text-xl font-extrabold text-[#1755c9]">
-              {formatCurrency(customer.boxJamanot || 0)}
+              {formatCurrency(customer.crateJamanot || 0)}
             </p>
           </div>
         </div>

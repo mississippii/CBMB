@@ -99,6 +99,7 @@ CREATE TABLE `wholesaler_customers` (
   `opening_due` decimal(14,2) NOT NULL DEFAULT '0.00',
   `jamanot_balance` decimal(14,2) NOT NULL DEFAULT '0.00',
   `status` enum('ACTIVE','DISABLED') NOT NULL DEFAULT 'ACTIVE',
+  `version` bigint NOT NULL DEFAULT '0',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -197,7 +198,7 @@ CREATE TABLE `supplier_delivery_items` (
   `category_id` bigint unsigned DEFAULT NULL,
   `sub_category_id` bigint unsigned DEFAULT NULL,
   `quantity` decimal(14,3) NOT NULL,
-  `unit` enum('PCS','KG','DOZEN','BOX','BAG','MOUND') NOT NULL DEFAULT 'PCS',
+  `unit` enum('PCS','KG','DOZEN','CRATE','BAG','MOUND') NOT NULL DEFAULT 'PCS',
   `note` text,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -228,8 +229,9 @@ CREATE TABLE `inventory` (
   `category_id` bigint unsigned DEFAULT NULL,
   `sub_category_id` bigint unsigned DEFAULT NULL,
   `quantity_on_hand` decimal(14,3) NOT NULL DEFAULT '0.000',
-  `unit` enum('PCS','KG','DOZEN','BOX','BAG','MOUND') NOT NULL DEFAULT 'PCS',
+  `unit` enum('PCS','KG','DOZEN','CRATE','BAG','MOUND') NOT NULL DEFAULT 'PCS',
   `status` enum('ACTIVE','STOCK_OUT','DISABLED') NOT NULL DEFAULT 'ACTIVE',
+  `version` bigint NOT NULL DEFAULT '0',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -256,6 +258,9 @@ CREATE TABLE `inventory` (
   CONSTRAINT `chk_inventory_quantity_nonnegative` CHECK (`quantity_on_hand` >= 0)
 ) ENGINE=InnoDB;
 
+-- Partitioned monthly. FK constraints removed: MySQL InnoDB does NOT support FOREIGN
+-- KEY on partitioned tables. Referential integrity is enforced by the service layer
+-- (every insert uses an id loaded via its own repository in the same transaction).
 CREATE TABLE `stock_ledger` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `wholesaler_id` bigint unsigned NOT NULL,
@@ -268,20 +273,39 @@ CREATE TABLE `stock_ledger` (
   `quantity` decimal(14,3) NOT NULL,
   `note` text,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
+  PRIMARY KEY (`id`,`created_at`),
   KEY `idx_stock_ledger_supplier_date` (`wholesaler_id`,`wholesaler_supplier_id`,`created_at`),
   KEY `idx_stock_ledger_category_date` (`wholesaler_id`,`category_id`,`created_at`),
   KEY `idx_stock_ledger_product_date` (`wholesaler_id`,`product_id`,`created_at`),
-  CONSTRAINT `fk_stock_ledger_category` FOREIGN KEY (`category_id`) REFERENCES `categories` (`id`)
-    ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT `fk_stock_ledger_product` FOREIGN KEY (`product_id`) REFERENCES `products` (`id`)
-    ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT `fk_stock_ledger_wholesaler` FOREIGN KEY (`wholesaler_id`) REFERENCES `wholesalers` (`id`)
-    ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT `fk_stock_ledger_ws` FOREIGN KEY (`wholesaler_supplier_id`) REFERENCES `wholesaler_suppliers` (`id`)
-    ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `chk_stock_ledger_quantity_positive` CHECK (`quantity` > 0)
-) ENGINE=InnoDB;
+) ENGINE=InnoDB
+PARTITION BY RANGE COLUMNS(created_at) (
+  PARTITION p202605 VALUES LESS THAN ('2026-06-01'),
+  PARTITION p202606 VALUES LESS THAN ('2026-07-01'),
+  PARTITION p202607 VALUES LESS THAN ('2026-08-01'),
+  PARTITION p202608 VALUES LESS THAN ('2026-09-01'),
+  PARTITION p202609 VALUES LESS THAN ('2026-10-01'),
+  PARTITION p202610 VALUES LESS THAN ('2026-11-01'),
+  PARTITION p202611 VALUES LESS THAN ('2026-12-01'),
+  PARTITION p202612 VALUES LESS THAN ('2027-01-01'),
+  PARTITION p202701 VALUES LESS THAN ('2027-02-01'),
+  PARTITION p202702 VALUES LESS THAN ('2027-03-01'),
+  PARTITION p202703 VALUES LESS THAN ('2027-04-01'),
+  PARTITION p202704 VALUES LESS THAN ('2027-05-01'),
+  PARTITION p202705 VALUES LESS THAN ('2027-06-01'),
+  PARTITION p202706 VALUES LESS THAN ('2027-07-01'),
+  PARTITION p202707 VALUES LESS THAN ('2027-08-01'),
+  PARTITION p202708 VALUES LESS THAN ('2027-09-01'),
+  PARTITION p202709 VALUES LESS THAN ('2027-10-01'),
+  PARTITION p202710 VALUES LESS THAN ('2027-11-01'),
+  PARTITION p202711 VALUES LESS THAN ('2027-12-01'),
+  PARTITION p202712 VALUES LESS THAN ('2028-01-01'),
+  PARTITION p202801 VALUES LESS THAN ('2028-02-01'),
+  PARTITION p202802 VALUES LESS THAN ('2028-03-01'),
+  PARTITION p202803 VALUES LESS THAN ('2028-04-01'),
+  PARTITION p202804 VALUES LESS THAN ('2028-05-01'),
+  PARTITION pmax VALUES LESS THAN (MAXVALUE)
+);
 
 -- =============================================================
 -- Sales / Payments
@@ -336,7 +360,7 @@ CREATE TABLE `sale_items` (
   `category_id` bigint unsigned DEFAULT NULL,
   `sub_category_id` bigint unsigned DEFAULT NULL,
   `quantity` decimal(14,3) NOT NULL,
-  `unit` enum('PCS','KG','DOZEN','BOX','BAG','MOUND') NOT NULL DEFAULT 'PCS',
+  `unit` enum('PCS','KG','DOZEN','CRATE','BAG','MOUND') NOT NULL DEFAULT 'PCS',
   `unit_price` decimal(14,2) NOT NULL DEFAULT '0.00',
   `line_total` decimal(14,2) NOT NULL DEFAULT '0.00',
   `commission_rate` decimal(5,2) NOT NULL DEFAULT '0.00',
@@ -375,7 +399,7 @@ CREATE TABLE `payments` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `wholesaler_id` bigint unsigned NOT NULL,
   `wholesaler_customer_id` bigint unsigned NOT NULL,
-  `payment_type` enum('CASH_RECEIVE','BOX_RETURN','CASH_AND_BOX_RETURN') NOT NULL,
+  `payment_type` enum('CASH_RECEIVE','CRATE_RETURN','CASH_AND_CRATE_RETURN') NOT NULL,
   `cash_amount` decimal(14,2) NOT NULL DEFAULT '0.00',
   `boxes_returned` int NOT NULL DEFAULT '0',
   `jamanot_amount` decimal(14,2) NOT NULL DEFAULT '0.00',
@@ -384,6 +408,7 @@ CREATE TABLE `payments` (
   `previous_jamanot` decimal(14,2) NOT NULL DEFAULT '0.00',
   `jamanot_after_payment` decimal(14,2) NOT NULL DEFAULT '0.00',
   `payment_method` enum('CASH','BANK','BKASH','NAGAD','OTHER','NONE') NOT NULL DEFAULT 'CASH',
+  `status` enum('POSTED','CANCELLED') NOT NULL DEFAULT 'POSTED',
   `note` text,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`,`created_at`),
@@ -398,9 +423,9 @@ CREATE TABLE `payments` (
   CONSTRAINT `chk_payments_type_values` CHECK (
     (`payment_type` = 'CASH_RECEIVE'         AND `cash_amount` > 0 AND `boxes_returned` = 0 AND `jamanot_amount` = 0)
     OR
-    (`payment_type` = 'BOX_RETURN'           AND `cash_amount` = 0 AND `boxes_returned` > 0 AND `jamanot_amount` >= 0)
+    (`payment_type` = 'CRATE_RETURN'           AND `cash_amount` = 0 AND `boxes_returned` > 0 AND `jamanot_amount` >= 0)
     OR
-    (`payment_type` = 'CASH_AND_BOX_RETURN'  AND `cash_amount` > 0 AND `boxes_returned` > 0 AND `jamanot_amount` >= 0)
+    (`payment_type` = 'CASH_AND_CRATE_RETURN'  AND `cash_amount` > 0 AND `boxes_returned` > 0 AND `jamanot_amount` >= 0)
   )
 ) ENGINE=InnoDB
 PARTITION BY RANGE COLUMNS(created_at) (
@@ -446,6 +471,7 @@ CREATE TABLE `supplier_settlements` (
   `previous_due` decimal(14,2) NOT NULL DEFAULT '0.00',
   `due_after_settlement` decimal(14,2) NOT NULL DEFAULT '0.00',
   `payment_method` enum('CASH','BANK','BKASH','NAGAD','OTHER') NOT NULL DEFAULT 'CASH',
+  `status` enum('POSTED','CANCELLED') NOT NULL DEFAULT 'POSTED',
   `note` text,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -465,15 +491,46 @@ CREATE TABLE `expense_categories` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `wholesaler_id` bigint unsigned NOT NULL,
   `name` varchar(120) NOT NULL,
+  `kind` enum('SUPPLIER','SHOP','BOTH') NOT NULL DEFAULT 'BOTH',
   `status` enum('ACTIVE','DISABLED') NOT NULL DEFAULT 'ACTIVE',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_expense_category_wh_name` (`wholesaler_id`,`name`),
   KEY `idx_expense_category_status` (`wholesaler_id`,`status`),
+  KEY `idx_expense_category_kind` (`wholesaler_id`,`kind`),
   CONSTRAINT `fk_expense_categories_wholesaler`
     FOREIGN KEY (`wholesaler_id`) REFERENCES `wholesalers` (`id`)
     ON DELETE RESTRICT ON UPDATE CASCADE
+) ENGINE=InnoDB;
+
+-- =============================================================
+-- Shop overhead expenses (pure outflow — wholesaler bears these)
+-- =============================================================
+-- Examples: employee salary, guest hospitality, owner/employee lunch, rent,
+-- utilities. Nobody reimburses. Reduces cash and profit. Distinct from
+-- supplier_expenses which are recoverable from the supplier.
+CREATE TABLE `shop_expenses` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `wholesaler_id` bigint unsigned NOT NULL,
+  `category_id` bigint unsigned NOT NULL,
+  `amount` decimal(14,2) NOT NULL DEFAULT '0.00',
+  `payment_method` enum('CASH','BANK','BKASH','NAGAD','OTHER') NOT NULL DEFAULT 'CASH',
+  `expense_date` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `note` text,
+  `status` enum('POSTED','CANCELLED') NOT NULL DEFAULT 'POSTED',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_shop_expense_wh_date` (`wholesaler_id`,`expense_date`),
+  KEY `idx_shop_expense_category` (`wholesaler_id`,`category_id`),
+  CONSTRAINT `fk_shop_expenses_wholesaler`
+    FOREIGN KEY (`wholesaler_id`) REFERENCES `wholesalers` (`id`)
+    ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `fk_shop_expenses_category`
+    FOREIGN KEY (`category_id`) REFERENCES `expense_categories` (`id`)
+    ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `chk_shop_expense_amount_positive` CHECK (`amount` > 0)
 ) ENGINE=InnoDB;
 
 -- V5: supplier_expenses.delivery_id (attach an expense to a shipment).
@@ -561,6 +618,7 @@ CREATE TABLE `box_inventory` (
   `with_customers` int NOT NULL DEFAULT '0',
   `with_suppliers` int NOT NULL DEFAULT '0',
   `lost_damaged` int NOT NULL DEFAULT '0',
+  `version` bigint NOT NULL DEFAULT '0',
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_box_inventory_wholesaler_type` (`wholesaler_id`,`box_type_id`),
@@ -584,6 +642,7 @@ CREATE TABLE `box_balances` (
   `party_type` enum('WHOLESALER_CUSTOMER','WHOLESALER_SUPPLIER') NOT NULL,
   `party_account_id` bigint unsigned NOT NULL,
   `boxes_due` int NOT NULL DEFAULT '0',
+  `version` bigint NOT NULL DEFAULT '0',
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_box_balances_party_type`
@@ -596,6 +655,7 @@ CREATE TABLE `box_balances` (
   CONSTRAINT `chk_box_balances_due_nonnegative` CHECK (`boxes_due` >= 0)
 ) ENGINE=InnoDB;
 
+-- Partitioned monthly. FK constraints removed (see note on stock_ledger above).
 CREATE TABLE `box_ledger` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `wholesaler_id` bigint unsigned NOT NULL,
@@ -610,14 +670,11 @@ CREATE TABLE `box_ledger` (
   `reference_id` bigint unsigned DEFAULT NULL,
   `note` text,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
+  PRIMARY KEY (`id`,`created_at`),
   KEY `idx_box_ledger_wholesaler_date` (`wholesaler_id`,`created_at`),
   KEY `idx_box_ledger_party` (`wholesaler_id`,`party_type`,`party_account_id`,`created_at`),
   KEY `idx_box_ledger_type_date` (`wholesaler_id`,`box_type_id`,`created_at`),
-  CONSTRAINT `fk_box_ledger_type` FOREIGN KEY (`box_type_id`) REFERENCES `box_types` (`id`)
-    ON DELETE RESTRICT ON UPDATE CASCADE,
-  CONSTRAINT `fk_box_ledger_wholesaler` FOREIGN KEY (`wholesaler_id`) REFERENCES `wholesalers` (`id`)
-    ON DELETE RESTRICT ON UPDATE CASCADE,
+  KEY `idx_box_ledger_reference` (`reference_type`,`reference_id`),
   CONSTRAINT `chk_box_ledger_party` CHECK (
     (`party_type` = 'WHOLESALER' AND `party_account_id` IS NULL)
     OR
@@ -625,7 +682,34 @@ CREATE TABLE `box_ledger` (
       AND `party_account_id` IS NOT NULL)
   ),
   CONSTRAINT `chk_box_ledger_quantity_positive` CHECK (`quantity` > 0)
-) ENGINE=InnoDB;
+) ENGINE=InnoDB
+PARTITION BY RANGE COLUMNS(created_at) (
+  PARTITION p202605 VALUES LESS THAN ('2026-06-01'),
+  PARTITION p202606 VALUES LESS THAN ('2026-07-01'),
+  PARTITION p202607 VALUES LESS THAN ('2026-08-01'),
+  PARTITION p202608 VALUES LESS THAN ('2026-09-01'),
+  PARTITION p202609 VALUES LESS THAN ('2026-10-01'),
+  PARTITION p202610 VALUES LESS THAN ('2026-11-01'),
+  PARTITION p202611 VALUES LESS THAN ('2026-12-01'),
+  PARTITION p202612 VALUES LESS THAN ('2027-01-01'),
+  PARTITION p202701 VALUES LESS THAN ('2027-02-01'),
+  PARTITION p202702 VALUES LESS THAN ('2027-03-01'),
+  PARTITION p202703 VALUES LESS THAN ('2027-04-01'),
+  PARTITION p202704 VALUES LESS THAN ('2027-05-01'),
+  PARTITION p202705 VALUES LESS THAN ('2027-06-01'),
+  PARTITION p202706 VALUES LESS THAN ('2027-07-01'),
+  PARTITION p202707 VALUES LESS THAN ('2027-08-01'),
+  PARTITION p202708 VALUES LESS THAN ('2027-09-01'),
+  PARTITION p202709 VALUES LESS THAN ('2027-10-01'),
+  PARTITION p202710 VALUES LESS THAN ('2027-11-01'),
+  PARTITION p202711 VALUES LESS THAN ('2027-12-01'),
+  PARTITION p202712 VALUES LESS THAN ('2028-01-01'),
+  PARTITION p202801 VALUES LESS THAN ('2028-02-01'),
+  PARTITION p202802 VALUES LESS THAN ('2028-03-01'),
+  PARTITION p202803 VALUES LESS THAN ('2028-04-01'),
+  PARTITION p202804 VALUES LESS THAN ('2028-05-01'),
+  PARTITION pmax VALUES LESS THAN (MAXVALUE)
+);
 
 -- =============================================================
 -- Account ledger / balances / transactions log
@@ -637,6 +721,7 @@ CREATE TABLE `account_balances` (
   `party_type` enum('WHOLESALER_CUSTOMER','WHOLESALER_SUPPLIER') NOT NULL,
   `party_account_id` bigint unsigned NOT NULL,
   `balance` decimal(14,2) NOT NULL DEFAULT '0.00',
+  `version` bigint NOT NULL DEFAULT '0',
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_account_balance_party` (`wholesaler_id`,`party_type`,`party_account_id`),
@@ -645,6 +730,7 @@ CREATE TABLE `account_balances` (
     ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB;
 
+-- Partitioned monthly. FK constraints removed (see note on stock_ledger above).
 CREATE TABLE `account_ledger` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `wholesaler_id` bigint unsigned NOT NULL,
@@ -657,19 +743,43 @@ CREATE TABLE `account_ledger` (
   `credit` decimal(14,2) NOT NULL DEFAULT '0.00',
   `note` text,
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  PRIMARY KEY (`id`),
+  PRIMARY KEY (`id`,`created_at`),
   KEY `idx_account_ledger_wh_party_date`
     (`wholesaler_id`,`party_type`,`party_account_id`,`created_at`),
   KEY `idx_account_ledger_reference` (`reference_type`,`reference_id`),
-  CONSTRAINT `fk_account_ledger_wholesaler`
-    FOREIGN KEY (`wholesaler_id`) REFERENCES `wholesalers` (`id`)
-    ON DELETE RESTRICT ON UPDATE CASCADE,
   CONSTRAINT `chk_account_ledger_debit_credit` CHECK (
     (`debit`  > 0 AND `credit` = 0)
     OR
     (`credit` > 0 AND `debit`  = 0)
   )
-) ENGINE=InnoDB;
+) ENGINE=InnoDB
+PARTITION BY RANGE COLUMNS(created_at) (
+  PARTITION p202605 VALUES LESS THAN ('2026-06-01'),
+  PARTITION p202606 VALUES LESS THAN ('2026-07-01'),
+  PARTITION p202607 VALUES LESS THAN ('2026-08-01'),
+  PARTITION p202608 VALUES LESS THAN ('2026-09-01'),
+  PARTITION p202609 VALUES LESS THAN ('2026-10-01'),
+  PARTITION p202610 VALUES LESS THAN ('2026-11-01'),
+  PARTITION p202611 VALUES LESS THAN ('2026-12-01'),
+  PARTITION p202612 VALUES LESS THAN ('2027-01-01'),
+  PARTITION p202701 VALUES LESS THAN ('2027-02-01'),
+  PARTITION p202702 VALUES LESS THAN ('2027-03-01'),
+  PARTITION p202703 VALUES LESS THAN ('2027-04-01'),
+  PARTITION p202704 VALUES LESS THAN ('2027-05-01'),
+  PARTITION p202705 VALUES LESS THAN ('2027-06-01'),
+  PARTITION p202706 VALUES LESS THAN ('2027-07-01'),
+  PARTITION p202707 VALUES LESS THAN ('2027-08-01'),
+  PARTITION p202708 VALUES LESS THAN ('2027-09-01'),
+  PARTITION p202709 VALUES LESS THAN ('2027-10-01'),
+  PARTITION p202710 VALUES LESS THAN ('2027-11-01'),
+  PARTITION p202711 VALUES LESS THAN ('2027-12-01'),
+  PARTITION p202712 VALUES LESS THAN ('2028-01-01'),
+  PARTITION p202801 VALUES LESS THAN ('2028-02-01'),
+  PARTITION p202802 VALUES LESS THAN ('2028-03-01'),
+  PARTITION p202803 VALUES LESS THAN ('2028-04-01'),
+  PARTITION p202804 VALUES LESS THAN ('2028-05-01'),
+  PARTITION pmax VALUES LESS THAN (MAXVALUE)
+);
 
 CREATE TABLE `transactions` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
@@ -732,7 +842,10 @@ CREATE TABLE `jpa_id_generators` (
 
 INSERT INTO `jpa_id_generators` (`sequence_name`, `next_val`) VALUES
   ('payments', 0),
-  ('transactions', 0);
+  ('transactions', 0),
+  ('box_ledger', 0),
+  ('stock_ledger', 0),
+  ('account_ledger', 0);
 
 -- =============================================================
 -- Seed Lot1..Lot200 (system-fixed Level-3 enumeration).

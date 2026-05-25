@@ -28,10 +28,14 @@ import lombok.Setter;
                 @jakarta.persistence.Index(name = "idx_stock_ledger_category_date", columnList = "wholesaler_id,category_id,created_at")
         })
 @org.hibernate.annotations.Check(constraints = "quantity > 0")
+@jakarta.persistence.IdClass(org.example.model.id.StockLedgerId.class)
 public class StockLedger {
 
     @Id
-    @GeneratedValue(strategy = GenerationType.IDENTITY)
+    @jakarta.persistence.TableGenerator(name = "stock_ledger_id_gen", table = "jpa_id_generators",
+            pkColumnName = "sequence_name", valueColumnName = "next_val",
+            pkColumnValue = "stock_ledger", allocationSize = 1)
+    @GeneratedValue(strategy = GenerationType.TABLE, generator = "stock_ledger_id_gen")
     private Long id;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
@@ -67,6 +71,12 @@ public class StockLedger {
     @Column(columnDefinition = "TEXT")
     private String note;
 
-    @Column(name = "created_at", insertable = false, updatable = false)
+    @Id
+    @Column(name = "created_at", nullable = false)
     private LocalDateTime createdAt;
+
+    @jakarta.persistence.PrePersist
+    void prePersist() {
+        if (createdAt == null) createdAt = LocalDateTime.now();
+    }
 }

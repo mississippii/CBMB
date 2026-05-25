@@ -7,7 +7,7 @@ import { useData } from '../../data/DataContext';
 import { useToast } from '../../shared/components/Toast';
 import SearchableSelect from '../../shared/components/SearchableSelect';
 
-const UNITS = ['KG', 'PCS', 'BOX', 'DOZEN', 'BAG', 'MOUND'];
+const UNITS = ['KG', 'PCS', 'CRATE', 'DOZEN', 'BAG', 'MOUND'];
 
 const newLine = () => ({ categoryId: '', subCategoryId: '', quantity: '' });
 

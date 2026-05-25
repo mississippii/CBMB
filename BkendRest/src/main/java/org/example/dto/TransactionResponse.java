@@ -28,7 +28,7 @@ public record TransactionResponse(
         BigDecimal discountAmount,
         BigDecimal paymentAmount,
         BigDecimal dueAmount,
-        Integer boxesReturned,
+        Integer cratesReturned,
         BigDecimal jamanotAmount,
         String paymentType,
         String description,

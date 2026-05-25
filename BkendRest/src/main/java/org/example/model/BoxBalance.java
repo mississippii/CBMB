@@ -47,6 +47,10 @@ public class BoxBalance {
     @Column(name = "boxes_due", nullable = false)
     private Integer boxesDue = 0;
 
+    @jakarta.persistence.Version
+    @Column(nullable = false)
+    private Long version = 0L;
+
     @Column(name = "updated_at", insertable = false, updatable = false)
     private LocalDateTime updatedAt;
 }

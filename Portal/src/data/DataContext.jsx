@@ -1,7 +1,9 @@
 /* eslint-disable react-refresh/only-export-components */
 import { createContext, useEffect, useState, useContext } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { useAuth } from '../features/auth/AuthContext';
 import { apiPaths, postJson } from '../services/apiClient';
+import { queryKeys } from '../services/queryKeys';
 
 const DataContext = createContext();
 
@@ -27,12 +29,12 @@ const loadSection = async (label, request, fallback) => {
 
 const asArray = (value) => (Array.isArray(value) ? value : []);
 
-const EMPTY_BOX_INVENTORY = {
-  totalBoxesOwned: 0,
-  boxesInShop: 0,
-  boxesWithSuppliers: 0,
-  boxesWithCustomers: 0,
-  boxesLostDamaged: 0,
+const EMPTY_CRATE_INVENTORY = {
+  totalCratesOwned: 0,
+  cratesInShop: 0,
+  cratesWithSuppliers: 0,
+  cratesWithCustomers: 0,
+  cratesLostDamaged: 0,
   bangla: {
     total: 0,
     inShop: 0,
@@ -57,13 +59,13 @@ const createDefaultState = () => ({
   shipments: [],
   catalogProducts: [],
   subCategories: [],   // fixed system list of Lot1..Lot200
-  boxInventory: EMPTY_BOX_INVENTORY,
+  crateInventory: EMPTY_CRATE_INVENTORY,
 });
 
 
-const normalizeBoxType = (value) => String(value || '').trim().toUpperCase() === 'CHINA' ? 'china' : 'bangla';
+const normalizeCrateType = (value) => String(value || '').trim().toUpperCase() === 'CHINA' ? 'china' : 'bangla';
 
-const createBoxTypeState = () => ({
+const createCrateTypeState = () => ({
   total: 0,
   inShop: 0,
   withSuppliers: 0,
@@ -71,19 +73,19 @@ const createBoxTypeState = () => ({
   lost: 0,
 });
 
-const mapBoxDashboard = (dashboard) => {
+const mapCrateDashboard = (dashboard) => {
   const next = {
-    totalBoxesOwned: Number(dashboard?.totalBoxesOwned) || 0,
-    boxesInShop: Number(dashboard?.boxesInShop) || 0,
-    boxesWithSuppliers: Number(dashboard?.boxesWithSuppliers) || 0,
-    boxesWithCustomers: Number(dashboard?.boxesWithCustomers) || 0,
-    boxesLostDamaged: Number(dashboard?.boxesLostDamaged) || 0,
-    bangla: createBoxTypeState(),
-    china: createBoxTypeState(),
+    totalCratesOwned: Number(dashboard?.totalCratesOwned) || 0,
+    cratesInShop: Number(dashboard?.cratesInShop) || 0,
+    cratesWithSuppliers: Number(dashboard?.cratesWithSuppliers) || 0,
+    cratesWithCustomers: Number(dashboard?.cratesWithCustomers) || 0,
+    cratesLostDamaged: Number(dashboard?.cratesLostDamaged) || 0,
+    bangla: createCrateTypeState(),
+    china: createCrateTypeState(),
   };
 
-  (dashboard?.boxTypes || []).forEach((item) => {
-    const key = normalizeBoxType(item.boxType);
+  (dashboard?.crateTypes || []).forEach((item) => {
+    const key = normalizeCrateType(item.crateType);
     next[key] = {
       total: Number(item.total) || 0,
       inShop: Number(item.inHand) || 0,
@@ -135,9 +137,9 @@ const mapSupplierAccount = (account) => ({
   amountDue: roundMoney(Number(account.currentDue ?? account.openingDue) || 0),
   lastSettlementDate: account.createdAt?.split('T')[0] || getDateOnly(),
   balance: -roundMoney(Number(account.currentDue ?? account.openingDue) || 0),
-  boxesHoldingWooden: Number(account.banglaCratesDue) || 0,
-  boxesHoldingPlastic: Number(account.chinaCratesDue) || 0,
-  totalBoxesHolding: Number(account.totalCratesDue) || 0,
+  cratesHoldingWooden: Number(account.banglaCratesDue) || 0,
+  cratesHoldingPlastic: Number(account.chinaCratesDue) || 0,
+  totalCratesHolding: Number(account.totalCratesDue) || 0,
   status: account.status || 'ACTIVE',
 });
 
@@ -153,10 +155,10 @@ const mapCustomerAccount = (account) => ({
   totalPurchases: roundMoney(Number(account.totalPurchases) || 0),
   totalPaid: roundMoney(Number(account.totalPaid) || 0),
   amountDue: roundMoney(Number(account.currentDue ?? account.openingDue) || 0),
-  boxJamanot: roundMoney(Number(account.jamanotBalance) || 0),
-  boxesHoldingWooden: Number(account.banglaCratesDue) || 0,
-  boxesHoldingPlastic: Number(account.chinaCratesDue) || 0,
-  totalBoxesHolding: Number(account.totalCratesDue) || 0,
+  crateJamanot: roundMoney(Number(account.jamanotBalance) || 0),
+  cratesHoldingWooden: Number(account.banglaCratesDue) || 0,
+  cratesHoldingPlastic: Number(account.chinaCratesDue) || 0,
+  totalCratesHolding: Number(account.totalCratesDue) || 0,
   status: account.status || 'ACTIVE',
 });
 
@@ -200,6 +202,8 @@ const mapTransaction = (transaction) => ({
   date: transaction.createdAt?.split('T')[0] || getDateOnly(),
   createdAt: transaction.createdAt || new Date().toISOString(),
   transactionType: transaction.transactionType === 'PAYMENT' ? 'Payment' : 'Sale',
+  saleId: transaction.saleId || null,
+  paymentId: transaction.paymentId || null,
   customerId: transaction.wholesalerCustomerId,
   customer: transaction.customerName || null,
   customerPhone: transaction.customerPhone || null,
@@ -220,7 +224,7 @@ const mapTransaction = (transaction) => ({
   discountAmount: Number(transaction.discountAmount) || 0,
   paymentAmount: Number(transaction.paymentAmount) || 0,
   customerNewDue: Number(transaction.dueAmount) || 0,
-  boxesReturned: Number(transaction.boxesReturned) || 0,
+  cratesReturned: Number(transaction.cratesReturned) || 0,
   boxJamanotChange: Number(transaction.jamanotAmount) ? -Number(transaction.jamanotAmount) : 0,
   paymentOperationType: transaction.paymentType || '',
   paymentType: transaction.paymentType || transaction.description || '',
@@ -248,7 +252,37 @@ const mapSupplierProfile = (profile) => ({
 
 export const DataProvider = ({ children }) => {
   const { admin, isAuthenticated } = useAuth();
+  const queryClient = useQueryClient();
+  const wholesalerId = admin?.wholesalerId;
   const initialState = createDefaultState();
+
+  // ──────────────────────────────────────────────────────────────────────────
+  // Invalidation helpers — every write below calls one of these so any tab
+  // using useQuery picks up the change next time it renders.
+  // ──────────────────────────────────────────────────────────────────────────
+  const invalidate = {
+    transactions: () => queryClient.invalidateQueries({ queryKey: queryKeys.transactions.root(wholesalerId) }),
+    inventory:    () => queryClient.invalidateQueries({ queryKey: queryKeys.inventory.root(wholesalerId) }),
+    shipments:    () => queryClient.invalidateQueries({ queryKey: queryKeys.shipments.list(wholesalerId) }),
+    crates:       () => queryClient.invalidateQueries({ queryKey: queryKeys.crates.root(wholesalerId) }),
+    shopExpenses: () => queryClient.invalidateQueries({ queryKey: queryKeys.shopExpenses.root(wholesalerId) }),
+    dashboard:    () => queryClient.invalidateQueries({ queryKey: ['dashboardSummary', wholesalerId] }),
+    salesAggregate: () => queryClient.invalidateQueries({ queryKey: ['salesAggregate', wholesalerId] }),
+    suppliers:    () => queryClient.invalidateQueries({ queryKey: ['suppliers', wholesalerId] }),
+    customers:    () => queryClient.invalidateQueries({ queryKey: ['customers', wholesalerId] }),
+    profile: (which, accountId) => {
+      if (which === 'customer') queryClient.invalidateQueries({ queryKey: queryKeys.parties.customerProfile(wholesalerId, accountId) });
+      if (which === 'supplier') queryClient.invalidateQueries({ queryKey: queryKeys.parties.supplierProfile(wholesalerId, accountId) });
+    },
+    // "Money event" = a write that moves money or due. Touches transaction feed,
+    // dashboard rollup, and the sales aggregate (commission earned changes).
+    moneyEvent: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.transactions.root(wholesalerId) });
+      queryClient.invalidateQueries({ queryKey: ['dashboardSummary', wholesalerId] });
+      queryClient.invalidateQueries({ queryKey: ['salesAggregate', wholesalerId] });
+    },
+  };
+
   const [suppliers, setSuppliers] = useState(initialState.suppliers);
   const [customers, setCustomers] = useState(initialState.customers);
   const [transactions, setTransactions] = useState(initialState.transactions);
@@ -256,7 +290,7 @@ export const DataProvider = ({ children }) => {
   const [shipments, setShipments] = useState(initialState.shipments);
   const [catalogProducts, setCatalogProducts] = useState(initialState.catalogProducts);
   const [subCategories, setSubCategories] = useState(initialState.subCategories);
-  const [boxInventory, setBoxInventory] = useState(initialState.boxInventory);
+  const [crateInventory, setCrateInventory] = useState(initialState.crateInventory);
   const [isLoading, setIsLoading] = useState(false);
   const [dataError, setDataError] = useState('');
 
@@ -270,7 +304,7 @@ export const DataProvider = ({ children }) => {
         setShipments([]);
         setCatalogProducts([]);
         setSubCategories([]);
-        setBoxInventory(createDefaultState().boxInventory);
+        setCrateInventory(createDefaultState().crateInventory);
         setDataError('');
         setIsLoading(false);
       });
@@ -288,7 +322,7 @@ export const DataProvider = ({ children }) => {
           loadSection('Products', () => postJson(apiPaths.productsList), []),
           loadSection('SubCategories', () => postJson(apiPaths.adminSubCategoriesList), []),
           loadSection('Inventory', () => postJson(apiPaths.inventoryList(admin.wholesalerId)), []),
-          loadSection('Crates', () => postJson(apiPaths.boxesDashboard(admin.wholesalerId)), EMPTY_BOX_INVENTORY),
+          loadSection('Crates', () => postJson(apiPaths.cratesDashboard(admin.wholesalerId)), EMPTY_CRATE_INVENTORY),
           loadSection('Transactions', () => postJson(apiPaths.transactionsList(admin.wholesalerId)), []),
           loadSection('Shipments', () => postJson(apiPaths.supplierDeliveriesList(admin.wholesalerId)), []),
         ]);
@@ -301,7 +335,7 @@ export const DataProvider = ({ children }) => {
         setShipments(asArray(shipmentItems.data).map(mapShipment));
         setCatalogProducts(asArray(productCatalog.data));
         setSubCategories(asArray(subCatalog.data));
-        setBoxInventory(mapBoxDashboard(boxDashboard.data));
+        setCrateInventory(mapCrateDashboard(boxDashboard.data));
         setDataError('');
       } catch (error) {
         if (isActive) {
@@ -338,6 +372,7 @@ export const DataProvider = ({ children }) => {
     const account = await postJson(apiPaths.wholesalerSuppliersCreate(admin.wholesalerId), payload);
     const newSupplier = mapSupplierAccount(account);
     setSuppliers((prev) => [...prev, newSupplier]);
+    invalidate.suppliers();
     return newSupplier;
   };
 
@@ -412,7 +447,7 @@ export const DataProvider = ({ children }) => {
 
     if (!supplier) throw new Error('Supplier not found.');
     if (!productId) throw new Error('Please pick a product from the catalog.');
-    if (!unit) throw new Error('Please pick a unit (KG, PCS, BOX, DOZEN, BAG, MOUND).');
+    if (!unit) throw new Error('Please pick a unit (KG, PCS, CRATE, DOZEN, BAG, MOUND).');
 
     // Build items[] from lines. Each line: { categoryId, subCategoryId, quantity }.
     const rawLines = Array.isArray(productData.lines) ? productData.lines : [];
@@ -492,6 +527,10 @@ export const DataProvider = ({ children }) => {
     };
     setTransactions((prev) => [...prev, newTransaction]);
 
+    invalidate.shipments();
+    invalidate.inventory();
+    invalidate.transactions();
+    invalidate.moneyEvent();
     return newProducts;
   };
 
@@ -511,6 +550,9 @@ export const DataProvider = ({ children }) => {
     });
     const updated = mapShipment(data);
     setShipments((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+    invalidate.shipments();
+    invalidate.salesAggregate();
+    invalidate.dashboard();
     return updated;
   };
 
@@ -522,6 +564,8 @@ export const DataProvider = ({ children }) => {
     });
     const updated = mapShipment(data);
     setShipments((prev) => prev.map((s) => (s.id === updated.id ? updated : s)));
+    invalidate.shipments();
+    invalidate.moneyEvent();
     return updated;
   };
 
@@ -535,6 +579,8 @@ export const DataProvider = ({ children }) => {
     });
     const mapped = mapInventoryItem(item);
     setSupplierProducts((prev) => prev.map((p) => (p.id === mapped.id ? { ...p, ...mapped } : p)));
+    invalidate.inventory();
+    invalidate.transactions();
     return mapped;
   };
 
@@ -549,12 +595,13 @@ export const DataProvider = ({ children }) => {
       phone: customerData.phone,
       address: customerData.address,
       openingDue: Number(customerData.openingDue) || 0,
-      jamanotBalance: Number(customerData.boxJamanot) || 0,
+      jamanotBalance: Number(customerData.crateJamanot) || 0,
     };
 
     const account = await postJson(apiPaths.wholesalerCustomersCreate(admin.wholesalerId), payload);
     const newCustomer = mapCustomerAccount(account);
     setCustomers((prev) => [...prev, newCustomer]);
+    invalidate.customers();
     return newCustomer;
   };
 
@@ -615,10 +662,10 @@ export const DataProvider = ({ children }) => {
               amountDue: roundMoney(Number(response.customerDueBalance) || 0),
               totalPurchases: roundMoney((customer.totalPurchases || 0) + Number(response.netAmount || 0)),
               totalPaid: roundMoney((customer.totalPaid || 0) + Number(response.paidAmount || 0)),
-              boxJamanot: roundMoney(Number(response.customerJamanotBalance ?? customer.boxJamanot) || 0),
-              boxesHoldingWooden: roundMoney((customer.boxesHoldingWooden || 0) + Number(response.banglaCratesGiven || 0)),
-              boxesHoldingPlastic: roundMoney((customer.boxesHoldingPlastic || 0) + Number(response.chinaCratesGiven || 0)),
-              totalBoxesHolding: roundMoney((customer.totalBoxesHolding || 0) + Number(response.cratesGiven || 0)),
+              crateJamanot: roundMoney(Number(response.customerJamanotBalance ?? customer.crateJamanot) || 0),
+              cratesHoldingWooden: roundMoney((customer.cratesHoldingWooden || 0) + Number(response.banglaCratesGiven || 0)),
+              cratesHoldingPlastic: roundMoney((customer.cratesHoldingPlastic || 0) + Number(response.chinaCratesGiven || 0)),
+              totalCratesHolding: roundMoney((customer.totalCratesHolding || 0) + Number(response.cratesGiven || 0)),
             }
           : customer,
       ),
@@ -641,10 +688,10 @@ export const DataProvider = ({ children }) => {
       const banglaCount = Number(response.banglaCratesGiven || 0);
       const chinaCount = Number(response.chinaCratesGiven || 0);
       const crateCount = banglaCount + chinaCount;
-      setBoxInventory((prev) => ({
+      setCrateInventory((prev) => ({
         ...prev,
-        boxesInShop: Math.max((prev.boxesInShop || 0) - crateCount, 0),
-        boxesWithCustomers: (prev.boxesWithCustomers || 0) + crateCount,
+        cratesInShop: Math.max((prev.cratesInShop || 0) - crateCount, 0),
+        cratesWithCustomers: (prev.cratesWithCustomers || 0) + crateCount,
         bangla: {
           ...prev.bangla,
           inShop: Math.max((prev.bangla?.inShop || 0) - banglaCount, 0),
@@ -686,6 +733,9 @@ export const DataProvider = ({ children }) => {
     };
 
     setTransactions((prev) => [...prev, transaction]);
+    invalidate.inventory();
+    invalidate.moneyEvent();
+    invalidate.crates();
     return transaction;
   };
 
@@ -740,8 +790,8 @@ export const DataProvider = ({ children }) => {
     const targetCustomer = customers.find((customer) => customer.id === customerId);
     if (!targetCustomer) return { wooden: 0, plastic: 0 };
 
-    appliedWooden = Math.min(wooden, targetCustomer.boxesHoldingWooden || 0);
-    appliedPlastic = Math.min(plastic, targetCustomer.boxesHoldingPlastic || 0);
+    appliedWooden = Math.min(wooden, targetCustomer.cratesHoldingWooden || 0);
+    appliedPlastic = Math.min(plastic, targetCustomer.cratesHoldingPlastic || 0);
 
     if (!appliedWooden && !appliedPlastic) return { wooden: 0, plastic: 0 };
 
@@ -750,10 +800,10 @@ export const DataProvider = ({ children }) => {
         customer.id === customerId
           ? {
               ...customer,
-              boxesHoldingWooden: Math.max((customer.boxesHoldingWooden || 0) - appliedWooden, 0),
-              boxesHoldingPlastic: Math.max((customer.boxesHoldingPlastic || 0) - appliedPlastic, 0),
-              totalBoxesHolding: Math.max(
-                (customer.totalBoxesHolding || 0) - (appliedWooden + appliedPlastic),
+              cratesHoldingWooden: Math.max((customer.cratesHoldingWooden || 0) - appliedWooden, 0),
+              cratesHoldingPlastic: Math.max((customer.cratesHoldingPlastic || 0) - appliedPlastic, 0),
+              totalCratesHolding: Math.max(
+                (customer.totalCratesHolding || 0) - (appliedWooden + appliedPlastic),
                 0,
               ),
             }
@@ -761,10 +811,10 @@ export const DataProvider = ({ children }) => {
       ),
     );
 
-    setBoxInventory((prev) => ({
+    setCrateInventory((prev) => ({
       ...prev,
-      boxesInShop: prev.boxesInShop + appliedWooden + appliedPlastic,
-      boxesWithCustomers: Math.max(prev.boxesWithCustomers - (appliedWooden + appliedPlastic), 0),
+      cratesInShop: prev.cratesInShop + appliedWooden + appliedPlastic,
+      cratesWithCustomers: Math.max(prev.cratesWithCustomers - (appliedWooden + appliedPlastic), 0),
       bangla: {
         ...prev.bangla,
         inShop: prev.bangla.inShop + appliedWooden,
@@ -792,8 +842,8 @@ export const DataProvider = ({ children }) => {
     const targetSupplier = suppliers.find((supplier) => supplier.id === supplierId);
     if (!targetSupplier) return { wooden: 0, plastic: 0 };
 
-    appliedWooden = Math.min(wooden, targetSupplier.boxesHoldingWooden || 0);
-    appliedPlastic = Math.min(plastic, targetSupplier.boxesHoldingPlastic || 0);
+    appliedWooden = Math.min(wooden, targetSupplier.cratesHoldingWooden || 0);
+    appliedPlastic = Math.min(plastic, targetSupplier.cratesHoldingPlastic || 0);
 
     if (!appliedWooden && !appliedPlastic) return { wooden: 0, plastic: 0 };
 
@@ -802,10 +852,10 @@ export const DataProvider = ({ children }) => {
         supplier.id === supplierId
           ? {
               ...supplier,
-              boxesHoldingWooden: Math.max((supplier.boxesHoldingWooden || 0) - appliedWooden, 0),
-              boxesHoldingPlastic: Math.max((supplier.boxesHoldingPlastic || 0) - appliedPlastic, 0),
-              totalBoxesHolding: Math.max(
-                (supplier.totalBoxesHolding || 0) - (appliedWooden + appliedPlastic),
+              cratesHoldingWooden: Math.max((supplier.cratesHoldingWooden || 0) - appliedWooden, 0),
+              cratesHoldingPlastic: Math.max((supplier.cratesHoldingPlastic || 0) - appliedPlastic, 0),
+              totalCratesHolding: Math.max(
+                (supplier.totalCratesHolding || 0) - (appliedWooden + appliedPlastic),
                 0,
               ),
             }
@@ -813,10 +863,10 @@ export const DataProvider = ({ children }) => {
       ),
     );
 
-    setBoxInventory((prev) => ({
+    setCrateInventory((prev) => ({
       ...prev,
-      boxesInShop: prev.boxesInShop + appliedWooden + appliedPlastic,
-      boxesWithSuppliers: Math.max(prev.boxesWithSuppliers - (appliedWooden + appliedPlastic), 0),
+      cratesInShop: prev.cratesInShop + appliedWooden + appliedPlastic,
+      cratesWithSuppliers: Math.max(prev.cratesWithSuppliers - (appliedWooden + appliedPlastic), 0),
       bangla: {
         ...prev.bangla,
         inShop: prev.bangla.inShop + appliedWooden,
@@ -865,7 +915,7 @@ export const DataProvider = ({ children }) => {
       if (inputAmount > Number(customer.amountDue || 0)) {
         throw new Error('Cash received cannot exceed customer due.');
       }
-      if (jamanotAmount > Number(customer.boxJamanot || 0)) {
+      if (jamanotAmount > Number(customer.crateJamanot || 0)) {
         throw new Error('Jamanot refund cannot exceed customer jamanot balance.');
       }
 
@@ -887,11 +937,11 @@ export const DataProvider = ({ children }) => {
                 ...customerItem,
                 amountDue: roundMoney(Number(response.dueAfter) || 0),
                 totalPaid: roundMoney((customerItem.totalPaid || 0) + Number(response.cashAmount || 0)),
-                boxJamanot: roundMoney(Number(response.jamanotAfter ?? customerItem.boxJamanot) || 0),
-                boxesHoldingWooden: Math.max((customerItem.boxesHoldingWooden || 0) - Number(response.banglaCrates || 0), 0),
-                boxesHoldingPlastic: Math.max((customerItem.boxesHoldingPlastic || 0) - Number(response.chinaCrates || 0), 0),
-                totalBoxesHolding: Math.max(
-                  (customerItem.totalBoxesHolding || 0) - Number(response.banglaCrates || 0) - Number(response.chinaCrates || 0),
+                crateJamanot: roundMoney(Number(response.jamanotAfter ?? customerItem.crateJamanot) || 0),
+                cratesHoldingWooden: Math.max((customerItem.cratesHoldingWooden || 0) - Number(response.banglaCrates || 0), 0),
+                cratesHoldingPlastic: Math.max((customerItem.cratesHoldingPlastic || 0) - Number(response.chinaCrates || 0), 0),
+                totalCratesHolding: Math.max(
+                  (customerItem.totalCratesHolding || 0) - Number(response.banglaCrates || 0) - Number(response.chinaCrates || 0),
                   0,
                 ),
               }
@@ -899,11 +949,11 @@ export const DataProvider = ({ children }) => {
         ),
       );
 
-      setBoxInventory((prev) => ({
+      setCrateInventory((prev) => ({
         ...prev,
-        boxesInShop: (prev.boxesInShop || 0) + Number(response.banglaCrates || 0) + Number(response.chinaCrates || 0),
-        boxesWithCustomers: Math.max(
-          (prev.boxesWithCustomers || 0) - Number(response.banglaCrates || 0) - Number(response.chinaCrates || 0),
+        cratesInShop: (prev.cratesInShop || 0) + Number(response.banglaCrates || 0) + Number(response.chinaCrates || 0),
+        cratesWithCustomers: Math.max(
+          (prev.cratesWithCustomers || 0) - Number(response.banglaCrates || 0) - Number(response.chinaCrates || 0),
           0,
         ),
         bangla: {
@@ -976,17 +1026,17 @@ export const DataProvider = ({ children }) => {
             supplierItem.id === partyId
               ? {
                   ...supplierItem,
-                  boxesHoldingWooden: Math.max((supplierItem.boxesHoldingWooden || 0) + sign * banglaCrates, 0),
-                  boxesHoldingPlastic: Math.max((supplierItem.boxesHoldingPlastic || 0) + sign * chinaCrates, 0),
-                  totalBoxesHolding: Math.max((supplierItem.totalBoxesHolding || 0) + sign * (banglaCrates + chinaCrates), 0),
+                  cratesHoldingWooden: Math.max((supplierItem.cratesHoldingWooden || 0) + sign * banglaCrates, 0),
+                  cratesHoldingPlastic: Math.max((supplierItem.cratesHoldingPlastic || 0) + sign * chinaCrates, 0),
+                  totalCratesHolding: Math.max((supplierItem.totalCratesHolding || 0) + sign * (banglaCrates + chinaCrates), 0),
                 }
               : supplierItem,
           ),
         );
-        setBoxInventory((prev) => ({
+        setCrateInventory((prev) => ({
           ...prev,
-          boxesInShop: Math.max((prev.boxesInShop || 0) + inventorySign * (banglaCrates + chinaCrates), 0),
-          boxesWithSuppliers: Math.max((prev.boxesWithSuppliers || 0) - inventorySign * (banglaCrates + chinaCrates), 0),
+          cratesInShop: Math.max((prev.cratesInShop || 0) + inventorySign * (banglaCrates + chinaCrates), 0),
+          cratesWithSuppliers: Math.max((prev.cratesWithSuppliers || 0) - inventorySign * (banglaCrates + chinaCrates), 0),
           bangla: {
             ...prev.bangla,
             inShop: Math.max((prev.bangla?.inShop || 0) + inventorySign * banglaCrates, 0),
@@ -1021,6 +1071,9 @@ export const DataProvider = ({ children }) => {
     };
 
     setTransactions((prev) => [...prev, newTransaction]);
+    invalidate.moneyEvent();
+    invalidate.crates();
+    invalidate.profile(partyType, partyAccount.id);
     return newTransaction;
   };
 
@@ -1045,7 +1098,7 @@ export const DataProvider = ({ children }) => {
   };
 
   const updateBoxInventory = (updates) => {
-    setBoxInventory((prev) => ({ ...prev, ...updates }));
+    setCrateInventory((prev) => ({ ...prev, ...updates }));
   };
 
   const refreshTransactions = async () => {
@@ -1058,40 +1111,118 @@ export const DataProvider = ({ children }) => {
     }
   };
 
-  const addBoxes = async (boxType, quantityInput) => {
+  const fetchDashboardSummary = async (period = 'today', from = null, to = null) => {
+    if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
+    const body = { period };
+    if (period === 'custom') {
+      if (!from || !to) throw new Error('Custom period needs both from and to.');
+      body.from = from;
+      body.to = to;
+    }
+    return postJson(apiPaths.dashboardSummary(admin.wholesalerId), body);
+  };
+
+  const fetchSalesAggregate = async (filters = {}) => {
+    if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
+    return postJson(apiPaths.salesAggregate(admin.wholesalerId), filters);
+  };
+
+  const fetchTransactionsRange = async (from = null, to = null) => {
+    if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
+    return postJson(apiPaths.transactionsList(admin.wholesalerId), { from, to });
+  };
+
+  const cancelSale = async (saleId, reason = '') => {
+    if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
+    const response = await postJson(apiPaths.salesCancel(admin.wholesalerId, saleId), { reason });
+    await refreshTransactions();
+    invalidate.moneyEvent();
+    invalidate.inventory();
+    invalidate.crates();
+    return response;
+  };
+
+  const cancelCustomerPayment = async (paymentId, reason = '') => {
+    if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
+    const response = await postJson(apiPaths.paymentsCustomerCancel(admin.wholesalerId, paymentId), { reason });
+    await refreshTransactions();
+    invalidate.moneyEvent();
+    invalidate.crates();
+    return response;
+  };
+
+  const cancelSupplierSettlement = async (settlementId, reason = '') => {
+    if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
+    const response = await postJson(apiPaths.paymentsSupplierCancel(admin.wholesalerId, settlementId), { reason });
+    await refreshTransactions();
+    invalidate.moneyEvent();
+    return response;
+  };
+
+  const fetchShopExpenseCategories = async () => {
+    if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
+    return postJson(apiPaths.shopExpenseCategories(admin.wholesalerId));
+  };
+
+  const fetchShopExpenses = async (from = null, to = null) => {
+    if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
+    return postJson(apiPaths.shopExpenseList(admin.wholesalerId), { from, to });
+  };
+
+  const createShopExpense = async (payload) => {
+    if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
+    const response = await postJson(apiPaths.shopExpenseCreate(admin.wholesalerId), payload);
+    invalidate.shopExpenses();
+    invalidate.dashboard();
+    return response;
+  };
+
+  const cancelShopExpense = async (expenseId, reason = '') => {
+    if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
+    const response = await postJson(apiPaths.shopExpenseCancel(admin.wholesalerId, expenseId), { reason });
+    invalidate.shopExpenses();
+    invalidate.dashboard();
+    return response;
+  };
+
+  const addCrates = async (crateType, quantityInput) => {
     if (!admin?.wholesalerId) {
       throw new Error('Wholesaler profile not found for this user.');
     }
     const quantity = Math.max(0, Math.floor(Number(quantityInput) || 0));
-    if (!quantity) return mapBoxDashboard(null);
+    if (!quantity) return mapCrateDashboard(null);
 
-    const dashboard = await postJson(apiPaths.boxesPurchaseCreate(admin.wholesalerId), {
-      boxType: String(boxType || '').toUpperCase(),
+    const dashboard = await postJson(apiPaths.cratesPurchaseCreate(admin.wholesalerId), {
+      crateType: String(crateType || '').toUpperCase(),
       quantity,
-      note: 'Manual box purchase',
+      note: 'Manual crate purchase',
     });
-    const mapped = mapBoxDashboard(dashboard);
-    setBoxInventory(mapped);
+    const mapped = mapCrateDashboard(dashboard);
+    setCrateInventory(mapped);
     refreshTransactions();
+    invalidate.crates();
+    invalidate.transactions();
     return mapped;
   };
 
-  const markBoxesLost = async (boxType, quantityInput, reason = 'lost') => {
+  const markCratesLost = async (crateType, quantityInput, reason = 'lost') => {
     if (!admin?.wholesalerId) {
       throw new Error('Wholesaler profile not found for this user.');
     }
     const quantity = Math.max(0, Math.floor(Number(quantityInput) || 0));
-    if (!quantity) return mapBoxDashboard(null);
+    if (!quantity) return mapCrateDashboard(null);
 
-    const dashboard = await postJson(apiPaths.boxesLostDamagedCreate(admin.wholesalerId), {
-      boxType: String(boxType || '').toUpperCase(),
+    const dashboard = await postJson(apiPaths.cratesLostDamagedCreate(admin.wholesalerId), {
+      crateType: String(crateType || '').toUpperCase(),
       quantity,
       reason,
-      note: 'Manual box loss/damage update',
+      note: 'Manual crate loss/damage update',
     });
-    const mapped = mapBoxDashboard(dashboard);
-    setBoxInventory(mapped);
+    const mapped = mapCrateDashboard(dashboard);
+    setCrateInventory(mapped);
     refreshTransactions();
+    invalidate.crates();
+    invalidate.transactions();
     return mapped;
   };
 
@@ -1103,7 +1234,7 @@ export const DataProvider = ({ children }) => {
         transactions,
         supplierProducts,
         shipments,
-        boxInventory,
+        crateInventory,
         catalogProducts,
         subCategories,
         isLoading,
@@ -1129,10 +1260,20 @@ export const DataProvider = ({ children }) => {
         settleShipment,
         writeOffStock,
         updateBoxInventory,
-        addBoxes,
-        markBoxesLost,
+        addCrates,
+        markCratesLost,
         getCustomerProfile,
         getSupplierProfile,
+        fetchDashboardSummary,
+        fetchSalesAggregate,
+        fetchTransactionsRange,
+        cancelSale,
+        cancelCustomerPayment,
+        cancelSupplierSettlement,
+        fetchShopExpenseCategories,
+        fetchShopExpenses,
+        createShopExpense,
+        cancelShopExpense,
       }}
     >
       {children}

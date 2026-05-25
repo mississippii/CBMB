@@ -10,4 +10,6 @@ public interface BoxInventoryRepository extends JpaRepository<BoxInventory, Long
     List<BoxInventory> findByWholesaler_IdOrderByBoxType_NameAsc(Long wholesalerId);
 
     Optional<BoxInventory> findByWholesaler_IdAndBoxType_Id(Long wholesalerId, Long boxTypeId);
+
+    List<BoxInventory> findByWholesaler_Id(Long wholesalerId);
 }

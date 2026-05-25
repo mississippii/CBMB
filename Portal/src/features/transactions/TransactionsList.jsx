@@ -1,5 +1,10 @@
 import { useCallback, useMemo, useState } from 'react';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { Ban } from 'lucide-react';
 import { useData } from '../../data/DataContext';
+import { useAuth } from '../auth/AuthContext';
+import { queryKeys } from '../../services/queryKeys';
+import Modal from '../../shared/components/Modal';
 
 const toStartOfDay = (dateString) => new Date(`${dateString}T00:00:00`);
 const toEndOfDay = (dateString) => new Date(`${dateString}T23:59:59.999`);
@@ -7,12 +12,146 @@ const formatCurrency = (value) => `৳ ${(Number(value) || 0).toLocaleString()}`
 const getTransactionDate = (transaction) => new Date(transaction.createdAt || transaction.date);
 const normalizePhone = (value) => String(value ?? '').replace(/\D/g, '');
 
+const todayIso = () => new Date().toISOString().split('T')[0];
+const isoDaysAgo = (n) => {
+  const d = new Date();
+  d.setDate(d.getDate() - n);
+  return d.toISOString().split('T')[0];
+};
+const isoStartOfMonth = () => {
+  const d = new Date();
+  d.setDate(1);
+  return d.toISOString().split('T')[0];
+};
+const isoStartOfYear = () => {
+  const d = new Date();
+  d.setMonth(0, 1);
+  return d.toISOString().split('T')[0];
+};
+
+const PERIOD_PRESETS = [
+  { value: 'today', label: 'Today' },
+  { value: 'week',  label: '7 days' },
+  { value: 'month', label: 'Month' },
+  { value: 'year',  label: 'Year' },
+];
+
 const TransactionsList = () => {
-  const { transactions, suppliers, customers } = useData();
+  const { admin } = useAuth();
+  const queryClient = useQueryClient();
+  const { suppliers, customers, cancelSale, cancelCustomerPayment, fetchTransactionsRange } = useData();
   const [startDate, setStartDate] = useState('');
   const [endDate, setEndDate] = useState('');
   const [search, setSearch] = useState('');
   const [typeFilter, setTypeFilter] = useState('all');
+  const [cancelTarget, setCancelTarget] = useState(null);
+  const [cancelReason, setCancelReason] = useState('');
+  const [cancelError, setCancelError] = useState('');
+
+  // Server-side date filter for the heavy query; client-side type/search filter stays local.
+  const fromIso = startDate ? new Date(`${startDate}T00:00:00`).toISOString() : null;
+  const toIso = endDate ? new Date(`${endDate}T23:59:59.999`).toISOString() : null;
+
+  const { data: transactionsRaw = [] } = useQuery({
+    queryKey: queryKeys.transactions.list(admin?.wholesalerId, fromIso, toIso),
+    queryFn: () => fetchTransactionsRange(fromIso, toIso),
+    enabled: Boolean(admin?.wholesalerId),
+  });
+
+  // Map backend shape to the existing client model (same as DataContext.mapTransaction).
+  const transactions = useMemo(() => (transactionsRaw || []).map((t) => ({
+    id: t.id,
+    date: t.createdAt?.split('T')[0] || '',
+    createdAt: t.createdAt || new Date().toISOString(),
+    transactionType: t.transactionType === 'PAYMENT' ? 'Payment' : 'Sale',
+    saleId: t.saleId || null,
+    paymentId: t.paymentId || null,
+    customerId: t.wholesalerCustomerId,
+    customer: t.customerName || null,
+    customerPhone: t.customerPhone || null,
+    supplierId: t.wholesalerSupplierId,
+    supplier: t.supplierName || null,
+    supplierPhone: t.supplierPhone || null,
+    productId: t.productId || null,
+    product: t.productName || null,
+    categoryId: t.categoryId || null,
+    category: t.categoryName || null,
+    subCategoryId: t.subCategoryId || null,
+    subCategoryName: t.subCategoryName || '',
+    quantity: Number(t.quantity) || 0,
+    unit: String(t.unit || '').toLowerCase(),
+    unitPrice: Number(t.unitPrice) || 0,
+    totalAmount: Number(t.saleAmount) || 0,
+    grossAmount: Number(t.grossAmount) || 0,
+    discountAmount: Number(t.discountAmount) || 0,
+    paymentAmount: Number(t.paymentAmount) || 0,
+    customerNewDue: Number(t.dueAmount) || 0,
+    cratesReturned: Number(t.cratesReturned) || 0,
+    boxJamanotChange: Number(t.jamanotAmount) ? -Number(t.jamanotAmount) : 0,
+    paymentOperationType: t.paymentType || '',
+    paymentType: t.paymentType || t.description || '',
+    note: t.description || '',
+  })), [transactionsRaw]);
+
+  const cancelSaleMutation = useMutation({
+    mutationFn: ({ id, reason }) => cancelSale(id, reason),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.transactions.root(admin?.wholesalerId) });
+      queryClient.invalidateQueries({ queryKey: queryKeys.inventory.root(admin?.wholesalerId) });
+      queryClient.invalidateQueries({ queryKey: ['dashboardSummary', admin?.wholesalerId] });
+    },
+  });
+  const cancelPaymentMutation = useMutation({
+    mutationFn: ({ id, reason }) => cancelCustomerPayment(id, reason),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: queryKeys.transactions.root(admin?.wholesalerId) });
+      queryClient.invalidateQueries({ queryKey: ['dashboardSummary', admin?.wholesalerId] });
+    },
+  });
+  const cancelBusy = cancelSaleMutation.isPending || cancelPaymentMutation.isPending;
+
+  const applyPreset = (preset) => {
+    const today = todayIso();
+    if (preset === 'today')      { setStartDate(today); setEndDate(today); return; }
+    if (preset === 'week')       { setStartDate(isoDaysAgo(6)); setEndDate(today); return; }
+    if (preset === 'month')      { setStartDate(isoStartOfMonth()); setEndDate(today); return; }
+    if (preset === 'year')       { setStartDate(isoStartOfYear()); setEndDate(today); return; }
+  };
+
+  const isPresetActive = (preset) => {
+    const today = todayIso();
+    if (preset === 'today')  return startDate === today && endDate === today;
+    if (preset === 'week')   return startDate === isoDaysAgo(6) && endDate === today;
+    if (preset === 'month')  return startDate === isoStartOfMonth() && endDate === today;
+    if (preset === 'year')   return startDate === isoStartOfYear() && endDate === today;
+    return false;
+  };
+
+  const handleCancel = async () => {
+    if (!cancelTarget) return;
+    setCancelError('');
+    try {
+      if (cancelTarget.kind === 'sale') {
+        await cancelSaleMutation.mutateAsync({ id: cancelTarget.id, reason: cancelReason });
+      } else if (cancelTarget.kind === 'customerPayment') {
+        await cancelPaymentMutation.mutateAsync({ id: cancelTarget.id, reason: cancelReason });
+      }
+      setCancelTarget(null);
+      setCancelReason('');
+    } catch (err) {
+      setCancelError(err.message || 'Failed to cancel.');
+    }
+  };
+
+  const cancelInfoFor = (transaction) => {
+    if (transaction.transactionType !== 'Payment' && transaction.saleId) {
+      return { kind: 'sale', id: transaction.saleId, label: 'sale' };
+    }
+    if (transaction.transactionType === 'Payment' && transaction.paymentId && transaction.customerId) {
+      return { kind: 'customerPayment', id: transaction.paymentId, label: 'customer payment' };
+    }
+    return null;
+  };
 
   const ledgerTransactions = useMemo(
     () =>
@@ -106,47 +245,6 @@ const TransactionsList = () => {
     return result.slice().sort((a, b) => getTransactionDate(b) - getTransactionDate(a));
   }, [ledgerTransactions, typeFilter, startDate, endDate, search, getTransactionPhones]);
 
-  const summary = useMemo(() => {
-    return filteredTransactions.reduce(
-      (acc, transaction) => {
-        const isPayment = transaction.transactionType === 'Payment';
-        const isSale = !isPayment;
-
-        if (isSale) {
-          acc.salesCount += 1;
-          acc.totalSales += Number(transaction.totalAmount) || 0;
-          acc.customerCashIn += Number(transaction.paymentAmount) || 0;
-          acc.customerDueAdded += Math.max(
-            (Number(transaction.totalAmount) || 0) - (Number(transaction.paymentAmount) || 0),
-            0,
-          );
-        } else {
-          acc.paymentsCount += 1;
-          if (transaction.partyType === 'Customer' && transaction.paymentType === 'Cash') {
-            acc.customerCashIn += Number(transaction.paymentAmount) || 0;
-            acc.boxJamanotChange += Number(transaction.boxJamanotChange) || 0;
-          }
-          if (transaction.partyType === 'Supplier' && transaction.paymentType === 'Cash') {
-            acc.supplierCashOut += Number(transaction.paymentAmount) || 0;
-          }
-          acc.boxesReturned += (Number(transaction.boxReturnWooden) || 0) + (Number(transaction.boxReturnPlastic) || 0);
-        }
-
-        return acc;
-      },
-      {
-        salesCount: 0,
-        paymentsCount: 0,
-        totalSales: 0,
-        customerCashIn: 0,
-        customerDueAdded: 0,
-        supplierCashOut: 0,
-        boxesReturned: 0,
-        boxJamanotChange: 0,
-      },
-    );
-  }, [filteredTransactions]);
-
   const clearFilters = () => {
     setStartDate('');
     setEndDate('');
@@ -184,8 +282,8 @@ const TransactionsList = () => {
     if (value.includes('EXPENSE_RECEIVE')) return 'Extra expenses received';
     if (value.includes('SUPPLIER_CRATE_GIVE')) return 'Crates borrowed by supplier';
     if (value.includes('SUPPLIER_CRATE_RETURN')) return 'Crates received from supplier';
-    if (value.includes('CASH_AND_BOX_RETURN')) return 'Customer cash and crates received';
-    if (value.includes('BOX_RETURN')) return 'Customer crates received';
+    if (value.includes('CASH_AND_CRATE_RETURN')) return 'Customer cash and crates received';
+    if (value.includes('CRATE_RETURN')) return 'Customer crates received';
     if (value.includes('CASH_RECEIVE')) return 'Customer cash received';
     return transaction.transactionType === 'Payment' ? 'Payment recorded' : 'Sale recorded';
   };
@@ -328,6 +426,23 @@ const TransactionsList = () => {
           <span className="transaction-filter-count">{filteredTransactions.length} entries</span>
         </div>
 
+        <div className="mb-3 inline-flex flex-wrap items-center gap-1 rounded-full border border-slate-200 bg-slate-50 p-0.5 text-[11px] font-semibold">
+          {PERIOD_PRESETS.map(({ value, label }) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => applyPreset(value)}
+              className={`px-2.5 py-1 rounded-full transition ${
+                isPresetActive(value)
+                  ? 'bg-blue-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              {label}
+            </button>
+          ))}
+        </div>
+
         <div className="transaction-filter-grid">
           <div className="filter-control type">
             <label>Type</label>
@@ -393,40 +508,52 @@ const TransactionsList = () => {
         ) : (
           <>
             <div className="space-y-3 lg:hidden">
-              {filteredTransactions.map((transaction) => (
-                <div key={transaction.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
-                  <div className="mb-2 flex items-start justify-between gap-3">
-                    <div>
-                      <p className="text-sm font-bold text-slate-900">{transaction.date}</p>
-                      <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
-                        <div>
-                          <p className="font-bold uppercase tracking-wider text-slate-400">Supplier</p>
-                          <p className="mt-0.5 font-semibold text-slate-700">{getSupplierName(transaction)}</p>
-                        </div>
-                        <div>
-                          <p className="font-bold uppercase tracking-wider text-slate-400">Customer</p>
-                          <p className="mt-0.5 font-semibold text-slate-700">{getCustomerName(transaction)}</p>
+              {filteredTransactions.map((transaction) => {
+                const cancel = cancelInfoFor(transaction);
+                return (
+                  <div key={transaction.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
+                    <div className="mb-2 flex items-start justify-between gap-3">
+                      <div>
+                        <p className="text-sm font-bold text-slate-900">{transaction.date}</p>
+                        <div className="mt-2 grid grid-cols-2 gap-2 text-xs">
+                          <div>
+                            <p className="font-bold uppercase tracking-wider text-slate-400">Supplier</p>
+                            <p className="mt-0.5 font-semibold text-slate-700">{getSupplierName(transaction)}</p>
+                          </div>
+                          <div>
+                            <p className="font-bold uppercase tracking-wider text-slate-400">Customer</p>
+                            <p className="mt-0.5 font-semibold text-slate-700">{getCustomerName(transaction)}</p>
+                          </div>
                         </div>
                       </div>
+                      <span
+                        className={`rounded-full px-2.5 py-1 text-xs font-bold ${
+                          transaction.transactionType === 'Payment'
+                            ? 'bg-blue-100 text-blue-700'
+                            : 'bg-green-100 text-green-700'
+                        }`}
+                      >
+                        {getTypeLabel(transaction)}
+                      </span>
                     </div>
-                    <span
-                      className={`rounded-full px-2.5 py-1 text-xs font-bold ${
-                        transaction.transactionType === 'Payment'
-                          ? 'bg-blue-100 text-blue-700'
-                          : 'bg-green-100 text-green-700'
-                      }`}
-                    >
-                      {getTypeLabel(transaction)}
-                    </span>
+                    <p className="text-lg font-extrabold text-slate-900">{renderAmount(transaction)}</p>
+                    {renderDetailText(transaction)}
+                    {cancel && (
+                      <button
+                        type="button"
+                        onClick={() => { setCancelTarget(cancel); setCancelReason(''); setCancelError(''); }}
+                        className="mt-3 inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-100"
+                      >
+                        <Ban size={11} /> Cancel {cancel.label}
+                      </button>
+                    )}
                   </div>
-                  <p className="text-lg font-extrabold text-slate-900">{renderAmount(transaction)}</p>
-                  {renderDetailText(transaction)}
-                </div>
-              ))}
+                );
+              })}
             </div>
 
             <div className="hidden overflow-x-auto rounded-xl border border-slate-200 lg:block">
-              <table className="transaction-ledger-table w-full min-w-[960px] text-sm">
+              <table className="transaction-ledger-table w-full min-w-[1040px] text-sm">
                 <thead>
                   <tr>
                     <th>Date</th>
@@ -435,29 +562,45 @@ const TransactionsList = () => {
                     <th>Customer</th>
                     <th className="text-right">Amount</th>
                     <th>Details</th>
+                    <th className="text-right">Action</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredTransactions.map((transaction) => (
-                    <tr key={transaction.id}>
-                      <td className="font-semibold text-slate-900">{transaction.date}</td>
-                      <td>
-                        <span
-                          className={`rounded-full px-2.5 py-1 text-xs font-bold ${
-                            transaction.transactionType === 'Payment'
-                              ? 'bg-blue-100 text-blue-700'
-                              : 'bg-green-100 text-green-700'
-                          }`}
-                        >
-                          {getTypeLabel(transaction)}
-                        </span>
-                      </td>
-                      <td className="font-medium text-slate-700">{getSupplierName(transaction)}</td>
-                      <td className="font-medium text-slate-700">{getCustomerName(transaction)}</td>
-                      <td className="text-right font-extrabold text-slate-900">{renderAmount(transaction)}</td>
-                      <td className="transaction-details-cell">{renderDetailText(transaction)}</td>
-                    </tr>
-                  ))}
+                  {filteredTransactions.map((transaction) => {
+                    const cancel = cancelInfoFor(transaction);
+                    return (
+                      <tr key={transaction.id}>
+                        <td className="font-semibold text-slate-900">{transaction.date}</td>
+                        <td>
+                          <span
+                            className={`rounded-full px-2.5 py-1 text-xs font-bold ${
+                              transaction.transactionType === 'Payment'
+                                ? 'bg-blue-100 text-blue-700'
+                                : 'bg-green-100 text-green-700'
+                            }`}
+                          >
+                            {getTypeLabel(transaction)}
+                          </span>
+                        </td>
+                        <td className="font-medium text-slate-700">{getSupplierName(transaction)}</td>
+                        <td className="font-medium text-slate-700">{getCustomerName(transaction)}</td>
+                        <td className="text-right font-extrabold text-slate-900">{renderAmount(transaction)}</td>
+                        <td className="transaction-details-cell">{renderDetailText(transaction)}</td>
+                        <td className="text-right">
+                          {cancel && (
+                            <button
+                              type="button"
+                              onClick={() => { setCancelTarget(cancel); setCancelReason(''); setCancelError(''); }}
+                              className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-100"
+                              title={`Cancel ${cancel.label}`}
+                            >
+                              <Ban size={11} /> Cancel
+                            </button>
+                          )}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
@@ -470,6 +613,58 @@ const TransactionsList = () => {
           </button>
         </div>
       </div>
+
+      <Modal
+        open={Boolean(cancelTarget)}
+        onClose={() => { if (!cancelBusy) setCancelTarget(null); }}
+        title={cancelTarget ? `Cancel ${cancelTarget.label}?` : ''}
+        subtitle="This writes reversing entries — original row stays as CANCELLED."
+        icon={Ban}
+        iconClass="bg-rose-100 text-rose-700"
+        maxWidth="28rem"
+        footer={(
+          <div className="flex w-full justify-end gap-2">
+            <button
+              type="button"
+              onClick={() => setCancelTarget(null)}
+              disabled={cancelBusy}
+              className="btn-secondary"
+            >
+              Keep
+            </button>
+            <button
+              type="button"
+              onClick={handleCancel}
+              disabled={cancelBusy}
+              className="rounded-lg bg-rose-600 px-3 py-1.5 text-sm font-bold text-white hover:bg-rose-700 disabled:opacity-50"
+            >
+              {cancelBusy ? 'Cancelling…' : 'Confirm Cancel'}
+            </button>
+          </div>
+        )}
+      >
+        <div className="space-y-3">
+          <p className="text-sm text-slate-600">
+            Customer balance, supplier balance, inventory, and crate movements tied to this entry will be reversed automatically.
+          </p>
+          <div>
+            <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Reason (optional)</label>
+            <input
+              type="text"
+              value={cancelReason}
+              onChange={(e) => setCancelReason(e.target.value)}
+              className="input-field mt-1 w-full"
+              placeholder="e.g. wrong customer, mistyped amount"
+              disabled={cancelBusy}
+            />
+          </div>
+          {cancelError && (
+            <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
+              {cancelError}
+            </div>
+          )}
+        </div>
+      </Modal>
     </div>
   );
 };

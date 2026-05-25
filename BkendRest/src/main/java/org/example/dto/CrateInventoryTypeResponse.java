@@ -1,8 +1,8 @@
 package org.example.dto;
 
-public record BoxInventoryTypeResponse(
-        Long boxTypeId,
-        String boxType,
+public record CrateInventoryTypeResponse(
+        Long crateTypeId,
+        String crateType,
         Integer total,
         Integer inHand,
         Integer withCustomers,

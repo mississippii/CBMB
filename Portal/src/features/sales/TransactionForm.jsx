@@ -4,7 +4,7 @@ import { useData } from '../../data/DataContext';
 const formatCurrency = (value) => `৳ ${(Number(value) || 0).toLocaleString()}`;
 
 const TransactionForm = ({ onClose, entryMode = 'both' }) => {
-  const { suppliers, customers, supplierProducts, boxInventory, recordSale, recordAccountTransaction } = useData();
+  const { suppliers, customers, supplierProducts, crateInventory, recordSale, recordAccountTransaction } = useData();
 
   const [entryType, setEntryType] = useState(entryMode === 'payment' ? 'payment' : 'sale');
   const [saleForm, setSaleForm] = useState({
@@ -29,7 +29,7 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
     amount: '',
     woodenReturn: '',
     plasticReturn: '',
-    boxJamanotChange: '',
+    crateJamanotChange: '',
     note: '',
   });
   const [oneTimeCustomer, setOneTimeCustomer] = useState({ name: '', phone: '' });
@@ -75,7 +75,7 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
   const unitPrice = Number(saleForm.unitPrice) || 0;
   const totalAmount = Math.max(0, quantity * unitPrice);
   const isOneTimeCustomer = saleForm.customerId === 'ONE_TIME';
-  const isCrateSale = !isOneTimeCustomer && selectedProduct?.unit === 'box';
+  const isCrateSale = !isOneTimeCustomer && selectedProduct?.unit === 'crate';
   const banglaCratesGiven = isCrateSale ? Math.max(0, Math.floor(Number(saleForm.banglaCratesGiven) || 0)) : 0;
   const chinaCratesGiven = isCrateSale ? Math.max(0, Math.floor(Number(saleForm.chinaCratesGiven) || 0)) : 0;
   const cratesGiven = banglaCratesGiven + chinaCratesGiven;
@@ -90,22 +90,22 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
         ? Number(saleForm.paymentAmount) || 0
         : 0;
   const paymentDueAmount = Number(paymentForm.amount) || 0;
-  const paymentJamanotAmount = Number(paymentForm.boxJamanotChange) || 0;
+  const paymentJamanotAmount = Number(paymentForm.crateJamanotChange) || 0;
   const isSupplierParty = paymentForm.partyType === 'supplier';
   const isCashReceive = paymentForm.paymentMode === 'cash';
   const isSupplierDuePay = paymentForm.paymentMode === 'supplier_due_pay';
   const isSupplierCommissionReceive = paymentForm.paymentMode === 'supplier_commission_receive';
   const isSupplierExpenseReceive = paymentForm.paymentMode === 'supplier_expense_receive';
-  const isSupplierBoxBorrow = paymentForm.paymentMode === 'supplier_box_borrow';
-  const isBoxReceive = paymentForm.paymentMode === 'box';
+  const isSupplierCrateBorrow = paymentForm.paymentMode === 'supplier_crate_borrow';
+  const isCrateReceive = paymentForm.paymentMode === 'crate';
   const isSupplierMoneyMode = isSupplierDuePay || isSupplierCommissionReceive || isSupplierExpenseReceive;
   const includesCashReceive = isSupplierParty ? isSupplierMoneyMode : isCashReceive;
-  const includesBoxReceive = isSupplierParty ? isBoxReceive || isSupplierBoxBorrow : isBoxReceive;
-  const includesJamanotEntry = paymentForm.partyType === 'customer' && includesBoxReceive;
+  const includesCrateReceive = isSupplierParty ? isCrateReceive || isSupplierCrateBorrow : isCrateReceive;
+  const includesJamanotEntry = paymentForm.partyType === 'customer' && includesCrateReceive;
   const selectedCustomerDue =
     paymentForm.partyType === 'customer' ? Number(selectedPaymentEntity?.amountDue || 0) : 0;
   const selectedCustomerJamanot =
-    paymentForm.partyType === 'customer' ? Number(selectedPaymentEntity?.boxJamanot || 0) : 0;
+    paymentForm.partyType === 'customer' ? Number(selectedPaymentEntity?.crateJamanot || 0) : 0;
   const customerDueAfterPayment =
     paymentForm.partyType === 'customer'
       ? Math.max(selectedCustomerDue - (includesCashReceive ? paymentDueAmount : 0), 0)
@@ -118,7 +118,7 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
     paymentForm.partyType === 'customer'
       ? (includesCashReceive ? Math.max(paymentDueAmount, 0) : 0)
       : 0;
-  const returnedBoxes = includesBoxReceive
+  const returnedCrates = includesCrateReceive
     ? (Number(paymentForm.woodenReturn) || 0) + (Number(paymentForm.plasticReturn) || 0)
     : 0;
   const selectedSupplierDue =
@@ -155,7 +155,7 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
       amount: '',
       woodenReturn: '',
       plasticReturn: '',
-      boxJamanotChange: '',
+      crateJamanotChange: '',
       note: '',
     });
   };
@@ -192,11 +192,11 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
       setFeedback({ type: 'error', message: 'Jamanot amount cannot be negative.' });
       return;
     }
-    if (isCrateSale && banglaCratesGiven > Number(boxInventory.bangla?.inShop || 0)) {
+    if (isCrateSale && banglaCratesGiven > Number(crateInventory.bangla?.inShop || 0)) {
       setFeedback({ type: 'error', message: 'Not enough Bangla crates in shop for this sale.' });
       return;
     }
-    if (isCrateSale && chinaCratesGiven > Number(boxInventory.china?.inShop || 0)) {
+    if (isCrateSale && chinaCratesGiven > Number(crateInventory.china?.inShop || 0)) {
       setFeedback({ type: 'error', message: 'Not enough China crates in shop for this sale.' });
       return;
     }
@@ -236,8 +236,8 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
 
     if (
       paymentForm.partyType === 'customer' &&
-      includesBoxReceive &&
-      paymentForm.boxJamanotChange === ''
+      includesCrateReceive &&
+      paymentForm.crateJamanotChange === ''
     ) {
       setFeedback({ type: 'error', message: 'Enter jamanot value for crate receive.' });
       return;
@@ -246,7 +246,7 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
       setFeedback({ type: 'error', message: 'Cash received cannot exceed customer due.' });
       return;
     }
-    if (paymentForm.partyType === 'customer' && includesBoxReceive && paymentJamanotAmount > selectedCustomerJamanot) {
+    if (paymentForm.partyType === 'customer' && includesCrateReceive && paymentJamanotAmount > selectedCustomerJamanot) {
       setFeedback({ type: 'error', message: 'Jamanot refund cannot exceed customer jamanot balance.' });
       return;
     }
@@ -265,10 +265,10 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
     }
     if (
       paymentForm.partyType === 'supplier' &&
-      includesBoxReceive &&
-      isSupplierBoxBorrow &&
-      ((Number(paymentForm.woodenReturn) || 0) > Number(boxInventory.bangla?.inShop || 0) ||
-        (Number(paymentForm.plasticReturn) || 0) > Number(boxInventory.china?.inShop || 0))
+      includesCrateReceive &&
+      isSupplierCrateBorrow &&
+      ((Number(paymentForm.woodenReturn) || 0) > Number(crateInventory.bangla?.inShop || 0) ||
+        (Number(paymentForm.plasticReturn) || 0) > Number(crateInventory.china?.inShop || 0))
     ) {
       setFeedback({ type: 'error', message: 'Not enough crates in shop for supplier issue.' });
       return;
@@ -284,12 +284,12 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
             : isSupplierExpenseReceive
               ? 'EXPENSE_RECEIVE'
               : paymentForm.supplierPaymentKind,
-        supplierCrateDirection: isSupplierBoxBorrow ? 'give' : paymentForm.supplierCrateDirection,
+        supplierCrateDirection: isSupplierCrateBorrow ? 'give' : paymentForm.supplierCrateDirection,
         paymentType: 'Cash',
         amount: includesCashReceive ? Number(paymentForm.amount || 0) : 0,
-        woodenReturn: includesBoxReceive ? Number(paymentForm.woodenReturn || 0) : 0,
-        plasticReturn: includesBoxReceive ? Number(paymentForm.plasticReturn || 0) : 0,
-        boxJamanotChange: includesJamanotEntry ? Number(paymentForm.boxJamanotChange || 0) : 0,
+        woodenReturn: includesCrateReceive ? Number(paymentForm.woodenReturn || 0) : 0,
+        plasticReturn: includesCrateReceive ? Number(paymentForm.plasticReturn || 0) : 0,
+        crateJamanotChange: includesJamanotEntry ? Number(paymentForm.crateJamanotChange || 0) : 0,
       });
 
       setFeedback({ type: 'success', message: '' });
@@ -340,7 +340,7 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
             onClick={() => setEntryType('payment')}
             className={`tab-button flex-1 sm:flex-none justify-center ${entryType === 'payment' ? 'active' : ''}`}
           >
-            Payment / Due / Box Update
+            Payment / Due / Crate Update
           </button>
         </div>
       )}
@@ -617,11 +617,11 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
                         partyId: '',
                         paymentMode: event.target.value === 'supplier'
                           ? 'supplier_due_pay'
-                          : ['supplier_due_pay', 'supplier_box_borrow', 'supplier_commission_receive', 'supplier_expense_receive'].includes(prev.paymentMode)
+                          : ['supplier_due_pay', 'supplier_crate_borrow', 'supplier_commission_receive', 'supplier_expense_receive'].includes(prev.paymentMode)
                             ? 'cash'
                             : prev.paymentMode,
                         supplierPaymentKind: event.target.value === 'supplier' ? 'PRODUCT_PAYMENT' : prev.supplierPaymentKind,
-                        boxJamanotChange: event.target.value === 'supplier' ? '' : prev.boxJamanotChange,
+                        crateJamanotChange: event.target.value === 'supplier' ? '' : prev.crateJamanotChange,
                       }))
                     }
                     className="input-field"
@@ -692,9 +692,9 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
                               : mode === 'supplier_expense_receive'
                                 ? 'EXPENSE_RECEIVE'
                                 : prev.supplierPaymentKind,
-                        supplierCrateDirection: mode === 'supplier_box_borrow' ? 'give' : mode === 'box' ? 'return' : prev.supplierCrateDirection,
-                        amount: mode === 'box' || mode === 'supplier_box_borrow' ? '' : prev.amount,
-                        boxJamanotChange: mode === 'box' ? '' : prev.boxJamanotChange,
+                        supplierCrateDirection: mode === 'supplier_crate_borrow' ? 'give' : mode === 'crate' ? 'return' : prev.supplierCrateDirection,
+                        amount: mode === 'crate' || mode === 'supplier_crate_borrow' ? '' : prev.amount,
+                        crateJamanotChange: mode === 'crate' ? '' : prev.crateJamanotChange,
                         woodenReturn: mode === 'cash' || mode === 'supplier_due_pay' || mode === 'supplier_commission_receive' || mode === 'supplier_expense_receive' ? '' : prev.woodenReturn,
                         plasticReturn: mode === 'cash' || mode === 'supplier_due_pay' || mode === 'supplier_commission_receive' || mode === 'supplier_expense_receive' ? '' : prev.plasticReturn,
                       }));
@@ -705,15 +705,15 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
                     {paymentForm.partyType === 'supplier' ? (
                       <>
                         <option value="supplier_due_pay">Supplier Due</option>
-                        <option value="box">Box Receive</option>
-                        <option value="supplier_box_borrow">Box Borrow</option>
+                        <option value="crate">Crate Receive</option>
+                        <option value="supplier_crate_borrow">Crate Borrow</option>
                         <option value="supplier_commission_receive">Commission Receive</option>
                         <option value="supplier_expense_receive">Extra Expenses Receive</option>
                       </>
                     ) : (
                       <>
                         <option value="cash">Cash Receive</option>
-                        <option value="box">Box Receive</option>
+                        <option value="crate">Crate Receive</option>
                       </>
                     )}
                   </select>
@@ -750,27 +750,27 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
                 <div className="mt-4">
                   <label>
                     Jamanot Refund
-                    {includesBoxReceive ? ' *' : ''}
+                    {includesCrateReceive ? ' *' : ''}
                   </label>
                   <input
                     type="number"
                     step="0.01"
-                    value={paymentForm.boxJamanotChange}
+                    value={paymentForm.crateJamanotChange}
                     onChange={(event) =>
-                      setPaymentForm((prev) => ({ ...prev, boxJamanotChange: event.target.value }))
+                      setPaymentForm((prev) => ({ ...prev, crateJamanotChange: event.target.value }))
                     }
                     min="0"
                     placeholder="0 allowed"
                     className="input-field"
-                    required={includesBoxReceive}
+                    required={includesCrateReceive}
                   />
                 </div>
               )}
             </section>
 
-            {includesBoxReceive && (
+            {includesCrateReceive && (
               <section className="payment-panel">
-                <h4>{paymentForm.partyType === 'supplier' ? (isSupplierBoxBorrow ? 'Box Borrow' : 'Box Receive') : 'Crate Receive'}</h4>
+                <h4>{paymentForm.partyType === 'supplier' ? (isSupplierCrateBorrow ? 'Crate Borrow' : 'Crate Receive') : 'Crate Receive'}</h4>
                 <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
                   <div>
                     <label>Bangla Crates</label>
@@ -834,7 +834,7 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
                   <p>Cash Received</p>
                   <strong>{formatCurrency(customerCashHandled)}</strong>
                 </div>
-                {includesBoxReceive && (
+                {includesCrateReceive && (
                   <div className="metric-tile">
                     <p>Crates Received</p>
                     <strong>{returnedBoxes}</strong>
@@ -855,9 +855,9 @@ const TransactionForm = ({ onClose, entryMode = 'both' }) => {
                   <p>Operation Amount</p>
                   <strong>{formatCurrency(includesCashReceive ? paymentDueAmount : 0)}</strong>
                 </div>
-                {includesBoxReceive && (
+                {includesCrateReceive && (
                   <div className="metric-tile">
-                    <p>{isSupplierBoxBorrow ? 'Crates Borrowed' : 'Crates Received'}</p>
+                    <p>{isSupplierCrateBorrow ? 'Crates Borrowed' : 'Crates Received'}</p>
                     <strong>{returnedBoxes}</strong>
                   </div>
                 )}

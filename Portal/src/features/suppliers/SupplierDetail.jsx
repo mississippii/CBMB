@@ -432,9 +432,9 @@ const SupplierDetail = ({ supplierId, onBack }) => {
         <div className="supplier-panel">
           <h3 className="flex items-center gap-2"><Boxes size={17} className="text-blue-600" /> Crates</h3>
           <div className="mt-3 space-y-2">
-            <div className="box-row"><span>Bangla</span><strong>{supplier.boxesHoldingWooden || 0}</strong></div>
-            <div className="box-row"><span>China</span><strong>{supplier.boxesHoldingPlastic || 0}</strong></div>
-            <div className="box-row total"><span>Total Due</span><strong>{supplier.totalBoxesHolding || 0}</strong></div>
+            <div className="box-row"><span>Bangla</span><strong>{supplier.cratesHoldingWooden || 0}</strong></div>
+            <div className="box-row"><span>China</span><strong>{supplier.cratesHoldingPlastic || 0}</strong></div>
+            <div className="box-row total"><span>Total Due</span><strong>{supplier.totalCratesHolding || 0}</strong></div>
           </div>
         </div>
       </div>
@@ -522,9 +522,13 @@ const SupplierDetail = ({ supplierId, onBack }) => {
                     <tr key={product.id} className="hover:bg-slate-50 transition">
                       <td className="px-3 py-2 font-medium text-slate-800">{product.productName}</td>
                       <td className="px-3 py-2 text-slate-600">
-                        {[product.category, product.subCategoryName].filter(Boolean).join(' › ') || '—'}
+                        {product.category || <span className="text-slate-300">—</span>}
                       </td>
-                      <td className="px-3 py-2 text-slate-500">{product.deliveryId ? `#${product.deliveryId}` : '—'}</td>
+                      <td className="px-3 py-2">
+                        {product.subCategoryName
+                          ? <span className={`font-semibold ${isStockOut ? 'text-slate-400' : 'text-blue-700'}`}>{product.subCategoryName}</span>
+                          : <span className="text-slate-300">—</span>}
+                      </td>
                       <td className="px-3 py-2 text-right font-semibold text-slate-800">
                         {product.quantity} <span className="text-xs text-slate-400">{String(product.unit || '').toUpperCase()}</span>
                       </td>

@@ -64,7 +64,7 @@ Server:
 ```yaml
 server:
   port: 8080
-  address: 192.168.0.177
+  address: localhost
 ```
 
 JPA currently uses:
@@ -88,13 +88,13 @@ For production, replace `ddl-auto: update` with migrations such as Flyway or Liq
 Swagger UI:
 
 ```text
-http://192.168.0.177:8080/swagger-ui.html
+http://localhost:8080/swagger-ui.html
 ```
 
 OpenAPI JSON:
 
 ```text
-http://192.168.0.177:8080/v3/api-docs
+http://localhost:8080/v3/api-docs
 ```
 
 ## API Style

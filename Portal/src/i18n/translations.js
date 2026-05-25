@@ -122,7 +122,7 @@ export const translations = {
     'product.name.placeholder': 'e.g. Apple',
     'product.unitType': 'Unit Type',
     'product.unitType.count': 'Count',
-    'product.unitType.count.hint': 'Sold by piece, box, dozen, bag',
+    'product.unitType.count.hint': 'Sold by piece, crate, dozen, bag',
     'product.unitType.weight': 'Weight',
     'product.unitType.weight.hint': 'Sold by KG, Mound',
     'product.defaultUnit': 'Default Unit',

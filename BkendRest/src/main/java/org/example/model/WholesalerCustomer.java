@@ -46,6 +46,10 @@ public class WholesalerCustomer {
     @Column(nullable = false)
     private RecordStatus status = RecordStatus.ACTIVE;
 
+    @jakarta.persistence.Version
+    @Column(nullable = false)
+    private Long version = 0L;
+
     @Column(name = "created_at", insertable = false, updatable = false)
     private LocalDateTime createdAt;
 

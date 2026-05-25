@@ -62,6 +62,7 @@ public class SaleService {
     private final TransactionRepository transactionRepository;
     private final AccountBalanceRepository accountBalanceRepository;
     private final AccountLedgerRepository accountLedgerRepository;
+    private final AccountBalanceService accountBalanceService;
     private final BoxTypeRepository boxTypeRepository;
     private final BoxInventoryRepository boxInventoryRepository;
     private final BoxBalanceRepository boxBalanceRepository;
@@ -77,6 +78,7 @@ public class SaleService {
             TransactionRepository transactionRepository,
             AccountBalanceRepository accountBalanceRepository,
             AccountLedgerRepository accountLedgerRepository,
+            AccountBalanceService accountBalanceService,
             BoxTypeRepository boxTypeRepository,
             BoxInventoryRepository boxInventoryRepository,
             BoxBalanceRepository boxBalanceRepository,
@@ -91,6 +93,7 @@ public class SaleService {
         this.transactionRepository = transactionRepository;
         this.accountBalanceRepository = accountBalanceRepository;
         this.accountLedgerRepository = accountLedgerRepository;
+        this.accountBalanceService = accountBalanceService;
         this.boxTypeRepository = boxTypeRepository;
         this.boxInventoryRepository = boxInventoryRepository;
         this.boxBalanceRepository = boxBalanceRepository;
@@ -118,7 +121,7 @@ public class SaleService {
         // works off the net (discounted) amount.
         BigDecimal netAmount = money(grossAmount.subtract(discountAmount));
         boolean oneTimeCustomer = request.wholesalerCustomerId() == null;
-        boolean crateSale = inventory.getUnit() == UnitType.BOX && !oneTimeCustomer;
+        boolean crateSale = inventory.getUnit() == UnitType.CRATE && !oneTimeCustomer;
         Integer banglaCratesGiven = resolveSpecificCrates(request.banglaCratesGiven());
         Integer chinaCratesGiven = resolveSpecificCrates(request.chinaCratesGiven());
         Integer cratesGiven = resolveCratesGiven(quantity, crateSale, request.crateType(), request.cratesGiven(), banglaCratesGiven, chinaCratesGiven);
@@ -277,16 +280,8 @@ public class SaleService {
             BigDecimal netAmount,
             BigDecimal paidAmount
     ) {
-        AccountBalance balance = accountBalanceRepository
-                .findByWholesaler_IdAndPartyTypeAndPartyAccountId(wholesaler.getId(), PartyType.WHOLESALER_CUSTOMER, customerAccount.getId())
-                .orElseGet(() -> {
-                    AccountBalance newBalance = new AccountBalance();
-                    newBalance.setWholesaler(wholesaler);
-                    newBalance.setPartyType(PartyType.WHOLESALER_CUSTOMER);
-                    newBalance.setPartyAccountId(customerAccount.getId());
-                    newBalance.setBalance(customerAccount.getOpeningDue() == null ? BigDecimal.ZERO : customerAccount.getOpeningDue());
-                    return newBalance;
-                });
+        AccountBalance balance = accountBalanceService.getOrCreate(
+                wholesaler, PartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), customerAccount.getOpeningDue());
 
         balance.setBalance(money(balance.getBalance().add(netAmount).subtract(paidAmount)));
         accountBalanceRepository.save(balance);
@@ -444,16 +439,8 @@ public class SaleService {
             Sale sale,
             BigDecimal saleAmount
     ) {
-        AccountBalance balance = accountBalanceRepository
-                .findByWholesaler_IdAndPartyTypeAndPartyAccountId(wholesaler.getId(), PartyType.WHOLESALER_SUPPLIER, supplierAccount.getId())
-                .orElseGet(() -> {
-                    AccountBalance newBalance = new AccountBalance();
-                    newBalance.setWholesaler(wholesaler);
-                    newBalance.setPartyType(PartyType.WHOLESALER_SUPPLIER);
-                    newBalance.setPartyAccountId(supplierAccount.getId());
-                    newBalance.setBalance(supplierAccount.getOpeningDue() == null ? BigDecimal.ZERO : supplierAccount.getOpeningDue());
-                    return newBalance;
-                });
+        AccountBalance balance = accountBalanceService.getOrCreate(
+                wholesaler, PartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), supplierAccount.getOpeningDue());
         if (saleAmount.signum() <= 0) {
             return balance.getBalance();
         }

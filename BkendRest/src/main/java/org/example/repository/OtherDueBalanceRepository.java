@@ -15,6 +15,8 @@ public interface OtherDueBalanceRepository extends JpaRepository<OtherDueBalance
 
     List<OtherDueBalance> findByWholesaler_IdAndWholesalerSupplier_Id(Long wholesalerId, Long wholesalerSupplierId);
 
+    List<OtherDueBalance> findByWholesaler_Id(Long wholesalerId);
+
     @Query("""
         SELECT COALESCE(SUM(b.dueAmount), 0) FROM OtherDueBalance b
         WHERE b.wholesaler.id = :wholesalerId AND b.wholesalerSupplier.id = :supplierId

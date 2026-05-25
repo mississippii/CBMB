@@ -8,7 +8,9 @@ import org.example.dto.ProductCatalogResponse;
 import org.example.dto.ResetPasswordRequest;
 import org.example.dto.WholesalerListRequest;
 import org.example.dto.WholesalerResponse;
+import org.example.dto.BalanceAuditResponse;
 import org.example.service.AdminWholesalerService;
+import org.example.service.BalanceAuditService;
 import org.example.service.ProductService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.CrossOrigin;
@@ -26,10 +28,13 @@ public class AdminController {
 
     private final AdminWholesalerService adminWholesalerService;
     private final ProductService productService;
+    private final BalanceAuditService balanceAuditService;
 
-    public AdminController(AdminWholesalerService adminWholesalerService, ProductService productService) {
+    public AdminController(AdminWholesalerService adminWholesalerService, ProductService productService,
+                           BalanceAuditService balanceAuditService) {
         this.adminWholesalerService = adminWholesalerService;
         this.productService = productService;
+        this.balanceAuditService = balanceAuditService;
     }
 
     @PostMapping("/wholesalers/list")
@@ -81,5 +86,10 @@ public class AdminController {
     @PostMapping("/sub-categories/list")
     public java.util.List<org.example.dto.SubCategoryResponse> listSubCategories() {
         return productService.listSubCategories();
+    }
+
+    @PostMapping("/wholesalers/{wholesalerId}/balances/audit")
+    public BalanceAuditResponse auditBalances(@PathVariable Long wholesalerId) {
+        return balanceAuditService.audit(wholesalerId);
     }
 }

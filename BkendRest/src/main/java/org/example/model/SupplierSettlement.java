@@ -59,6 +59,10 @@ public class SupplierSettlement {
     @Column(name = "payment_method", nullable = false)
     private PaymentMethod paymentMethod = PaymentMethod.CASH;
 
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false)
+    private org.example.model.enums.PostStatus status = org.example.model.enums.PostStatus.POSTED;
+
     @Column(columnDefinition = "TEXT")
     private String note;
 

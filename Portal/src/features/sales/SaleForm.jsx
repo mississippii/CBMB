@@ -23,7 +23,7 @@ const initialForm = {
 };
 
 const SaleForm = ({ onClose }) => {
-  const { suppliers, customers, supplierProducts, boxInventory, recordSale } = useData();
+  const { suppliers, customers, supplierProducts, crateInventory, recordSale } = useData();
   const showToast = useToast();
   const [form, setForm] = useState(initialForm);
   const [oneTime, setOneTime] = useState({ name: '', phone: '' });
@@ -54,7 +54,7 @@ const SaleForm = ({ onClose }) => {
   const discount = showDiscount ? Math.min(Math.max(0, Number(form.discount) || 0), grossAmount) : 0;
   const netSale = Math.max(0, grossAmount - discount);
   const isOneTime = form.customerId === 'ONE_TIME';
-  const isCrateSale = !isOneTime && selectedProduct?.unit === 'box';
+  const isCrateSale = !isOneTime && selectedProduct?.unit === 'crate';
   const banglaCrates = isCrateSale ? Math.max(0, Math.floor(Number(form.banglaCratesGiven) || 0)) : 0;
   const chinaCrates = isCrateSale ? Math.max(0, Math.floor(Number(form.chinaCratesGiven) || 0)) : 0;
   const cratesGiven = banglaCrates + chinaCrates;
@@ -107,11 +107,11 @@ const SaleForm = ({ onClose }) => {
       setError('Bangla + China crates must equal the sold crate quantity.');
       return;
     }
-    if (isCrateSale && banglaCrates > Number(boxInventory.bangla?.inShop || 0)) {
+    if (isCrateSale && banglaCrates > Number(crateInventory.bangla?.inShop || 0)) {
       setError('Not enough Bangla crates in shop for this sale.');
       return;
     }
-    if (isCrateSale && chinaCrates > Number(boxInventory.china?.inShop || 0)) {
+    if (isCrateSale && chinaCrates > Number(crateInventory.china?.inShop || 0)) {
       setError('Not enough China crates in shop for this sale.');
       return;
     }

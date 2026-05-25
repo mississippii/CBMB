@@ -52,56 +52,81 @@ Wholesaler dashboard
 
 ## Backend Shape
 
-Controllers are grouped by business area and currently use POST endpoints consistently.
+Controllers are grouped by business area and consistently use POST endpoints (avoids cache + safer with bodies).
 
 ```text
 AuthController
   /auth/login
 
-AdminController
-  /admin/wholesalers/list
-  /admin/wholesalers/create
+AdminController                                        — admin-wide
+  /admin/wholesalers/{list,search,create}
+  /admin/wholesalers/{wholesalerId}/reset-password
+  /admin/wholesalers/{wholesalerId}/balances/audit     — drift detector
+  /admin/products/{list,create}
+  /admin/categories/{create,update}
+  /admin/sub-categories/list
 
-WholesalerController
-  /wholesalers/{wholesalerId}/suppliers/list
-  /wholesalers/{wholesalerId}/suppliers/create
-  /wholesalers/{wholesalerId}/customers/list
-  /wholesalers/{wholesalerId}/customers/create
-  /wholesalers/{wholesalerId}/supplier-deliveries/create
+WholesalerController                                   — shop entities + dashboard
+  /wholesalers/{id}/suppliers/{list,create,update,profile,disable,enable}
+  /wholesalers/{id}/customers/{list,create,profile,disable,enable}
+  /wholesalers/{id}/supplier-deliveries/{list,create}
+  /wholesalers/{id}/shipments/{by-supplier,set-commission,settle}
+  /wholesalers/{id}/dashboard/summary                  — period KPIs
 
 ProductController
   /products/list
 
 InventoryController
-  /wholesalers/{wholesalerId}/inventory/list
+  /wholesalers/{id}/inventory/{list,write-off}
 
 SaleController
-  /wholesalers/{wholesalerId}/sales/create
+  /wholesalers/{id}/sales/create
+  /wholesalers/{id}/sales/aggregate                    — sums by product/variety/lot/supplier/shipment
+  /wholesalers/{id}/sales/{saleId}/cancel              — reversing-entry undo
 
 PaymentController
-  /wholesalers/{wholesalerId}/payments/customer/settle
-  /wholesalers/{wholesalerId}/payments/supplier/product-pay
-  /wholesalers/{wholesalerId}/payments/supplier/commission-receive
-  /wholesalers/{wholesalerId}/payments/supplier/expense-receive
-  /wholesalers/{wholesalerId}/payments/supplier/crate-give
-  /wholesalers/{wholesalerId}/payments/supplier/crate-return
+  /wholesalers/{id}/payments/customer/settle
+  /wholesalers/{id}/payments/customer/crate-borrow
+  /wholesalers/{id}/payments/customer/{paymentId}/cancel
+  /wholesalers/{id}/payments/supplier/product-pay
+  /wholesalers/{id}/payments/supplier/commission-receive
+  /wholesalers/{id}/payments/supplier/expense-receive  — pays down supplier_expenses FIFO
+  /wholesalers/{id}/payments/supplier/crate-give
+  /wholesalers/{id}/payments/supplier/crate-return
+  /wholesalers/{id}/payments/supplier/{settlementId}/cancel
+                                                       — EXPENSE_RECEIVE + ADJUSTMENT refused (record corrective entry)
 
-BoxController
-  /wholesalers/{wholesalerId}/boxes/dashboard
-  /wholesalers/{wholesalerId}/boxes/purchase/create
-  /wholesalers/{wholesalerId}/boxes/lost-damaged/create
+CrateController                                        — crate inventory + loss stats
+  /wholesalers/{id}/crates/dashboard
+  /wholesalers/{id}/crates/purchase/create
+  /wholesalers/{id}/crates/lost-damaged/create
+  /wholesalers/{id}/crates/loss-stats
 
 TransactionController
-  /wholesalers/{wholesalerId}/transactions/list
+  /wholesalers/{id}/transactions/list                  — accepts {from, to} body for period filter
 
-ExpenseController (planned)
-  /wholesalers/{wholesalerId}/expense-categories/list
-  /wholesalers/{wholesalerId}/expense-categories/create
-  /wholesalers/{wholesalerId}/supplier-expenses/create
-  /wholesalers/{wholesalerId}/supplier-expenses/list
+ExpenseController                                      — supplier-funded expenses (recoverable)
+  /wholesalers/{id}/expenses/categories
+  /wholesalers/{id}/expenses/create
+  /wholesalers/{id}/expenses/list
+  /wholesalers/{id}/expenses/statement                 — per-supplier P&L
+
+ShopExpenseController                                  — wholesaler-borne overhead (non-recoverable)
+  /wholesalers/{id}/shop-expenses/categories
+  /wholesalers/{id}/shop-expenses/create
+  /wholesalers/{id}/shop-expenses/list
+  /wholesalers/{id}/shop-expenses/{expenseId}/cancel
 ```
 
-Service classes contain business rules. Repositories provide JPA access. Controllers should stay thin.
+**Service classes** contain business rules; **repositories** provide JPA access; **controllers** stay thin. Notable services that don't map 1:1 to a controller:
+
+- `AccountBalanceService` — single get-or-create entry point for `account_balances`, also writes the `OPENING_DUE` ledger row so `sum(ledger) == balance` from row creation.
+- `ExpensePaydownService` — FIFO pay-down of `supplier_expenses.due_amount` + decrement of `other_due_balances`. Called by both `PaymentService.receiveSupplierExpense` and `SupplierDeliveryService.setSettlementStatus`.
+- `BalanceAuditService` — read-only reconciliation, surfaces drift between any balance table and its ledger/source aggregate.
+- `SaleCancellationService` / `PaymentCancellationService` — undo with reversing ledger entries; original rows preserved with `status=CANCELLED`.
+- `DashboardService` — period rollup composing sales aggregate + payment sums + settlement sums + balance totals + shop expenses + net profit.
+- `SalesAggregateService` — drives `/sales/aggregate` summary + groupBy queries.
+- `ShopExpenseService` — wholesaler-borne overhead.
 
 ## Core Data Principles
 
@@ -163,8 +188,10 @@ wholesaler_suppliers 1:N supplier_settlements
 wholesalers 1:N expense_categories
 expense_categories 1:N supplier_expenses
 expense_categories 1:N other_due_balances
+expense_categories 1:N shop_expenses
 wholesaler_suppliers 1:N supplier_expenses
 wholesaler_suppliers 1:N other_due_balances
+wholesalers 1:N shop_expenses
 
 wholesalers 1:N box_types
 box_types 1:1 box_inventory per wholesaler
@@ -177,14 +204,227 @@ payments 0..1:1 transactions
 supplier_settlements 0..1:1 transactions
 ```
 
+## Database Design
+
+30 tables total: 29 application tables + `flyway_schema_history` (auto-created by Flyway, tooling metadata only). This section explains **why each table exists and how data is organized across them** — not just what columns they have.
+
+### The four design patterns
+
+Once you see these recurring patterns, the whole schema makes sense:
+
+1. **Identity ⟂ Relationship.** A globally-unique party (`suppliers`, `customers`) is one table. The *relationship* between that party and a specific wholesaler (`wholesaler_suppliers`, `wholesaler_customers`) is a second table holding shop-specific fields like `opening_due`. This lets the same farmer/customer trade with many wholesalers without duplicating their phone/address.
+
+2. **Snapshot + Ledger.** Money, crates, and stock each have **two tables**: a *live snapshot* (fast to read, "what's the balance right now?") and an *append-only ledger* (every change, audit-able). The snapshot is derived from the ledger; if they ever diverge, the ledger is truth. The balance-audit endpoint reconciles them.
+
+3. **Catalog + Event Snapshot.** Products are mutable catalog rows, but every sale snapshots the product/variety/lot/unit/commission-rate **at the time of sale** into `sale_items`. Renaming a product later doesn't rewrite sales history.
+
+4. **Tenant isolation by column.** Every operational row carries `wholesaler_id`. One database hosts many shops with no leakage; every query filters on it.
+
+### Identity & parties (6 tables)
+
+> Answers: who logs in, who owns the shop, who is this customer/supplier?
+
+| Table | Why it exists | Key fields |
+|---|---|---|
+| `users` | Pure authentication. Separate from `wholesalers` because admins exist without a shop, and one auth table for everyone is simpler than one per role. | `email`, `password_hash`, `role` (ADMIN / WHOLESALER) |
+| `wholesalers` | The shop itself — the tenant root every operational table FKs to. One per WHOLESALER user. | `business_name`, `phone`, `address` |
+| `suppliers` | **Global** directory of supplier identity. Same trader sells to many wholesalers — don't duplicate his phone/address per shop. | `name`, `phone`, `address` |
+| `wholesaler_suppliers` | The **relationship** row: this shop's account with this supplier. Carries shop-specific state. **Every supplier-side balance/ledger row keys off this id, not `suppliers.id`** — because "money owed" only makes sense per-shop. | `opening_due`, `commission_rate`, `status` |
+| `customers` | Global directory of customer identity — same rationale as `suppliers`. | `name`, `phone`, `address` |
+| `wholesaler_customers` | Shop-specific customer relationship. **The party id used by all customer-side balances/ledgers.** | `opening_due`, `jamanot_balance` (cumulative crate-deposit money owed *to* the customer), `status`, `@Version` |
+
+### Product catalog (3 tables)
+
+> Three levels because real wholesale produce has three levels: *what is it* → *which variety* → *which batch*.
+
+| Table | Why it exists | Key fields |
+|---|---|---|
+| `products` | Top-level item name (Mango, Watermelon, Potato). Just a label — no unit, no price. Unit is decided per shipment/sale, price per sale. | `name` |
+| `categories` | Variety under a product (Himsagar / Langra / Amrapali under "Mango"). `uses_lots` flag — if true, every inventory/sale row under this variety **must** also carry a `sub_category_id`. | `product_id`, `name`, `uses_lots` |
+| `sub_categories` | **Fixed system-wide enumeration** `Lot1..Lot200`, seeded once at install. Shared across every variety that uses lots — admin never edits these. They're just labels for "first batch / second batch", not unique entities. | `name`, `sort_order` |
+
+### Shipments & stock (4 tables)
+
+> Answers: what came in, where is it now, who paid for what.
+
+| Table | Why it exists | Key fields |
+|---|---|---|
+| `supplier_deliveries` | One row per arriving shipment — **the unit of account for consignment**. Every sale, expense, and settlement attributes back to a shipment so per-lot P&L is possible. Commission rate is nullable because it's negotiated *after* the sell. | `name`, `estimated_value`, `advance_paid`, `commission_rate`, `settlement_status` (OPEN/SETTLED) |
+| `supplier_delivery_items` | Lines on a shipment (product + variety + lot + qty + unit). Immutable snapshot of what arrived. | `delivery_id`, `product_id`, `category_id`, `sub_category_id`, `quantity`, `unit` |
+| `inventory` | Lot-scoped on-hand stock — one row per (shipment × product × variety × lot × unit). **Why lot-scoped?** Because consignment P&L is per-shipment — pooling stock across deliveries would lose attribution. `@Version` for optimistic locking. | `delivery_id`, `product_id`, `category_id`, `sub_category_id`, `quantity_on_hand`, `unit`, `status` |
+| `stock_ledger` | Append-only IN/OUT log. Every receive writes IN, every sale writes OUT, every write-off writes OUT. Audit trail — `inventory.quantity_on_hand` should equal Σ(IN) − Σ(OUT). | `reference_type` (SUPPLIER_DELIVERY / SALE / ADJUSTMENT), `reference_id`, `direction`, `quantity` |
+
+### Sales (2 tables)
+
+> Standard normalized split: header + lines.
+
+| Table | Why it exists | Key fields |
+|---|---|---|
+| `sales` | Sale header — one row per checkout. Carries the money summary so reports don't have to aggregate `sale_items`. `customer_name_snapshot`/`customer_phone_snapshot` capture one-time customers without writing to `wholesaler_customers`. | `wholesaler_customer_id` (nullable for one-time), `gross/discount/net/paid/due_amount`, `boxes_given`, `jamanot_amount`, `status` (POSTED/CANCELLED) |
+| `sale_items` | Per-product line. **`delivery_id` is the load-bearing field for shipment-wise reporting** — every sold rupee can be traced to its lot. `commission_rate` is snapshotted because the lot's rate can be edited later. | `wholesaler_supplier_id`, `delivery_id`, `product_id`, `category_id`, `sub_category_id`, `quantity`, `unit_price`, `line_total`, `commission_rate` |
+
+### Payments & settlements (2 tables)
+
+> Customer settlement and supplier money-flow are different shapes, so two tables.
+
+| Table | Why it exists | Key fields |
+|---|---|---|
+| `payments` | Customer settlement events (cash, returned crates, jamanot refund). Carries the before/after snapshot so each row is auditable on its own. Partitioned by `created_at` for retention. | `cash_amount`, `boxes_returned`, `jamanot_amount`, `previous_due`, `due_after_payment`, `status` |
+| `supplier_settlements` | Money flow with a supplier. The `settlement_type` enum is the dispatcher: `PRODUCT_PAYMENT` (paying supplier for sold goods), `COMMISSION_RECEIVE` (collecting your commission), `EXPENSE_RECEIVE` (supplier reimbursing fronted expense), `ADVANCE_PAYMENT`, `ADJUSTMENT`. | `wholesaler_supplier_id`, `settlement_type`, `amount`, `previous_due`, `due_after_settlement`, `status` |
+
+### Expense tracking (4 tables)
+
+> Two **kinds** of expenses with very different semantics → two source tables, plus shared categories and a per-supplier rollup cache.
+
+| Table | Why it exists | Key fields |
+|---|---|---|
+| `expense_categories` | Per-wholesaler category names (Transport, Labour, Salary, Hospitality…). `kind` enum lets one table serve both expense surfaces — no duplicate "Other" rows. | `name`, `kind` (SUPPLIER / SHOP / BOTH), `status` |
+| `supplier_expenses` | Cost the wholesaler **fronted** for a supplier's shipment (transport, labour). `paid_amount`+`due_amount` track what the supplier still owes. **Recoverable** — supplier reimburses via `EXPENSE_RECEIVE` settlement. | `wholesaler_supplier_id`, `delivery_id`, `category_id`, `amount`, `paid_amount`, `due_amount` |
+| `other_due_balances` | Per `(supplier, category)` rollup of `Σ(supplier_expenses.due_amount)`. **Read-optimized cache** — dashboards / supplier profile pages don't have to aggregate the source rows every time. Mutated alongside `supplier_expenses`. | `wholesaler_supplier_id`, `category_id`, `due_amount` |
+| `shop_expenses` | Pure wholesaler-borne overhead (salary, hospitality, lunch, rent, utilities). **No party, no reimbursement** — reduces cash + net profit only; never touches a balance. | `category_id`, `amount`, `payment_method`, `expense_date`, `status` |
+
+### Crate (jamanot) tracking (4 tables)
+
+> Crates are physical wooden/plastic boxes lent to customers and borrowed from suppliers. Same **snapshot + ledger** model as money — because crates are a second kind of "balance" between you and a party.
+
+| Table | Why it exists | Key fields |
+|---|---|---|
+| `box_types` | Catalog per wholesaler (BANGLA, CHINA). Seeded on first `/crates/dashboard` hit. | `name` |
+| `box_inventory` | Warehouse-level totals per crate type. **DB CHECK enforces conservation**: `total_owned = in_hand + with_customers + with_suppliers + lost_damaged`. `@Version`. | `total_owned`, `in_hand`, `with_customers`, `with_suppliers`, `lost_damaged` |
+| `box_balances` | Per-party crate due — how many crates each customer/supplier owes you back. The "credit balance" for crates, mirroring `account_balances`. `@Version`. | `party_type`, `party_account_id`, `box_type_id`, `boxes_due` |
+| `box_ledger` | Append-only crate-movement log: PURCHASE / GIVEN_TO_CUSTOMER / RETURNED_FROM_CUSTOMER / GIVEN_TO_SUPPLIER / RETURNED_FROM_SUPPLIER / LOST / DAMAGED / ADJUSTMENT. Tagged with `reference_type`+`reference_id` (SALE / PAYMENT / SUPPLIER_DELIVERY / MANUAL) so every movement traces back to its trigger. **Audit trail behind `box_inventory` and `box_balances`.** | `box_type_id`, `party_type`, `party_account_id`, `movement_type`, `quantity`, `reference_type`, `reference_id` |
+
+### Money balances & ledger (2 tables)
+
+> The financial spine. **Snapshot + ledger pattern**: balance is fast to read; ledger is the truth.
+
+| Table | Why it exists | Key fields |
+|---|---|---|
+| `account_balances` | Live money balance per `(wholesaler, party_type, party_account_id)`. Sign convention: **customer-side positive = customer owes you**; **supplier-side positive = you owe supplier**. One row per (wholesaler × customer) and per (wholesaler × supplier). `@Version` to prevent lost updates under concurrent writes. | `party_type` (WHOLESALER_CUSTOMER / WHOLESALER_SUPPLIER), `party_account_id`, `balance` |
+| `account_ledger` | Append-only debit/credit log. **The ledger is truth; the balance is a derived snapshot.** `reference_type` enum: SALE, PAYMENT, SUPPLIER_SETTLEMENT, SUPPLIER_COMMISSION, SUPPLIER_EXPENSE, DUE_ADJUSTMENT (reversal entries), OPENING_DUE (carry-forward). DB CHECK forbids both debit and credit on the same row. Drift is detected via `/admin/.../balances/audit`. | `party_type`, `party_account_id`, `reference_type`, `reference_id`, `debit`, `credit` |
+
+### Audit feed & infra (2 tables)
+
+| Table | Why it exists | Key fields |
+|---|---|---|
+| `transactions` | **Single unified activity feed** for the UI. One row per sale, payment, supplier settlement, or cancellation. Read-only after insert; cancellations *append* a new row, never mutate. Why a separate table? So the Transactions tab is one `SELECT … ORDER BY created_at DESC` instead of UNIONing three source tables. | `transaction_type` (SALE / PAYMENT), `sale_id`, `payment_id`, `wholesaler_customer_id`, `wholesaler_supplier_id`, `sale_amount`, `payment_amount`, `due_amount`, `description` |
+| `jpa_id_generators` | Hibernate `@TableGenerator` sequence storage for `payments.id`. Needed because `payments` is partitioned by `created_at` and partitioned MySQL tables can't use AUTO_INCREMENT cleanly across partitions. | `sequence_name`, `next_val` |
+
+### Tooling (not in V1)
+
+| Table | Why it exists |
+|---|---|
+| `flyway_schema_history` | Flyway's own bookkeeping (which migrations ran, their checksums, success status). Auto-created on first connection. Don't query from app code. |
+
+### Major Data Flows
+
+Each flow lists the tables touched, in order. `+` = INSERT, `~` = UPDATE.
+
+**1. Receive supplier delivery** (`SupplierDeliveryService.receiveSupplierDelivery`)
+```
++ supplier_deliveries           (one shipment header)
++ supplier_delivery_items       (one per line)
++ inventory                     (one per line, lot-scoped)
++ stock_ledger                  (IN, ref=SUPPLIER_DELIVERY)
+[if advance_paid > 0]
+  ~ account_balances            (supplier balance ↓ by advance)
+  + account_ledger              (DEBIT, ref=SUPPLIER_SETTLEMENT)
+  + supplier_settlements        (PRODUCT_PAYMENT)
+  + transactions                (description: "Shipment #N advance")
+```
+
+**2. Sale to permanent customer** (`SaleService.createSale`)
+```
++ sales                                  (status=POSTED, paid + due split)
++ sale_items                             (one per inventory row; carries delivery_id)
+~ inventory.quantity_on_hand             (decremented; STOCK_OUT if zero)
++ stock_ledger                           (OUT, ref=SALE)
+~ account_balances (customer)            (+net − paid)
++ account_ledger × 1‑2 (customer)        (DEBIT net; CREDIT paid if any)
+~ account_balances (supplier)            (+net — full sale credits supplier regardless of customer payment)
++ account_ledger (supplier)              (CREDIT net, ref=SALE)
+[if crate sale]
+  ~ box_inventory                        (in_hand↓, with_customers↑)
+  ~ box_balances (customer)              (boxes_due↑)
+  + box_ledger                           (GIVEN_TO_CUSTOMER, ref=SALE)
+  ~ wholesaler_customers.jamanot_balance (+jamanot)
++ transactions                           (transactionType=SALE)
+```
+
+**3. Customer settles due / returns crates** (`PaymentService.settleCustomer`)
+```
++ payments                               (cash + bangla/china returned + jamanot refund)
+~ account_balances (customer)            (−cash)
++ account_ledger                         (CREDIT cash, ref=PAYMENT)
+[per crate type returned]
+  ~ box_inventory                        (in_hand↑, with_customers↓)
+  ~ box_balances (customer)              (boxes_due↓)
+  + box_ledger                           (RETURNED_FROM_CUSTOMER, ref=PAYMENT)
+[if jamanot refunded]
+  ~ wholesaler_customers.jamanot_balance (−jamanot)
++ transactions                           (transactionType=PAYMENT)
+```
+
+**4. Pay supplier / settle shipment** (`PaymentService.paySupplierProduct`, `SupplierDeliveryService.setSettlementStatus`)
+```
++ supplier_settlements                   (PRODUCT_PAYMENT / COMMISSION_RECEIVE / EXPENSE_RECEIVE)
+[if PRODUCT_PAYMENT or ADVANCE_PAYMENT — only types that touch balance]
+  ~ account_balances (supplier)          (−amount)
+  + account_ledger                       (DEBIT, ref=SUPPLIER_SETTLEMENT)
+[if EXPENSE_RECEIVE, via ExpensePaydownService FIFO]
+  ~ supplier_expenses.due_amount         (decremented oldest-first)
+  ~ supplier_expenses.paid_amount        (incremented)
+  ~ other_due_balances.due_amount        (decremented per category as expenses are paid down)
++ transactions
+```
+
+**5. Wholesaler logs shop overhead** (`ShopExpenseService.create`)
+```
++ shop_expenses                          (amount + category + payment_method + date)
+                                         (no balance/ledger writes — pure outflow)
+```
+Dashboard pulls these via `SUM(amount) WHERE status=POSTED AND expense_date IN period` and reports them in Money Out + reduces Net Profit (= commission earned − shop expenses).
+
+**6. Cancel a sale or payment** (`SaleCancellationService`, `PaymentCancellationService`)
+```
+~ sales/payments/supplier_settlements    (status → CANCELLED — original row preserved)
++ account_ledger                         (reversing DUE_ADJUSTMENT entries)
+~ account_balances                       (balance unwound to pre-event state)
+[for sale cancellations]
+  ~ inventory.quantity_on_hand           (restored)
+  + stock_ledger                         (ADJUSTMENT IN, ref=SALE)
+  ~ box_inventory + box_balances         (crates pulled back from customer)
+  + box_ledger                           (RETURNED_FROM_CUSTOMER, ref=SALE)
+  ~ wholesaler_customers.jamanot_balance (jamanot reversed)
++ transactions                           (description: "Cancellation of …")
+```
+
+### Key Invariants
+
+- `account_balances.balance` = `wholesaler_customer.opening_due` + Σ(`account_ledger.debit` − `account_ledger.credit`) for customers; sign flips for suppliers. Enforced lazily by `/admin/wholesalers/{id}/balances/audit`.
+- `box_inventory.total_owned` = `in_hand` + `with_customers` + `with_suppliers` + `lost_damaged` (DB CHECK constraint).
+- `box_inventory.with_customers` = Σ(`box_balances.boxes_due` for WHOLESALER_CUSTOMER of that type). Audited.
+- `other_due_balances.due_amount` per (supplier, category) = Σ(`supplier_expenses.due_amount` for that supplier+category). Audited.
+- `sale_items.delivery_id` is the load-bearing field for shipment-wise P&L — every sold rupee can be attributed back to a specific lot.
+- CANCELLED rows never participate in any aggregate (filtered at the query level).
+
 ## Schema Reference
 
 The sections below show, for each table:
 
 1. A short pseudo‑schema describing intent.
-2. The authoritative `CREATE TABLE` DDL (verbatim from `DatabaseSchema.sql`).
+2. The `CREATE TABLE` DDL.
 
 CHARSET/COLLATION boilerplate is `utf8mb4 / utf8mb4_unicode_ci` for every table and is elided from the DDL examples for readability — the live DDL keeps them.
+
+> **Canonical source.** `BkendRest/src/main/resources/db/migration/V1__create_initial_schema.sql` is the single source of truth for DDL. The DDL snippets below should match but may lag minor column additions. Recent additions present in V1 you should know about:
+>
+> - `payments.status` and `supplier_settlements.status` — `enum('POSTED','CANCELLED')` for the cancellation flow. Aggregate queries filter on `status='POSTED'`.
+> - `version bigint` (JPA `@Version`) on: `account_balances`, `box_balances`, `box_inventory`, `wholesaler_customers`, `inventory` — optimistic locking against concurrent updates.
+> - `expense_categories.kind` — `enum('SUPPLIER','SHOP','BOTH')` to split shipment-recoverable vs shop-overhead categories.
+> - `supplier_expenses.delivery_id` — nullable FK so an expense can be tied to a shipment for per-lot P&L.
+> - New table `shop_expenses` — wholesaler-borne overhead, documented in its own subsection below.
+> - `payments.payment_type` enum: `BOX_RETURN` / `CASH_AND_BOX_RETURN` were renamed to `CRATE_RETURN` / `CASH_AND_CRATE_RETURN` to match wire/UI naming.
 
 ### Identity And Access
 
@@ -713,7 +953,7 @@ payments
   id, created_at  -> COMPOSITE PK (partitioned by created_at, MONTHLY)
   wholesaler_id FK
   wholesaler_customer_id FK
-  payment_type CASH_RECEIVE | BOX_RETURN | CASH_AND_BOX_RETURN
+  payment_type CASH_RECEIVE | CRATE_RETURN | CASH_AND_CRATE_RETURN
   cash_amount
   boxes_returned
   jamanot_amount
@@ -740,13 +980,13 @@ supplier_settlements
 **Payment operation rules (MUST):**
 
 ```text
-Customer due receive (CASH_RECEIVE / CASH_AND_BOX_RETURN cash leg):
+Customer due receive (CASH_RECEIVE / CASH_AND_CRATE_RETURN cash leg):
   - decreases customer current due (account_balances)
   - writes one payments row
   - writes one account_ledger row (reference_type=PAYMENT, reference_id=payment.id)
   - writes one transactions row (transaction_type=PAYMENT, payment_id=payment.id)
 
-Customer crate return (BOX_RETURN / CASH_AND_BOX_RETURN crate leg):
+Customer crate return (CRATE_RETURN / CASH_AND_CRATE_RETURN crate leg):
   - decreases customer crate due (box_balances)
   - increases wholesaler crate in_hand (box_inventory)
   - decreases box_inventory.with_customers by the same amount
@@ -791,7 +1031,7 @@ CREATE TABLE `payments` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `wholesaler_id` bigint unsigned NOT NULL,
   `wholesaler_customer_id` bigint unsigned NOT NULL,
-  `payment_type` enum('CASH_RECEIVE','BOX_RETURN','CASH_AND_BOX_RETURN') NOT NULL,
+  `payment_type` enum('CASH_RECEIVE','CRATE_RETURN','CASH_AND_CRATE_RETURN') NOT NULL,
   `cash_amount` decimal(14,2) NOT NULL DEFAULT '0.00',
   `boxes_returned` int NOT NULL DEFAULT '0',
   `jamanot_amount` decimal(14,2) NOT NULL DEFAULT '0.00',
@@ -814,9 +1054,9 @@ CREATE TABLE `payments` (
   CONSTRAINT `chk_payments_type_values` CHECK (
     (`payment_type` = 'CASH_RECEIVE'         AND `cash_amount` > 0 AND `boxes_returned` = 0 AND `jamanot_amount` = 0)
     OR
-    (`payment_type` = 'BOX_RETURN'           AND `cash_amount` = 0 AND `boxes_returned` > 0 AND `jamanot_amount` >= 0)
+    (`payment_type` = 'CRATE_RETURN'           AND `cash_amount` = 0 AND `boxes_returned` > 0 AND `jamanot_amount` >= 0)
     OR
-    (`payment_type` = 'CASH_AND_BOX_RETURN'  AND `cash_amount` > 0 AND `boxes_returned` > 0 AND `jamanot_amount` >= 0)
+    (`payment_type` = 'CASH_AND_CRATE_RETURN'  AND `cash_amount` > 0 AND `boxes_returned` > 0 AND `jamanot_amount` >= 0)
   )
 ) ENGINE=InnoDB
 PARTITION BY RANGE COLUMNS(created_at) (
@@ -859,15 +1099,16 @@ CREATE TABLE `supplier_settlements` (
 > single `PaymentMethod` enum for convenience but the service layer MUST reject
 > `NONE` before writing a `supplier_settlements` row.
 
-### Supplier Expenses (non‑product money)
+### Supplier Expenses (non‑product money, **recoverable** from supplier)
 
-Captures money the wholesaler owes a supplier for non‑product costs (labour, transport, etc.) and tracks payments against those expenses. `expense_categories` is the per‑wholesaler catalog; `supplier_expenses` are the source rows; `other_due_balances` is the rollup used by Supplier Profile reads.
+Captures money the wholesaler **fronted** for a supplier's shipment (labour, transport) — the supplier is expected to reimburse. `expense_categories` is the shared per-wholesaler catalog (now also used by shop overhead — see next section); `supplier_expenses` are the source rows (linked to a shipment via `delivery_id`); `other_due_balances` is the rollup used by Supplier Profile reads.
 
 ```text
 expense_categories
   id PK
   wholesaler_id FK
-  name           -- e.g. Labour, Transport
+  name           -- e.g. Labour, Transport, Salary, Hospitality
+  kind           -- enum: SUPPLIER | SHOP | BOTH (filters which expense surface can pick)
   status
   created_at, updated_at
   UNIQUE (wholesaler_id, name)
@@ -876,9 +1117,10 @@ supplier_expenses
   id PK
   wholesaler_id FK
   wholesaler_supplier_id FK
+  delivery_id FK -> supplier_deliveries.id  (nullable; ties expense to a shipment for per-lot P&L)
   category_id FK -> expense_categories.id
   amount         -- total expense incurred
-  paid_amount    -- amount paid so far (<= amount, CHECK enforced)
+  paid_amount    -- amount supplier has paid back so far (<= amount, CHECK enforced)
   due_amount     -- outstanding
   note
   expense_date
@@ -889,7 +1131,7 @@ other_due_balances
   wholesaler_id FK
   wholesaler_supplier_id FK
   category_id FK -> expense_categories.id
-  due_amount     -- rollup over supplier_expenses for fast supplier-profile reads
+  due_amount     -- rollup over supplier_expenses.due_amount; live cache for supplier-profile reads
   updated_at
   UNIQUE (wholesaler_id, wholesaler_supplier_id, category_id)
 ```
@@ -919,12 +1161,14 @@ CREATE TABLE `expense_categories` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `wholesaler_id` bigint unsigned NOT NULL,
   `name` varchar(120) NOT NULL,
+  `kind` enum('SUPPLIER','SHOP','BOTH') NOT NULL DEFAULT 'BOTH',
   `status` enum('ACTIVE','DISABLED') NOT NULL DEFAULT 'ACTIVE',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_expense_category_wh_name` (`wholesaler_id`,`name`),
   KEY `idx_expense_category_status` (`wholesaler_id`,`status`),
+  KEY `idx_expense_category_kind` (`wholesaler_id`,`kind`),
   CONSTRAINT `fk_expense_categories_wholesaler`
     FOREIGN KEY (`wholesaler_id`) REFERENCES `wholesalers` (`id`)
     ON DELETE RESTRICT ON UPDATE CASCADE
@@ -934,6 +1178,7 @@ CREATE TABLE `supplier_expenses` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `wholesaler_id` bigint unsigned NOT NULL,
   `wholesaler_supplier_id` bigint unsigned NOT NULL,
+  `delivery_id` bigint unsigned DEFAULT NULL,
   `category_id` bigint unsigned NOT NULL,
   `amount` decimal(14,2) NOT NULL DEFAULT '0.00',
   `paid_amount` decimal(14,2) NOT NULL DEFAULT '0.00',
@@ -981,6 +1226,70 @@ CREATE TABLE `other_due_balances` (
   CONSTRAINT `fk_other_due_ws`
     FOREIGN KEY (`wholesaler_supplier_id`) REFERENCES `wholesaler_suppliers` (`id`)
     ON DELETE RESTRICT ON UPDATE CASCADE
+) ENGINE=InnoDB;
+```
+
+### Shop Overhead Expenses (wholesaler-borne, **not recoverable**)
+
+Captures **pure outflow** the wholesaler bears alone: employee salary, guest hospitality, owner/employee lunch, rent, utilities, maintenance. Nobody reimburses. Distinct from `supplier_expenses` — these do **not** touch any party balance and do **not** create `account_ledger` rows. They reduce cash and net profit only.
+
+Categories come from the shared `expense_categories` table filtered by `kind IN ('SHOP', 'BOTH')`. Default seed (lazy-created on first `/shop-expenses/categories` call): Employee Salary, Hospitality, Lunch, Rent, Utilities, Other.
+
+```text
+shop_expenses
+  id PK
+  wholesaler_id FK
+  category_id FK -> expense_categories.id
+  amount         -- > 0, CHECK enforced
+  payment_method -- CASH | BANK | BKASH | NAGAD | OTHER (NONE not valid here)
+  expense_date
+  note
+  status         -- POSTED | CANCELLED (cancel just flips status; no reversing entries needed
+                 -- because no balance was ever touched)
+  created_at, updated_at
+```
+
+**Shop-expense rules (MUST):**
+
+```text
+Create shop expense (POST /shop-expenses/create):
+  - inserts one shop_expenses row (status=POSTED).
+  - NO writes to account_balances / account_ledger / box_* / transactions.
+  - Dashboard pulls these via SUM(amount) WHERE status=POSTED AND expense_date IN period.
+
+Cancel shop expense (POST /shop-expenses/{id}/cancel):
+  - flips status to CANCELLED. Aggregate queries exclude CANCELLED rows.
+  - No reversing entries needed.
+
+Net profit per period:
+  Σ(sale_item.line_total * delivery.commission_rate / 100)  WHERE sale.status=POSTED
+  − Σ(shop_expenses.amount)                                  WHERE status=POSTED
+  Both restricted to [from, to). Commission-receive settlements DO NOT enter this
+  calc — they're just transfers of already-recognised income.
+```
+
+```sql
+CREATE TABLE `shop_expenses` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `wholesaler_id` bigint unsigned NOT NULL,
+  `category_id` bigint unsigned NOT NULL,
+  `amount` decimal(14,2) NOT NULL DEFAULT '0.00',
+  `payment_method` enum('CASH','BANK','BKASH','NAGAD','OTHER') NOT NULL DEFAULT 'CASH',
+  `expense_date` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `note` text,
+  `status` enum('POSTED','CANCELLED') NOT NULL DEFAULT 'POSTED',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  KEY `idx_shop_expense_wh_date` (`wholesaler_id`,`expense_date`),
+  KEY `idx_shop_expense_category` (`wholesaler_id`,`category_id`),
+  CONSTRAINT `fk_shop_expenses_wholesaler`
+    FOREIGN KEY (`wholesaler_id`) REFERENCES `wholesalers` (`id`)
+    ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `fk_shop_expenses_category`
+    FOREIGN KEY (`category_id`) REFERENCES `expense_categories` (`id`)
+    ON DELETE RESTRICT ON UPDATE CASCADE,
+  CONSTRAINT `chk_shop_expense_amount_positive` CHECK (`amount` > 0)
 ) ENGINE=InnoDB;
 ```
 
@@ -1458,6 +1767,8 @@ Inventory.quantity_on_hand and wholesaler_customers.jamanot_balance are
 
 ## Near-Term Gaps
 
+Open items at time of writing. (Items 7–11, 14 from earlier versions of this doc are **done** and removed: paid_amount validation, ExpenseController wiring, cancellation flows, date-range transactions, @Version optimistic locking.)
+
 ```text
 1.  Wire up Spring Security: real authentication filter, role-based access,
     /wholesalers/{wholesalerId}/** ownership check from the principal.
@@ -1468,19 +1779,19 @@ Inventory.quantity_on_hand and wholesaler_customers.jamanot_balance are
 5.  Move application.yaml secrets to environment variables.
 6.  Multi-line sale support in CreateSaleRequest and SaleService (the schema
     already supports 1:N sale_items; only the request and service loop need it).
-7.  Enforce paid_amount <= net_amount on create-sale; settle prior due
-    through /payments/customer/settle so a payment source row exists.
-8.  Add settlement_id column to transactions and backfill; until then,
+7.  Add settlement_id column to transactions and backfill; until then,
     join supplier_settlements to transactions by (wholesaler_supplier_id, created_at).
-9.  Wire ExpenseController endpoints; today expense_categories, supplier_expenses,
-    and other_due_balances exist as entities but have no controller.
-10. Sale/payment cancellation/reversal flows (status -> CANCELLED with full
-    reversing ledger entries; never delete history rows).
-11. Date-range transaction API for server-side filtering/export.
-12. Automated service tests for sale/payment/crate balance updates and
-    end-of-day invariants (sum of ledger == account_balances).
-13. Partition maintenance job for payments and transactions; add pmax-1
+8.  EXPENSE_RECEIVE supplier-settlement cancellation: today it's refused with
+    "record a corrective entry instead" because we don't track which specific
+    SupplierExpense rows the settlement paid down. Either add a junction table
+    or reverse-FIFO from most-recently-paid expenses.
+9.  Automated service tests for sale/payment/crate balance updates and the
+    audit-endpoint invariants (sum of ledger == account_balances).
+10. Partition maintenance job for payments and transactions; add pmax-1
     monthly partition automatically.
-14. Optimistic locking (@Version) on inventory and wholesaler_customers;
-    pessimistic SELECT ... FOR UPDATE on box_inventory rows.
+11. Pessimistic SELECT ... FOR UPDATE on box_inventory rows for multi-clerk
+    write safety beyond what @Version already gives (single-clerk shops are
+    already safe).
+12. Frontend: surface supplier-settlement cancellation in the supplier detail
+    page (backend endpoint exists, no UI yet).
 ```
