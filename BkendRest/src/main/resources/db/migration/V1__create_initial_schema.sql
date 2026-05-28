@@ -360,6 +360,11 @@ CREATE TABLE `sale_items` (
   `category_id` bigint unsigned DEFAULT NULL,
   `sub_category_id` bigint unsigned DEFAULT NULL,
   `quantity` decimal(14,3) NOT NULL,
+  -- Optional sale weight in kg. When NULL, the product is priced per pack
+  -- (line_total = quantity * unit_price). When set, the product is priced per kg
+  -- (line_total = sale_weight_kg * unit_price, where unit_price = per-kg rate).
+  -- Inventory deduction always uses `quantity` (pack count).
+  `sale_weight_kg` decimal(14,3) DEFAULT NULL,
   `unit` enum('PCS','KG','DOZEN','CRATE','BAG','MOUND') NOT NULL DEFAULT 'PCS',
   `unit_price` decimal(14,2) NOT NULL DEFAULT '0.00',
   `line_total` decimal(14,2) NOT NULL DEFAULT '0.00',
@@ -600,11 +605,14 @@ CREATE TABLE `box_types` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `wholesaler_id` bigint unsigned NOT NULL,
   `name` varchar(80) NOT NULL,
+  -- Wholesaler's purchase cost per crate. Used by P&L to value uncompensated losses.
+  `purchase_price` decimal(14,2) NOT NULL DEFAULT '0.00',
   `status` enum('ACTIVE','DISABLED') NOT NULL DEFAULT 'ACTIVE',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
   UNIQUE KEY `uk_box_types_wholesaler_name` (`wholesaler_id`,`name`),
+  CONSTRAINT `chk_box_types_price_nonnegative` CHECK (`purchase_price` >= 0),
   CONSTRAINT `fk_box_types_wholesaler` FOREIGN KEY (`wholesaler_id`) REFERENCES `wholesalers` (`id`)
     ON DELETE RESTRICT ON UPDATE CASCADE
 ) ENGINE=InnoDB;
@@ -618,6 +626,9 @@ CREATE TABLE `box_inventory` (
   `with_customers` int NOT NULL DEFAULT '0',
   `with_suppliers` int NOT NULL DEFAULT '0',
   `lost_damaged` int NOT NULL DEFAULT '0',
+  -- Running weighted-average cost of crates currently in stock (in_hand + with_customers + with_suppliers).
+  -- Recomputed on PURCHASE; consumed (no recompute) on SOLD/LOST/DAMAGED.
+  `weighted_avg_cost` decimal(14,2) NOT NULL DEFAULT '0.00',
   `version` bigint NOT NULL DEFAULT '0',
   `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
   PRIMARY KEY (`id`),
@@ -664,8 +675,19 @@ CREATE TABLE `box_ledger` (
   `party_account_id` bigint unsigned DEFAULT NULL,
   `movement_type` enum('PURCHASE','GIVEN_TO_CUSTOMER','RETURNED_FROM_CUSTOMER',
                        'GIVEN_TO_SUPPLIER','RETURNED_FROM_SUPPLIER',
-                       'LOST','DAMAGED','ADJUSTMENT') NOT NULL,
+                       'LOST','DAMAGED','SOLD','ADJUSTMENT') NOT NULL,
   `quantity` int NOT NULL,
+  -- Per-batch cost snapshot at the moment of recording:
+  --   PURCHASE   -> price paid for THIS batch
+  --   LOST/DAMAGED -> weighted-average cost at the moment of loss (P&L value)
+  --   SOLD       -> weighted-average cost basis for COGS calc (sale_price - this = profit)
+  -- NULL on movement types where cost isn't tracked.
+  `unit_cost_snapshot` decimal(14,2) DEFAULT NULL,
+  -- SOLD only: sale price per crate. Net profit = quantity * (unit_sale_price - unit_cost_snapshot).
+  `unit_sale_price` decimal(14,2) DEFAULT NULL,
+  -- LOST/DAMAGED only: account_ledger.id of the receivable raised when a party
+  -- was charged for the loss. NULL = wholesaler absorbed (counts as P&L expense).
+  `compensation_account_ledger_id` bigint unsigned DEFAULT NULL,
   `reference_type` enum('SALE','PAYMENT','SUPPLIER_DELIVERY','MANUAL') NOT NULL DEFAULT 'MANUAL',
   `reference_id` bigint unsigned DEFAULT NULL,
   `note` text,
@@ -675,6 +697,8 @@ CREATE TABLE `box_ledger` (
   KEY `idx_box_ledger_party` (`wholesaler_id`,`party_type`,`party_account_id`,`created_at`),
   KEY `idx_box_ledger_type_date` (`wholesaler_id`,`box_type_id`,`created_at`),
   KEY `idx_box_ledger_reference` (`reference_type`,`reference_id`),
+  -- Fast P&L lookup: uncompensated losses in a period for one wholesaler.
+  KEY `idx_box_ledger_loss_pnl` (`wholesaler_id`,`movement_type`,`compensation_account_ledger_id`,`created_at`),
   CONSTRAINT `chk_box_ledger_party` CHECK (
     (`party_type` = 'WHOLESALER' AND `party_account_id` IS NULL)
     OR
@@ -737,7 +761,8 @@ CREATE TABLE `account_ledger` (
   `party_type` enum('WHOLESALER_CUSTOMER','WHOLESALER_SUPPLIER') NOT NULL,
   `party_account_id` bigint unsigned NOT NULL,
   `reference_type` enum('SALE','PAYMENT','SUPPLIER_COMMISSION','SUPPLIER_EXPENSE',
-                        'SUPPLIER_SETTLEMENT','DUE_ADJUSTMENT','OPENING_DUE') NOT NULL,
+                        'SUPPLIER_SETTLEMENT','DUE_ADJUSTMENT','OPENING_DUE',
+                        'CRATE_LOSS_COMPENSATION','CRATE_SALE') NOT NULL,
   `reference_id` bigint unsigned DEFAULT NULL,
   `debit` decimal(14,2) NOT NULL DEFAULT '0.00',
   `credit` decimal(14,2) NOT NULL DEFAULT '0.00',

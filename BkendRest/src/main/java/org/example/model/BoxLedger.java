@@ -11,6 +11,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import org.example.model.enums.BoxLedgerPartyType;
 import org.example.model.enums.BoxMovementType;
@@ -60,6 +61,31 @@ public class BoxLedger {
 
     @Column(nullable = false)
     private Integer quantity;
+
+    /**
+     * Per-batch cost snapshot at the moment of recording.
+     *   PURCHASE     -> price paid for THIS batch
+     *   LOST/DAMAGED -> weighted-average cost at the moment of loss (P&L value)
+     *   SOLD         -> weighted-average cost basis for COGS (sale_price - this = profit)
+     * Null on movement types where cost isn't tracked.
+     */
+    @Column(name = "unit_cost_snapshot", precision = 14, scale = 2)
+    private BigDecimal unitCostSnapshot;
+
+    /**
+     * SOLD rows only: sale price per crate. Net profit on a sale =
+     * {@code quantity * (unitSalePrice - unitCostSnapshot)}.
+     */
+    @Column(name = "unit_sale_price", precision = 14, scale = 2)
+    private BigDecimal unitSalePrice;
+
+    /**
+     * For LOST / DAMAGED rows only: the {@code account_ledger.id} that posted the
+     * receivable on the compensating party. NULL = wholesaler absorbed the loss,
+     * so the row counts in P&L as an expense.
+     */
+    @Column(name = "compensation_account_ledger_id")
+    private Long compensationAccountLedgerId;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "reference_type", nullable = false)

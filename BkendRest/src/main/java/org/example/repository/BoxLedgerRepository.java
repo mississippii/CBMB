@@ -59,4 +59,55 @@ public interface BoxLedgerRepository extends JpaRepository<BoxLedger, BoxLedgerI
             org.example.model.enums.BoxReferenceType referenceType,
             Long referenceId
     );
+
+    /**
+     * Lookup a single box-ledger row by id within a wholesaler — used by the
+     * "mark loss compensated" flow. Scans all partitions (rare call path).
+     */
+    @Query("SELECT l FROM BoxLedger l WHERE l.wholesaler.id = :wholesalerId AND l.id = :id")
+    java.util.Optional<BoxLedger> findOneByWholesalerAndId(
+            @Param("wholesalerId") Long wholesalerId,
+            @Param("id") Long id
+    );
+
+    /**
+     * Sum of uncompensated loss value (quantity × unit_cost_snapshot) in a period.
+     * Returns null if no rows match. Used by the P&L report.
+     */
+    @Query("""
+        SELECT COALESCE(SUM(l.quantity * l.unitCostSnapshot), 0)
+        FROM BoxLedger l
+        WHERE l.wholesaler.id = :wholesalerId
+          AND l.movementType IN (org.example.model.enums.BoxMovementType.LOST,
+                                 org.example.model.enums.BoxMovementType.DAMAGED)
+          AND l.compensationAccountLedgerId IS NULL
+          AND l.unitCostSnapshot IS NOT NULL
+          AND (:from IS NULL OR l.createdAt >= :from)
+          AND (:to   IS NULL OR l.createdAt <  :to)
+        """)
+    java.math.BigDecimal sumUncompensatedLossValue(
+            @Param("wholesalerId") Long wholesalerId,
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to
+    );
+
+    /**
+     * Net profit from crate sales in a period: sum(qty × (unitSalePrice − unitCostSnapshot)).
+     * Crates are a capital asset so only the gain/loss flows to P&L, never the gross sale.
+     */
+    @Query("""
+        SELECT COALESCE(SUM(l.quantity * (l.unitSalePrice - l.unitCostSnapshot)), 0)
+        FROM BoxLedger l
+        WHERE l.wholesaler.id = :wholesalerId
+          AND l.movementType = org.example.model.enums.BoxMovementType.SOLD
+          AND l.unitSalePrice IS NOT NULL
+          AND l.unitCostSnapshot IS NOT NULL
+          AND (:from IS NULL OR l.createdAt >= :from)
+          AND (:to   IS NULL OR l.createdAt <  :to)
+        """)
+    java.math.BigDecimal sumCrateSalesNetProfit(
+            @Param("wholesalerId") Long wholesalerId,
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to
+    );
 }

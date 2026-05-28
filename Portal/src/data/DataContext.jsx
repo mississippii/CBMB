@@ -41,6 +41,7 @@ const EMPTY_CRATE_INVENTORY = {
     withSuppliers: 0,
     withCustomers: 0,
     lost: 0,
+    purchasePrice: 0,
   },
   china: {
     total: 0,
@@ -48,6 +49,7 @@ const EMPTY_CRATE_INVENTORY = {
     withSuppliers: 0,
     withCustomers: 0,
     lost: 0,
+    purchasePrice: 0,
   },
 };
 
@@ -71,6 +73,7 @@ const createCrateTypeState = () => ({
   withSuppliers: 0,
   withCustomers: 0,
   lost: 0,
+  purchasePrice: 0,
 });
 
 const mapCrateDashboard = (dashboard) => {
@@ -92,6 +95,7 @@ const mapCrateDashboard = (dashboard) => {
       withSuppliers: Number(item.withSuppliers) || 0,
       withCustomers: Number(item.withCustomers) || 0,
       lost: Number(item.lostDamaged) || 0,
+      purchasePrice: Number(item.purchasePrice) || 0,
     };
   });
 
@@ -627,12 +631,18 @@ export const DataProvider = ({ children }) => {
       throw new Error('Insufficient stock for ' + selectedInventory.productName + '. Available: ' + selectedInventory.quantity + ', required: ' + quantity + '.');
     }
 
+    const weightRaw = saleData.saleWeightKg;
+    const saleWeightKg = weightRaw === '' || weightRaw == null
+      ? null
+      : Number(weightRaw) > 0 ? Number(weightRaw) : null;
+
     const response = await postJson(apiPaths.salesCreate(admin.wholesalerId), {
       wholesalerCustomerId: Number(saleData.customerId) || null,
       customerName: saleData.customerName,
       customerPhone: saleData.customerPhone,
       inventoryId,
       quantity,
+      saleWeightKg,
       unitPrice,
       discountAmount,
       paymentAmount,
@@ -1185,16 +1195,36 @@ export const DataProvider = ({ children }) => {
     return response;
   };
 
-  const addCrates = async (crateType, quantityInput) => {
+  // Read-side fetchers exposed so callers can wrap them in useQuery while still
+  // using the same response mapping the eager DataContext fetch uses.
+  const fetchShipments = async () => {
+    if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
+    const data = await postJson(apiPaths.supplierDeliveriesList(admin.wholesalerId));
+    return asArray(data).map(mapShipment);
+  };
+
+  const fetchInventoryList = async () => {
+    if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
+    const data = await postJson(apiPaths.inventoryList(admin.wholesalerId));
+    return asArray(data).map(mapInventoryItem);
+  };
+
+  const addCrates = async (crateType, quantityInput, unitPriceInput) => {
     if (!admin?.wholesalerId) {
       throw new Error('Wholesaler profile not found for this user.');
     }
     const quantity = Math.max(0, Math.floor(Number(quantityInput) || 0));
     if (!quantity) return mapCrateDashboard(null);
 
+    const unitPrice = Number(unitPriceInput);
+    if (unitPriceInput === '' || unitPriceInput == null || !Number.isFinite(unitPrice) || unitPrice <= 0) {
+      throw new Error('Cost per crate is required.');
+    }
+
     const dashboard = await postJson(apiPaths.cratesPurchaseCreate(admin.wholesalerId), {
       crateType: String(crateType || '').toUpperCase(),
       quantity,
+      unitPrice,
       note: 'Manual crate purchase',
     });
     const mapped = mapCrateDashboard(dashboard);
@@ -1205,24 +1235,92 @@ export const DataProvider = ({ children }) => {
     return mapped;
   };
 
-  const markCratesLost = async (crateType, quantityInput, reason = 'lost') => {
+  /**
+   * Sell crates (capital-asset disposal). If `customerAccountId` is provided, the customer's
+   * account is debited (receivable). If null/empty, treated as a walk-in cash sale — no
+   * account ledger entry, but the SOLD movement still posts and P&L picks up the profit.
+   */
+  const sellCrates = async ({ crateType, quantity, unitSalePrice, customerAccountId, note }) => {
+    if (!admin?.wholesalerId) {
+      throw new Error('Wholesaler profile not found for this user.');
+    }
+    const qty = Math.max(0, Math.floor(Number(quantity) || 0));
+    if (!qty) throw new Error('Quantity must be greater than zero.');
+    const price = Number(unitSalePrice);
+    if (!Number.isFinite(price) || price <= 0) throw new Error('Sale price per crate is required.');
+
+    const payload = {
+      crateType: String(crateType || '').toUpperCase(),
+      quantity: qty,
+      unitSalePrice: price,
+      note: note || null,
+    };
+    if (customerAccountId) {
+      payload.customerAccountId = Number(customerAccountId);
+    }
+
+    const dashboard = await postJson(apiPaths.cratesSell(admin.wholesalerId), payload);
+    const mapped = mapCrateDashboard(dashboard);
+    setCrateInventory(mapped);
+    refreshTransactions();
+    invalidate.crates();
+    invalidate.transactions();
+    if (customerAccountId) invalidate.moneyEvent();
+    return mapped;
+  };
+
+  /**
+   * Mark crates lost/damaged. Pass `compensation` to charge a party for the loss instead
+   * of absorbing it as a wholesaler expense:
+   *   compensation: {
+   *     partyType: 'WHOLESALER_CUSTOMER' | 'WHOLESALER_SUPPLIER',
+   *     partyAccountId: number,
+   *     amount?: number,          // defaults to quantity × unit_cost on the backend
+   *   }
+   */
+  const markCratesLost = async (crateType, quantityInput, reason = 'lost', compensation = null) => {
     if (!admin?.wholesalerId) {
       throw new Error('Wholesaler profile not found for this user.');
     }
     const quantity = Math.max(0, Math.floor(Number(quantityInput) || 0));
     if (!quantity) return mapCrateDashboard(null);
 
-    const dashboard = await postJson(apiPaths.cratesLostDamagedCreate(admin.wholesalerId), {
+    const payload = {
       crateType: String(crateType || '').toUpperCase(),
       quantity,
       reason,
       note: 'Manual crate loss/damage update',
-    });
+    };
+    if (compensation?.partyType && compensation?.partyAccountId) {
+      payload.compensationPartyType = compensation.partyType;
+      payload.compensationPartyAccountId = compensation.partyAccountId;
+      if (compensation.amount != null && compensation.amount !== '') {
+        payload.compensationAmount = Number(compensation.amount);
+      }
+    }
+
+    const dashboard = await postJson(apiPaths.cratesLostDamagedCreate(admin.wholesalerId), payload);
     const mapped = mapCrateDashboard(dashboard);
     setCrateInventory(mapped);
     refreshTransactions();
     invalidate.crates();
     invalidate.transactions();
+    if (compensation?.partyAccountId) invalidate.moneyEvent();
+    return mapped;
+  };
+
+  /** Set the per-crate purchase cost. Used to value lost/damaged crates in P&L. */
+  const setCratePrice = async (crateType, purchasePrice) => {
+    if (!admin?.wholesalerId) {
+      throw new Error('Wholesaler profile not found for this user.');
+    }
+    const dashboard = await postJson(apiPaths.cratesTypeSetPrice(admin.wholesalerId), {
+      crateType: String(crateType || '').toUpperCase(),
+      purchasePrice: Number(purchasePrice),
+    });
+    const mapped = mapCrateDashboard(dashboard);
+    setCrateInventory(mapped);
+    invalidate.crates();
     return mapped;
   };
 
@@ -1262,6 +1360,8 @@ export const DataProvider = ({ children }) => {
         updateBoxInventory,
         addCrates,
         markCratesLost,
+        setCratePrice,
+        sellCrates,
         getCustomerProfile,
         getSupplierProfile,
         fetchDashboardSummary,
@@ -1274,6 +1374,8 @@ export const DataProvider = ({ children }) => {
         fetchShopExpenses,
         createShopExpense,
         cancelShopExpense,
+        fetchShipments,
+        fetchInventoryList,
       }}
     >
       {children}

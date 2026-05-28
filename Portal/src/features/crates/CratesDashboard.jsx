@@ -1,15 +1,59 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   Boxes, Plus, AlertTriangle, ArrowRightLeft, Store, Users, UserCheck, Package,
   TrendingDown, Hash, ArrowUpRight, ArrowDownLeft, FileText, Wallet, BarChart3, Zap,
+  ShoppingCart,
 } from 'lucide-react';
 import { useData } from '../../data/DataContext';
 import { useToast } from '../../shared/components/Toast';
 import { postJson, apiPaths } from '../../services/apiClient';
 import { useAuth } from '../auth/AuthContext';
+import { queryKeys } from '../../services/queryKeys';
 
-const EMPTY_PURCHASE = { crateType: 'BANGLA', quantity: '' };
-const EMPTY_LOSS = { crateType: 'BANGLA', quantity: '', reason: 'lost' };
+// Same shape as DataContext.mapCrateDashboard — kept local so the dashboard query
+// produces an identical object regardless of which place loaded it.
+const EMPTY_TYPE = { total: 0, inShop: 0, withSuppliers: 0, withCustomers: 0, lost: 0, purchasePrice: 0 };
+const EMPTY_INV = {
+  totalCratesOwned: 0, cratesInShop: 0, cratesWithSuppliers: 0,
+  cratesWithCustomers: 0, cratesLostDamaged: 0,
+  bangla: { ...EMPTY_TYPE }, china: { ...EMPTY_TYPE },
+};
+const mapDashboard = (d) => {
+  if (!d) return EMPTY_INV;
+  const out = {
+    totalCratesOwned: Number(d.totalCratesOwned) || 0,
+    cratesInShop: Number(d.cratesInShop) || 0,
+    cratesWithSuppliers: Number(d.cratesWithSuppliers) || 0,
+    cratesWithCustomers: Number(d.cratesWithCustomers) || 0,
+    cratesLostDamaged: Number(d.cratesLostDamaged) || 0,
+    bangla: { ...EMPTY_TYPE }, china: { ...EMPTY_TYPE },
+  };
+  (d.crateTypes || []).forEach((t) => {
+    const key = String(t.crateType || '').trim().toUpperCase() === 'CHINA' ? 'china' : 'bangla';
+    out[key] = {
+      total: Number(t.total) || 0,
+      inShop: Number(t.inHand) || 0,
+      withSuppliers: Number(t.withSuppliers) || 0,
+      withCustomers: Number(t.withCustomers) || 0,
+      lost: Number(t.lostDamaged) || 0,
+      purchasePrice: Number(t.purchasePrice) || 0,
+    };
+  });
+  return out;
+};
+
+const EMPTY_PURCHASE = { crateType: 'BANGLA', quantity: '', unitPrice: '' };
+const EMPTY_SELL = { crateType: 'BANGLA', quantity: '', unitSalePrice: '', buyerKind: 'customer', customerId: '', note: '' };
+const EMPTY_LOSS = {
+  crateType: 'BANGLA',
+  quantity: '',
+  reason: 'lost',
+  compensationKind: 'absorbed', // 'absorbed' | 'customer' | 'supplier'
+  compensationPartyId: '',
+  compensationAmount: '',       // optional override
+};
+const EMPTY_PRICE = { crateType: 'BANGLA', purchasePrice: '' };
 const EMPTY_SUPPLIER = { supplierId: '', direction: 'give', banglaCrates: '', chinaCrates: '', note: '' };
 const EMPTY_CUSTOMER = { customerId: '', direction: 'borrow', banglaCrates: '', chinaCrates: '', jamanotAmount: '', note: '' };
 
@@ -29,30 +73,47 @@ const KPI = ({ icon: Icon, label, value, tone = 'default' }) => (
 );
 
 const BoxDashboard = () => {
-  const { crateInventory, suppliers, customers, addCrates, markCratesLost, recordAccountTransaction, refreshTransactions } = useData();
+  const { suppliers, customers, addCrates, markCratesLost, setCratePrice, sellCrates, refreshTransactions } = useData();
   const { admin } = useAuth();
   const showToast = useToast();
+
+  // Live dashboard data — always fresh (refetches on tab focus + after writes via invalidation).
+  const { data: dashboardRaw } = useQuery({
+    queryKey: queryKeys.crates.dashboard(admin?.wholesalerId),
+    queryFn: () => postJson(apiPaths.cratesDashboard(admin.wholesalerId)),
+    enabled: Boolean(admin?.wholesalerId),
+  });
+  const crateInventory = mapDashboard(dashboardRaw);
 
   // Modals
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
   const [showLossModal, setShowLossModal] = useState(false);
   const [showSupplierModal, setShowSupplierModal] = useState(false);
   const [showCustomerModal, setShowCustomerModal] = useState(false);
+  const [showPriceModal, setShowPriceModal] = useState(false);
+  const [showSellModal, setShowSellModal] = useState(false);
+
+  const [priceForm, setPriceForm] = useState(EMPTY_PRICE);
+  const [priceError, setPriceError] = useState('');
+  const [isSavingPrice, setIsSavingPrice] = useState(false);
 
   const [purchaseForm, setPurchaseForm] = useState(EMPTY_PURCHASE);
   const [lossForm, setLossForm] = useState(EMPTY_LOSS);
   const [supplierForm, setSupplierForm] = useState(EMPTY_SUPPLIER);
   const [customerForm, setCustomerForm] = useState(EMPTY_CUSTOMER);
+  const [sellForm, setSellForm] = useState(EMPTY_SELL);
 
   const [purchaseError, setPurchaseError] = useState('');
   const [lossError, setLossError] = useState('');
   const [supplierError, setSupplierError] = useState('');
   const [customerError, setCustomerError] = useState('');
+  const [sellError, setSellError] = useState('');
 
   const [isSavingPurchase, setIsSavingPurchase] = useState(false);
   const [isSavingLoss, setIsSavingLoss] = useState(false);
   const [isSavingSupplier, setIsSavingSupplier] = useState(false);
   const [isSavingCustomer, setIsSavingCustomer] = useState(false);
+  const [isSavingSell, setIsSavingSell] = useState(false);
 
   // Stats — "Active" excludes lost since lost is permanent loss
   const totalOwned = Number(crateInventory.totalCratesOwned) || 0;
@@ -70,23 +131,11 @@ const BoxDashboard = () => {
 
   // Loss stats
   const [lossRange, setLossRange] = useState(3);
-  const [lossStats, setLossStats] = useState(null);
-  const [lossLoading, setLossLoading] = useState(false);
-
-  const loadLossStats = useCallback(async (months) => {
-    if (!admin?.wholesalerId) return;
-    setLossLoading(true);
-    try {
-      const data = await postJson(apiPaths.cratesLossStats(admin.wholesalerId), { months });
-      setLossStats(data);
-    } catch {
-      setLossStats(null);
-    } finally {
-      setLossLoading(false);
-    }
-  }, [admin?.wholesalerId]);
-
-  useEffect(() => { loadLossStats(lossRange); }, [lossRange, loadLossStats]);
+  const { data: lossStats, isLoading: lossLoading } = useQuery({
+    queryKey: queryKeys.crates.lossStats(admin?.wholesalerId, lossRange),
+    queryFn: () => postJson(apiPaths.cratesLossStats(admin.wholesalerId), { months: lossRange }),
+    enabled: Boolean(admin?.wholesalerId),
+  });
 
   const crateTypes = [
     { key: 'bangla', label: 'Bangla', data: crateInventory.bangla || {} },
@@ -97,10 +146,16 @@ const BoxDashboard = () => {
   const handlePurchase = async () => {
     const qty = Number(purchaseForm.quantity) || 0;
     if (qty <= 0) { setPurchaseError('Enter a quantity greater than 0.'); return; }
+    const priceRaw = purchaseForm.unitPrice;
+    const price = Number(priceRaw);
+    if (priceRaw === '' || !Number.isFinite(price) || price <= 0) {
+      setPurchaseError('Cost per crate is required.');
+      return;
+    }
     setIsSavingPurchase(true); setPurchaseError('');
     try {
-      await addCrates(purchaseForm.crateType, qty);
-      showToast(`Added ${qty} ${purchaseForm.crateType} crates`, 'success');
+      await addCrates(purchaseForm.crateType, qty, price);
+      showToast(`Added ${qty} ${purchaseForm.crateType} crates @ ৳${price.toLocaleString()}`, 'success');
       setPurchaseForm(EMPTY_PURCHASE);
       setShowPurchaseModal(false);
     } catch (err) {
@@ -110,13 +165,100 @@ const BoxDashboard = () => {
     }
   };
 
+  const openPurchaseModal = () => {
+    const key = (purchaseForm.crateType || 'BANGLA').toLowerCase();
+    const currentPrice = crateInventory[key]?.purchasePrice || 0;
+    setPurchaseForm({
+      crateType: purchaseForm.crateType || 'BANGLA',
+      quantity: '',
+      unitPrice: currentPrice ? String(currentPrice) : '',
+    });
+    setPurchaseError('');
+    setShowPurchaseModal(true);
+  };
+
+  const handlePurchaseTypeChange = (newType) => {
+    const key = newType.toLowerCase();
+    const typePrice = crateInventory[key]?.purchasePrice || 0;
+    setPurchaseForm((p) => ({
+      ...p,
+      crateType: newType,
+      // Refresh price default when the user switches type — unless they've already typed one.
+      unitPrice: p.unitPrice === '' ? (typePrice ? String(typePrice) : '') : p.unitPrice,
+    }));
+  };
+
+  const openSellModal = () => {
+    setSellForm({ ...EMPTY_SELL, crateType: 'BANGLA' });
+    setSellError('');
+    setShowSellModal(true);
+  };
+
+  const handleSell = async () => {
+    const qty = Number(sellForm.quantity) || 0;
+    const priceRaw = sellForm.unitSalePrice;
+    const price = Number(priceRaw);
+    if (qty <= 0) { setSellError('Enter a quantity greater than 0.'); return; }
+    if (priceRaw === '' || !Number.isFinite(price) || price <= 0) {
+      setSellError('Sale price per crate is required.');
+      return;
+    }
+    if (sellForm.buyerKind === 'customer' && !sellForm.customerId) {
+      setSellError('Pick the customer who is buying the crates.');
+      return;
+    }
+
+    const key = (sellForm.crateType || 'BANGLA').toLowerCase();
+    const inShopAvail = Number(crateInventory[key]?.inShop) || 0;
+    if (qty > inShopAvail) {
+      setSellError(`Only ${inShopAvail} ${sellForm.crateType} crates in shop.`);
+      return;
+    }
+
+    setIsSavingSell(true); setSellError('');
+    try {
+      await sellCrates({
+        crateType: sellForm.crateType,
+        quantity: qty,
+        unitSalePrice: price,
+        customerAccountId: sellForm.buyerKind === 'customer' ? Number(sellForm.customerId) : null,
+        note: sellForm.note,
+      });
+      const buyerLabel = sellForm.buyerKind === 'customer' ? 'on account' : 'cash';
+      showToast(`Sold ${qty} ${sellForm.crateType} crates @ ৳${price.toLocaleString()} (${buyerLabel})`, 'success');
+      setSellForm(EMPTY_SELL);
+      setShowSellModal(false);
+    } catch (err) {
+      setSellError(err.message || 'Failed to record sale.');
+    } finally {
+      setIsSavingSell(false);
+    }
+  };
+
   const handleLoss = async () => {
     const qty = Number(lossForm.quantity) || 0;
     if (qty <= 0) { setLossError('Enter a quantity greater than 0.'); return; }
+
+    let compensation = null;
+    if (lossForm.compensationKind !== 'absorbed') {
+      if (!lossForm.compensationPartyId) {
+        setLossError('Select the party who is paying for the loss.');
+        return;
+      }
+      compensation = {
+        partyType: lossForm.compensationKind === 'customer' ? 'WHOLESALER_CUSTOMER' : 'WHOLESALER_SUPPLIER',
+        partyAccountId: Number(lossForm.compensationPartyId),
+        amount: lossForm.compensationAmount || null,
+      };
+    }
+
     setIsSavingLoss(true); setLossError('');
     try {
-      await markCratesLost(lossForm.crateType, qty, lossForm.reason);
-      showToast(`Marked ${qty} ${lossForm.crateType} crates as ${lossForm.reason}`, 'warning');
+      await markCratesLost(lossForm.crateType, qty, lossForm.reason, compensation);
+      const suffix = compensation
+        ? ` (charged to ${lossForm.compensationKind})`
+        : ' (absorbed by shop)';
+      showToast(`Marked ${qty} ${lossForm.crateType} crates as ${lossForm.reason}${suffix}`, 'warning');
       setLossForm(EMPTY_LOSS);
       setShowLossModal(false);
     } catch (err) {
@@ -124,6 +266,31 @@ const BoxDashboard = () => {
     } finally {
       setIsSavingLoss(false);
     }
+  };
+
+  const handlePriceSave = async () => {
+    const price = Number(priceForm.purchasePrice);
+    if (!Number.isFinite(price) || price < 0) {
+      setPriceError('Enter a valid price (0 or greater).');
+      return;
+    }
+    setIsSavingPrice(true); setPriceError('');
+    try {
+      await setCratePrice(priceForm.crateType, price);
+      showToast(`${priceForm.crateType} crate price set to ৳ ${price}`, 'success');
+      setShowPriceModal(false);
+    } catch (err) {
+      setPriceError(err.message || 'Failed to set price.');
+    } finally {
+      setIsSavingPrice(false);
+    }
+  };
+
+  const openPriceModal = (crateType) => {
+    const existing = crateInventory[crateType.toLowerCase()] || {};
+    setPriceForm({ crateType, purchasePrice: existing.purchasePrice || '' });
+    setPriceError('');
+    setShowPriceModal(true);
   };
 
   const handleCustomerCrate = async () => {
@@ -264,6 +431,15 @@ const BoxDashboard = () => {
                   <div><span>Suppliers</span><strong>{(type.data.withSuppliers || 0).toLocaleString()}</strong></div>
                   <div><span>Lost</span><strong className="text-rose-600">{(type.data.lost || 0).toLocaleString()}</strong></div>
                 </div>
+                <button
+                  type="button"
+                  onClick={() => openPriceModal(type.label.toUpperCase())}
+                  className="mt-2 w-full text-xs font-semibold text-slate-600 hover:text-blue-700 hover:bg-blue-50 rounded px-2 py-1 flex items-center justify-between gap-2 border border-slate-200"
+                  title="Used to value lost/damaged crates in P&L"
+                >
+                  <span>Cost per crate</span>
+                  <span className="font-bold">৳ {(type.data.purchasePrice || 0).toLocaleString()} <span className="text-slate-400 font-normal">edit</span></span>
+                </button>
               </div>
             ))}
           </div>
@@ -294,7 +470,12 @@ const BoxDashboard = () => {
               <span className="quick-action-label">Mark Lost / Damaged</span>
               <ArrowUpRight size={13} className="quick-action-arrow" />
             </button>
-            <button onClick={() => setShowPurchaseModal(true)} className="quick-action-row quick-action-row-primary">
+            <button onClick={openSellModal} className="quick-action-row">
+              <span className="quick-action-icon" style={{ background: '#ecfdf5', color: '#047857' }}><ShoppingCart size={14} /></span>
+              <span className="quick-action-label">Sell Crates</span>
+              <ArrowUpRight size={13} className="quick-action-arrow" />
+            </button>
+            <button onClick={openPurchaseModal} className="quick-action-row quick-action-row-primary">
               <span className="quick-action-icon" style={{ background: 'rgba(255,255,255,0.2)', color: '#fff' }}><Plus size={14} /></span>
               <span className="quick-action-label">Add New Crates</span>
               <ArrowUpRight size={13} className="quick-action-arrow" />
@@ -484,7 +665,7 @@ const BoxDashboard = () => {
                       <button
                         type="button"
                         key={t.value}
-                        onClick={() => setPurchaseForm((p) => ({ ...p, crateType: t.value }))}
+                        onClick={() => handlePurchaseTypeChange(t.value)}
                         className={`unit-type-btn ${purchaseForm.crateType === t.value ? 'active' : ''}`}
                       >
                         <span className="unit-type-icon">{t.value === 'BANGLA' ? 'BA' : 'CH'}</span>
@@ -502,6 +683,20 @@ const BoxDashboard = () => {
                     onChange={(e) => setPurchaseForm((p) => ({ ...p, quantity: e.target.value }))}
                     className="input-field" placeholder="e.g. 50" autoFocus
                   />
+                </div>
+                <div className="form-field">
+                  <label className="form-label">
+                    <Wallet size={13} /> Cost per crate (৳) <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="number" min="0.01" step="0.01" value={purchaseForm.unitPrice}
+                    onChange={(e) => setPurchaseForm((p) => ({ ...p, unitPrice: e.target.value }))}
+                    className="input-field"
+                    placeholder={`Current ৳ ${(crateInventory[purchaseForm.crateType.toLowerCase()]?.purchasePrice || 0)}`}
+                  />
+                  <p className="text-xs text-slate-500 mt-1">
+                    Crates are a capital investment — this price doesn&apos;t hit P&amp;L, it sets the cost basis for resale &amp; loss accounting.
+                  </p>
                 </div>
                 {purchaseError && (
                   <div className="status-error"><span>!</span><span>{purchaseError}</span></div>
@@ -570,6 +765,67 @@ const BoxDashboard = () => {
                     ))}
                   </div>
                 </div>
+
+                <div className="form-field">
+                  <label className="form-label"><Wallet size={13} /> Who pays for it?</label>
+                  <div className="unit-pills">
+                    {[
+                      { value: 'absorbed', label: 'Shop absorbs' },
+                      { value: 'customer', label: 'Customer' },
+                      { value: 'supplier', label: 'Supplier' },
+                    ].map((c) => (
+                      <button
+                        type="button"
+                        key={c.value}
+                        onClick={() => setLossForm((p) => ({
+                          ...p,
+                          compensationKind: c.value,
+                          compensationPartyId: '',
+                          compensationAmount: '',
+                        }))}
+                        className={`unit-pill ${lossForm.compensationKind === c.value ? 'active' : ''}`}
+                      >
+                        {c.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    "Shop absorbs" counts as a loss in P&amp;L. Otherwise the party is charged at cost per crate.
+                  </p>
+                </div>
+
+                {lossForm.compensationKind !== 'absorbed' && (
+                  <>
+                    <div className="form-field">
+                      <label className="form-label">
+                        <Users size={13} /> {lossForm.compensationKind === 'customer' ? 'Customer' : 'Supplier'}
+                      </label>
+                      <select
+                        className="input-field"
+                        value={lossForm.compensationPartyId}
+                        onChange={(e) => setLossForm((p) => ({ ...p, compensationPartyId: e.target.value }))}
+                      >
+                        <option value="">— Select —</option>
+                        {(lossForm.compensationKind === 'customer' ? customers : suppliers).map((p) => (
+                          <option key={p.id} value={p.id}>{p.name}</option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="form-field">
+                      <label className="form-label"><Hash size={13} /> Amount to charge (optional)</label>
+                      <input
+                        type="number"
+                        min="0"
+                        step="0.01"
+                        value={lossForm.compensationAmount}
+                        onChange={(e) => setLossForm((p) => ({ ...p, compensationAmount: e.target.value }))}
+                        className="input-field"
+                        placeholder={`Defaults to qty × ৳ ${(crateInventory[lossForm.crateType.toLowerCase()]?.purchasePrice || 0)}`}
+                      />
+                    </div>
+                  </>
+                )}
+
                 {lossError && (
                   <div className="status-error"><span>!</span><span>{lossError}</span></div>
                 )}
@@ -801,6 +1057,193 @@ const BoxDashboard = () => {
               <button onClick={() => setShowSupplierModal(false)} className="btn-secondary" disabled={isSavingSupplier}>Cancel</button>
               <button onClick={handleSupplierCrate} className="btn-primary flex items-center gap-2" disabled={isSavingSupplier}>
                 {isSavingSupplier ? 'Saving…' : (<><ArrowRightLeft size={14} /> Record</>)}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SELL CRATES MODAL */}
+      {showSellModal && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: '28rem' }}>
+            <div className="modal-header">
+              <div className="flex items-center gap-2.5">
+                <div className="modal-icon-circle bg-emerald-100 text-emerald-700"><ShoppingCart size={18} /></div>
+                <div>
+                  <h2>Sell Crates</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">Customer is charged · only profit hits P&amp;L</p>
+                </div>
+              </div>
+              <button onClick={() => setShowSellModal(false)} className="modal-close-btn">✕</button>
+            </div>
+            <div className="modal-body">
+              <div className="space-y-4">
+                <div className="form-field">
+                  <label className="form-label"><Boxes size={13} /> Crate Type</label>
+                  <div className="unit-type-grid">
+                    {BOX_TYPES.map((t) => (
+                      <button
+                        type="button"
+                        key={t.value}
+                        onClick={() => setSellForm((p) => ({ ...p, crateType: t.value }))}
+                        className={`unit-type-btn ${sellForm.crateType === t.value ? 'active' : ''}`}
+                      >
+                        <span className="unit-type-icon">{t.value === 'BANGLA' ? 'BA' : 'CH'}</span>
+                        <div className="text-left">
+                          <p className="font-bold">{t.label}</p>
+                          <p className="text-xs opacity-75">
+                            {(crateInventory[t.value.toLowerCase()]?.inShop || 0).toLocaleString()} in shop
+                          </p>
+                        </div>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="form-field">
+                  <label className="form-label"><Users size={13} /> Buyer</label>
+                  <div className="unit-pills">
+                    {[
+                      { value: 'customer', label: 'Permanent customer' },
+                      { value: 'walkin', label: 'Walk-in (cash)' },
+                    ].map((b) => (
+                      <button
+                        type="button"
+                        key={b.value}
+                        onClick={() => setSellForm((p) => ({ ...p, buyerKind: b.value, customerId: '' }))}
+                        className={`unit-pill ${sellForm.buyerKind === b.value ? 'active' : ''}`}
+                      >
+                        {b.label}
+                      </button>
+                    ))}
+                  </div>
+                  <p className="text-xs text-slate-500 mt-1">
+                    {sellForm.buyerKind === 'customer'
+                      ? 'Sale amount goes on the customer’s ledger as a receivable.'
+                      : 'Cash sale — no account entry, just the inventory movement and P&L profit.'}
+                  </p>
+                </div>
+
+                {sellForm.buyerKind === 'customer' && (
+                  <div className="form-field">
+                    <label className="form-label"><Users size={13} /> Customer <span className="text-red-500">*</span></label>
+                    <select
+                      value={sellForm.customerId}
+                      onChange={(e) => setSellForm((p) => ({ ...p, customerId: e.target.value }))}
+                      className="input-field"
+                    >
+                      <option value="">Choose customer…</option>
+                      {customers.map((c) => (
+                        <option key={c.id} value={c.id}>{c.name}</option>
+                      ))}
+                    </select>
+                  </div>
+                )}
+
+                <div className="form-grid">
+                  <div className="form-field">
+                    <label className="form-label"><Hash size={13} /> Quantity</label>
+                    <input
+                      type="number" min="1" value={sellForm.quantity}
+                      onChange={(e) => setSellForm((p) => ({ ...p, quantity: e.target.value }))}
+                      className="input-field" placeholder="e.g. 20"
+                    />
+                  </div>
+                  <div className="form-field">
+                    <label className="form-label">
+                      <Wallet size={13} /> Sale price each (৳) <span className="text-red-500">*</span>
+                    </label>
+                    <input
+                      type="number" min="0.01" step="0.01" value={sellForm.unitSalePrice}
+                      onChange={(e) => setSellForm((p) => ({ ...p, unitSalePrice: e.target.value }))}
+                      className="input-field" placeholder="e.g. 300"
+                    />
+                  </div>
+                </div>
+
+                {/* Preview: total + cost basis + profit */}
+                {Number(sellForm.quantity) > 0 && Number(sellForm.unitSalePrice) >= 0 && (() => {
+                  const qty = Number(sellForm.quantity) || 0;
+                  const unit = Number(sellForm.unitSalePrice) || 0;
+                  const key = (sellForm.crateType || 'BANGLA').toLowerCase();
+                  const costBasis = Number(crateInventory[key]?.purchasePrice) || 0;
+                  const gross = qty * unit;
+                  const cost = qty * costBasis;
+                  const profit = gross - cost;
+                  return (
+                    <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs space-y-1">
+                      <div className="flex justify-between"><span className="text-slate-500">Sale total (customer owes)</span><strong>৳ {gross.toLocaleString()}</strong></div>
+                      <div className="flex justify-between"><span className="text-slate-500">Cost basis (avg)</span><span>৳ {cost.toLocaleString()}</span></div>
+                      <div className="flex justify-between border-t border-slate-200 pt-1">
+                        <span className="text-slate-700 font-semibold">P&amp;L impact</span>
+                        <strong className={profit >= 0 ? 'text-emerald-700' : 'text-rose-700'}>
+                          {profit >= 0 ? '+' : ''}৳ {profit.toLocaleString()}
+                        </strong>
+                      </div>
+                    </div>
+                  );
+                })()}
+
+                <div className="form-field">
+                  <label className="form-label"><FileText size={13} /> Note <span className="form-label-hint">optional</span></label>
+                  <input
+                    type="text" value={sellForm.note}
+                    onChange={(e) => setSellForm((p) => ({ ...p, note: e.target.value }))}
+                    className="input-field" placeholder="e.g. Sold from extra stock"
+                  />
+                </div>
+
+                {sellError && <div className="status-error"><span>!</span><span>{sellError}</span></div>}
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button onClick={() => setShowSellModal(false)} className="btn-secondary" disabled={isSavingSell}>Cancel</button>
+              <button onClick={handleSell} className="btn-primary flex items-center gap-2" disabled={isSavingSell}>
+                {isSavingSell ? 'Saving…' : (<><ShoppingCart size={14} /> Confirm Sale</>)}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* SET CRATE PRICE MODAL */}
+      {showPriceModal && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: '24rem' }}>
+            <div className="modal-header">
+              <div className="flex items-center gap-2.5">
+                <div className="modal-icon-circle bg-blue-100 text-blue-700"><Wallet size={18} /></div>
+                <div>
+                  <h2>Crate Cost</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">{priceForm.crateType} — used to value losses in P&amp;L</p>
+                </div>
+              </div>
+              <button onClick={() => setShowPriceModal(false)} className="modal-close-btn">✕</button>
+            </div>
+            <div className="modal-body">
+              <div className="form-field">
+                <label className="form-label"><Hash size={13} /> Purchase price per crate (৳)</label>
+                <input
+                  type="number"
+                  min="0"
+                  step="0.01"
+                  value={priceForm.purchasePrice}
+                  onChange={(e) => setPriceForm((p) => ({ ...p, purchasePrice: e.target.value }))}
+                  className="input-field"
+                  placeholder="e.g. 250"
+                  autoFocus
+                />
+                <p className="text-xs text-slate-500 mt-1">
+                  Already-recorded losses keep their original cost snapshot; only new losses use this price.
+                </p>
+              </div>
+              {priceError && <div className="status-error"><span>!</span><span>{priceError}</span></div>}
+            </div>
+            <div className="modal-footer">
+              <button onClick={() => setShowPriceModal(false)} className="btn-secondary" disabled={isSavingPrice}>Cancel</button>
+              <button onClick={handlePriceSave} className="btn-primary flex items-center gap-2" disabled={isSavingPrice}>
+                {isSavingPrice ? 'Saving…' : 'Save price'}
               </button>
             </div>
           </div>

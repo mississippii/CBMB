@@ -15,7 +15,7 @@ const EMPTY_FORM = {
   openingDue: '',
 };
 
-const SuppliersList = () => {
+const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
   const { suppliers, supplierProducts, addSupplier, reloadSuppliers } = useData();
   const showToast = useToast();
   const [showForm, setShowForm] = useState(false);
@@ -29,6 +29,16 @@ const SuppliersList = () => {
     reloadSuppliers(showDisabled);
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [showDisabled]);
+
+  // Auto-open profile when arriving from the Overview money strip.
+  useEffect(() => {
+    if (autoOpenId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedSupplierId(autoOpenId);
+      onProfileOpened?.();
+    }
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [autoOpenId]);
   const [isSaving, setIsSaving] = useState(false);
   const [formError, setFormError] = useState('');
   const [formData, setFormData] = useState(EMPTY_FORM);

@@ -20,6 +20,7 @@ public record SaleResponse(
         Long wholesalerSupplierId,
         String supplierName,
         BigDecimal quantity,
+        BigDecimal saleWeightKg,
         String unit,
         BigDecimal unitPrice,
         BigDecimal grossAmount,

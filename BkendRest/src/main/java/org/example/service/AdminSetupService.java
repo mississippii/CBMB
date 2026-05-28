@@ -41,6 +41,7 @@ public class AdminSetupService {
             throw new BadRequestException("A user with this email already exists.");
         }
 
+
         User admin = new User();
         admin.setName(name);
         admin.setEmail(email);

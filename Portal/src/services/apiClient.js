@@ -1,3 +1,7 @@
+/**
+ * Backend is bound to localhost only. Override at build time with
+ * `VITE_API_BASE_URL=https://api.example.com` if you ever need to point elsewhere.
+ */
 const API_BASE_URL = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
 
 const buildUrl = (path) => {
@@ -70,6 +74,10 @@ export const apiPaths = {
   cratesPurchaseCreate: (wholesalerId) => '/wholesalers/' + wholesalerId + '/crates/purchase/create',
   cratesLostDamagedCreate: (wholesalerId) => '/wholesalers/' + wholesalerId + '/crates/lost-damaged/create',
   cratesLossStats: (wholesalerId) => '/wholesalers/' + wholesalerId + '/crates/loss-stats',
+  cratesTypeSetPrice: (wholesalerId) => '/wholesalers/' + wholesalerId + '/crates/types/set-price',
+  cratesLossCompensate: (wholesalerId, boxLedgerId) => '/wholesalers/' + wholesalerId + '/crates/loss/' + boxLedgerId + '/compensate',
+  cratesSell: (wholesalerId) => '/wholesalers/' + wholesalerId + '/crates/sell',
+  reportsPnL: (wholesalerId) => '/wholesalers/' + wholesalerId + '/reports/pnl',
   paymentsCustomerSettle: (wholesalerId) => '/wholesalers/' + wholesalerId + '/payments/customer/settle',
   paymentsCustomerCrateBorrow: (wholesalerId) => '/wholesalers/' + wholesalerId + '/payments/customer/crate-borrow',
   paymentsSupplierProductPay: (wholesalerId) => '/wholesalers/' + wholesalerId + '/payments/supplier/product-pay',

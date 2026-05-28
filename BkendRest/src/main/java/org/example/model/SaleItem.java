@@ -67,6 +67,14 @@ public class SaleItem {
     @Column(nullable = false, precision = 14, scale = 3)
     private BigDecimal quantity;
 
+    /**
+     * Optional sale weight in kg. When non-null, the product was priced per kg
+     * (line_total = saleWeightKg × unitPrice). When null, priced per pack
+     * (line_total = quantity × unitPrice). Inventory deduction always uses {@code quantity}.
+     */
+    @Column(name = "sale_weight_kg", precision = 14, scale = 3)
+    private BigDecimal saleWeightKg;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private UnitType unit = UnitType.PCS;

@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
-  ShoppingCart, UserCheck, User, Package, Hash, DollarSign, Boxes,
-  CreditCard, Save, Tag, X,
+  ShoppingCart, UserCheck, User, Package, Hash, DollarSign,
+  CreditCard, Save, Tag, X, Scale,
 } from 'lucide-react';
 import { useData } from '../../data/DataContext';
 import { useToast } from '../../shared/components/Toast';
@@ -13,17 +13,15 @@ const initialForm = {
   customerId: '',
   productId: '',
   quantity: '',
+  saleWeightKg: '',
   unitPrice: '',
   paymentType: 'FULL_DUE',
   paymentAmount: '',
   discount: '',
-  banglaCratesGiven: '',
-  chinaCratesGiven: '',
-  jamanotAmount: '',
 };
 
 const SaleForm = ({ onClose }) => {
-  const { suppliers, customers, supplierProducts, crateInventory, recordSale } = useData();
+  const { suppliers, customers, supplierProducts, recordSale } = useData();
   const showToast = useToast();
   const [form, setForm] = useState(initialForm);
   const [oneTime, setOneTime] = useState({ name: '', phone: '' });
@@ -49,16 +47,14 @@ const SaleForm = ({ onClose }) => {
   );
 
   const quantity = Number(form.quantity) || 0;
+  const saleWeightKg = Number(form.saleWeightKg) || 0;
   const unitPrice = Number(form.unitPrice) || 0;
-  const grossAmount = Math.max(0, quantity * unitPrice);
+  // Weight set → priced per kg; otherwise priced per pack-unit (matches shipment unit).
+  const pricedByWeight = saleWeightKg > 0;
+  const grossAmount = Math.max(0, pricedByWeight ? saleWeightKg * unitPrice : quantity * unitPrice);
   const discount = showDiscount ? Math.min(Math.max(0, Number(form.discount) || 0), grossAmount) : 0;
   const netSale = Math.max(0, grossAmount - discount);
   const isOneTime = form.customerId === 'ONE_TIME';
-  const isCrateSale = !isOneTime && selectedProduct?.unit === 'crate';
-  const banglaCrates = isCrateSale ? Math.max(0, Math.floor(Number(form.banglaCratesGiven) || 0)) : 0;
-  const chinaCrates = isCrateSale ? Math.max(0, Math.floor(Number(form.chinaCratesGiven) || 0)) : 0;
-  const cratesGiven = banglaCrates + chinaCrates;
-  const jamanotAmount = isCrateSale ? Number(form.jamanotAmount) || 0 : 0;
   const previousDue = selectedCustomer ? Number(selectedCustomer.amountDue || 0) : 0;
   // A sale collects payment for THIS sale only (max = netSale). Prior due is settled separately.
   const paymentReceived = isOneTime
@@ -72,11 +68,16 @@ const SaleForm = ({ onClose }) => {
   const overStock = selectedProduct && quantity > selectedProduct.quantity;
 
   const handleSupplierChange = (supplierId) =>
-    setForm((prev) => ({ ...prev, supplierId, productId: '', unitPrice: '', quantity: '' }));
+    setForm((prev) => ({ ...prev, supplierId, productId: '', unitPrice: '', quantity: '', saleWeightKg: '' }));
 
   const handleProductChange = (productId) => {
     const product = availableProducts.find((p) => p.id === Number(productId));
-    setForm((prev) => ({ ...prev, productId, unitPrice: product ? String(product.unitPrice || '') : '' }));
+    setForm((prev) => ({
+      ...prev,
+      productId,
+      unitPrice: product ? String(product.unitPrice || '') : '',
+      saleWeightKg: '',
+    }));
   };
 
   const handleSubmit = async (event) => {
@@ -99,22 +100,6 @@ const SaleForm = ({ onClose }) => {
       setError('Payment for a sale cannot exceed the sale amount. Settle prior due separately.');
       return;
     }
-    if (isCrateSale && (!Number.isInteger(quantity) || quantity <= 0)) {
-      setError('Crate sale quantity must be a whole number.');
-      return;
-    }
-    if (isCrateSale && cratesGiven !== quantity) {
-      setError('Bangla + China crates must equal the sold crate quantity.');
-      return;
-    }
-    if (isCrateSale && banglaCrates > Number(crateInventory.bangla?.inShop || 0)) {
-      setError('Not enough Bangla crates in shop for this sale.');
-      return;
-    }
-    if (isCrateSale && chinaCrates > Number(crateInventory.china?.inShop || 0)) {
-      setError('Not enough China crates in shop for this sale.');
-      return;
-    }
 
     setIsSaving(true);
     try {
@@ -123,13 +108,10 @@ const SaleForm = ({ onClose }) => {
         customerId: form.customerId,
         productId: Number(form.productId),
         quantity,
+        saleWeightKg: pricedByWeight ? saleWeightKg : null,
         unitPrice,
         discountAmount: discount,
         paymentAmount: paymentReceived,
-        cratesGiven: isCrateSale ? cratesGiven : 0,
-        banglaCratesGiven: isCrateSale ? banglaCrates : 0,
-        chinaCratesGiven: isCrateSale ? chinaCrates : 0,
-        jamanotAmount: isCrateSale ? jamanotAmount : 0,
         customerName: isOneTime ? oneTime.name : undefined,
         customerPhone: isOneTime ? oneTime.phone : undefined,
       });
@@ -230,39 +212,43 @@ const SaleForm = ({ onClose }) => {
               <input type="number" min="0" step="0.01" value={form.quantity} onChange={(e) => set('quantity', e.target.value)} className="input-field" placeholder="0" required />
             </div>
             <div className="form-field">
-              <label className="form-label"><DollarSign size={13} /> Unit Price <span className="text-red-500">*</span></label>
+              <label className="form-label">
+                <Scale size={13} /> Sale Weight
+                <span className="form-label-hint">kg · optional</span>
+              </label>
+              <div className="input-with-suffix">
+                <input
+                  type="number" min="0" step="0.001" value={form.saleWeightKg}
+                  onChange={(e) => set('saleWeightKg', e.target.value)}
+                  className="input-field" placeholder="0"
+                />
+                <span className="input-suffix">kg</span>
+              </div>
+            </div>
+            <div className="form-field">
+              <label className="form-label">
+                <DollarSign size={13} /> Price per kg <span className="text-red-500">*</span>
+              </label>
               <div className="input-with-suffix">
                 <input type="number" min="0" step="0.01" value={form.unitPrice} onChange={(e) => set('unitPrice', e.target.value)} className="input-field" placeholder="0" required />
-                <span className="input-suffix">৳</span>
+                <span className="input-suffix">৳/kg</span>
               </div>
             </div>
           </div>
 
-          {overStock && (
-            <div className="status-error mt-3"><span>!</span><span>Quantity exceeds available stock ({selectedProduct.quantity}).</span></div>
+          {/* Pricing hint — confirm formula at a glance. */}
+          {selectedProduct && unitPrice > 0 && (quantity > 0 || saleWeightKg > 0) && (
+            <p className="mt-1 text-[11px] text-slate-500">
+              {pricedByWeight ? (
+                <>Sale total: <strong>{saleWeightKg} kg × ৳{unitPrice}/kg = ৳{grossAmount.toLocaleString()}</strong>. Inventory will decrement <strong>{quantity} {String(selectedProduct.unit || '').toLowerCase()}</strong>.</>
+              ) : (
+                <>Enter weight to price by kg. Without weight, falling back to <strong>{quantity} × ৳{unitPrice} = ৳{grossAmount.toLocaleString()}</strong>.</>
+              )}
+            </p>
           )}
 
-          {isCrateSale && (
-            <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 mt-3">
-              <p className="mb-2 flex items-center gap-1.5 text-sm font-bold text-amber-800"><Boxes size={14} /> Crate sale</p>
-              <div className="form-grid">
-                <div className="form-field">
-                  <label className="form-label">Bangla Crates</label>
-                  <input type="number" min="0" value={form.banglaCratesGiven} onChange={(e) => set('banglaCratesGiven', e.target.value)} className="input-field" placeholder="0" />
-                </div>
-                <div className="form-field">
-                  <label className="form-label">China Crates</label>
-                  <input type="number" min="0" value={form.chinaCratesGiven} onChange={(e) => set('chinaCratesGiven', e.target.value)} className="input-field" placeholder="0" />
-                </div>
-                <div className="form-field">
-                  <label className="form-label">Jamanot</label>
-                  <div className="input-with-suffix">
-                    <input type="number" min="0" step="0.01" value={form.jamanotAmount} onChange={(e) => set('jamanotAmount', e.target.value)} className="input-field" placeholder="0" />
-                    <span className="input-suffix">৳</span>
-                  </div>
-                </div>
-              </div>
-            </div>
+          {overStock && (
+            <div className="status-error mt-3"><span>!</span><span>Quantity exceeds available stock ({selectedProduct.quantity}).</span></div>
           )}
 
           <div className="form-grid mt-3">

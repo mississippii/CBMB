@@ -11,6 +11,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import org.example.model.enums.RecordStatus;
 import lombok.Getter;
@@ -32,6 +33,10 @@ public class BoxType {
 
     @Column(nullable = false, length = 80)
     private String name;
+
+    /** Wholesaler's purchase cost per crate. Used to value uncompensated losses in P&L. */
+    @Column(name = "purchase_price", nullable = false, precision = 14, scale = 2)
+    private BigDecimal purchasePrice = BigDecimal.ZERO;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)

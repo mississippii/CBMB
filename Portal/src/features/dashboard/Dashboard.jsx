@@ -36,6 +36,16 @@ const Dashboard = () => {
   const [activeTab, setActiveTab] = useState('inventory');
   const [showLoadFallback, setShowLoadFallback] = useState(false);
 
+  // Cross-tab profile opening: Overview's money strips set this; the destination list
+  // reads it on render to auto-open the profile drawer, then clears it via onProfileOpened.
+  const [pendingProfile, setPendingProfile] = useState(null); // { type: 'supplier'|'customer', id }
+  const goToProfile = (type, id) => {
+    if (!type || !id) return;
+    setPendingProfile({ type, id });
+    setActiveTab(type === 'supplier' ? 'suppliers' : 'customers');
+  };
+  const clearPendingProfile = () => setPendingProfile(null);
+
   useEffect(() => {
     if (!isLoading) {
       setShowLoadFallback(false);
@@ -114,11 +124,21 @@ const Dashboard = () => {
                   </div>
                 )}
                 {activeTab === 'sales'        && <SalesPage />}
-                {activeTab === 'inventory'    && <StoreInventory />}
+                {activeTab === 'inventory'    && <StoreInventory onOpenProfile={goToProfile} />}
                 {activeTab === 'dashboard'    && <CratesDashboard />}
                 {activeTab === 'shipments'    && <ShipmentsPage />}
-                {activeTab === 'suppliers'    && <SuppliersList />}
-                {activeTab === 'customers'    && <CustomersList />}
+                {activeTab === 'suppliers'    && (
+                  <SuppliersList
+                    autoOpenId={pendingProfile?.type === 'supplier' ? pendingProfile.id : null}
+                    onProfileOpened={clearPendingProfile}
+                  />
+                )}
+                {activeTab === 'customers'    && (
+                  <CustomersList
+                    autoOpenId={pendingProfile?.type === 'customer' ? pendingProfile.id : null}
+                    onProfileOpened={clearPendingProfile}
+                  />
+                )}
                 {activeTab === 'transactions' && <TransactionsList />}
                 {activeTab === 'payment'      && <PaymentsPage />}
                 {activeTab === 'shopExpenses' && <ShopExpensesPage />}

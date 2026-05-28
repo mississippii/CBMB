@@ -3,6 +3,8 @@ package org.example.controller;
 import org.example.dto.CrateDashboardResponse;
 import org.example.dto.CrateLossStatsResponse;
 import org.example.dto.CrateQuantityRequest;
+import org.example.dto.SellCratesRequest;
+import org.example.dto.SetCratePriceRequest;
 import org.example.service.CrateService;
 import java.util.Map;
 import org.springframework.web.bind.annotation.CrossOrigin;
@@ -51,5 +53,35 @@ public class CrateController {
     ) {
         Integer months = body == null ? null : body.get("months");
         return crateService.getLossStats(wholesalerId, months);
+    }
+
+    /**
+     * Mark a previously-absorbed lost/damaged record as compensated by a customer
+     * or supplier. Posts a receivable on that party's account_ledger and stamps
+     * the box_ledger row so the P&L stops counting it as a wholesaler-borne cost.
+     */
+    @PostMapping("/types/set-price")
+    public CrateDashboardResponse setCratePrice(
+            @PathVariable Long wholesalerId,
+            @RequestBody SetCratePriceRequest request
+    ) {
+        return crateService.setCratePrice(wholesalerId, request);
+    }
+
+    @PostMapping("/loss/{boxLedgerId}/compensate")
+    public CrateDashboardResponse markLossCompensated(
+            @PathVariable Long wholesalerId,
+            @PathVariable Long boxLedgerId,
+            @RequestBody CrateQuantityRequest request
+    ) {
+        return crateService.markLossCompensated(wholesalerId, boxLedgerId, request);
+    }
+
+    @PostMapping("/sell")
+    public CrateDashboardResponse sellCrates(
+            @PathVariable Long wholesalerId,
+            @RequestBody SellCratesRequest request
+    ) {
+        return crateService.sellCrates(wholesalerId, request);
     }
 }

@@ -1,40 +1,99 @@
 import { useMemo, useState } from 'react';
-import { Plus, CreditCard, Receipt, ArrowUpRight, ArrowDownRight } from 'lucide-react';
+import { useQuery } from '@tanstack/react-query';
+import { Plus, Receipt, ArrowDownRight, ArrowUpRight } from 'lucide-react';
 import { useData } from '../../data/DataContext';
+import { useAuth } from '../auth/AuthContext';
+import { queryKeys } from '../../services/queryKeys';
+import { formatMoney, formatDate } from '../../shared/utils/format';
+import { Loader, EmptyRow, ErrorBanner } from '../../shared/components/Loader';
 import PaymentForm from './PaymentForm';
 
-const fmt = (value) => `৳ ${Math.round(Number(value) || 0).toLocaleString()}`;
-const getDateOnly = (value) => (value ? String(value).split('T')[0] : '-');
+/**
+ * Classify a Transaction row as money-in vs money-out and produce a stable label.
+ *
+ * Decision order (most reliable signal first):
+ *   1. Customer-side row → money IN. Use payment_type enum when present (CASH_RECEIVE /
+ *      CRATE_RETURN / CASH_AND_CRATE_RETURN) for a precise label.
+ *   2. Supplier-side row → look at the SupplierSettlement type embedded in the
+ *      description. PRODUCT_PAYMENT + ADVANCE = OUT; COMMISSION/EXPENSE_RECEIVE = IN.
+ *   3. Everything else = IN by default.
+ *
+ * Description-based supplier classification is still a fallback because
+ * TransactionResponse doesn't carry a dedicated `settlementType` field yet
+ * (on the Near-Term Gaps list).
+ */
+const classify = (t) => {
+  const isCustomerSide = Boolean(t.customerId || t.wholesalerCustomerId);
+  const isSupplierSide = Boolean(t.supplierId || t.wholesalerSupplierId);
+  const pt = String(t.paymentType || t.paymentOperationType || '').toUpperCase();
+  const desc = String(t.description || t.note || '').toLowerCase();
+
+  if (isCustomerSide) {
+    if (pt.includes('CRATE_RETURN') && pt.includes('CASH')) {
+      return { label: 'Customer cash + crates', dir: 'in', icon: ArrowDownRight };
+    }
+    if (pt.includes('CRATE_RETURN')) {
+      return { label: 'Customer crate return', dir: 'in', icon: ArrowDownRight };
+    }
+    if (pt.includes('CASH_RECEIVE')) {
+      return { label: 'Customer cash received', dir: 'in', icon: ArrowDownRight };
+    }
+    if (desc.includes('crate borrow')) {
+      return { label: 'Customer crate borrow', dir: 'in', icon: ArrowDownRight };
+    }
+    return { label: 'Customer payment', dir: 'in', icon: ArrowDownRight };
+  }
+
+  if (isSupplierSide) {
+    if (desc.includes('commission')) {
+      return { label: 'Commission received', dir: 'in', icon: ArrowDownRight };
+    }
+    if (desc.includes('expense received') || desc.includes('expense money received')) {
+      return { label: 'Expense reimbursed', dir: 'in', icon: ArrowDownRight };
+    }
+    if (desc.includes('advance')) {
+      return { label: 'Shipment advance', dir: 'out', icon: ArrowUpRight };
+    }
+    if (desc.includes('crates returned from')) {
+      return { label: 'Supplier crate return', dir: 'in', icon: ArrowDownRight };
+    }
+    if (desc.includes('crates given to')) {
+      return { label: 'Supplier crate give', dir: 'out', icon: ArrowUpRight };
+    }
+    if (desc.includes('product payment') || desc.includes('product payable') || desc.includes('paid supplier')) {
+      return { label: 'Paid supplier', dir: 'out', icon: ArrowUpRight };
+    }
+    return { label: 'Supplier movement', dir: 'in', icon: ArrowDownRight };
+  }
+
+  return { label: 'Payment', dir: 'in', icon: ArrowDownRight };
+};
 
 const PaymentsPage = () => {
-  const { transactions } = useData();
+  const { admin } = useAuth();
+  const { fetchTransactionsRange } = useData();
   const [showModal, setShowModal] = useState(false);
+
+  // Cache key shared with TransactionsList + SalesPage so tab toggles are free.
+  const { data: raw = [], isLoading, error: queryError } = useQuery({
+    queryKey: queryKeys.transactions.list(admin?.wholesalerId, null, null),
+    queryFn: () => fetchTransactionsRange(null, null),
+    enabled: Boolean(admin?.wholesalerId),
+  });
 
   const payments = useMemo(
     () =>
-      transactions
-        .filter((t) => t.transactionType === 'Payment')
+      (raw || [])
+        .filter((t) => (t.transactionType || '').toUpperCase() === 'PAYMENT')
         .slice()
-        .sort((a, b) => new Date(b.createdAt || b.date || 0) - new Date(a.createdAt || a.date || 0)),
-    [transactions],
+        .sort((a, b) => new Date(b.createdAt || 0) - new Date(a.createdAt || 0)),
+    [raw],
   );
 
-  const today = new Date().toISOString().split('T')[0];
+  const todayKey = new Date().toISOString().split('T')[0];
   const todayTotal = payments
-    .filter((t) => getDateOnly(t.createdAt || t.date) === today)
+    .filter((t) => (t.createdAt || '').split('T')[0] === todayKey)
     .reduce((sum, t) => sum + (Number(t.paymentAmount) || 0), 0);
-
-  // Heuristic to classify each payment row for display only.
-  // Backend stores the financial impact; this just labels the row.
-  const classify = (t) => {
-    const desc = String(t.description || t.paymentType || '').toLowerCase();
-    if (t.customerId) return { label: 'Customer paid', dir: 'in', icon: ArrowDownRight };
-    if (desc.includes('commission')) return { label: 'Commission received', dir: 'in', icon: ArrowDownRight };
-    if (desc.includes('expense')) return { label: 'Expense received', dir: 'in', icon: ArrowDownRight };
-    if (desc.includes('advance')) return { label: 'Shipment advance', dir: 'out', icon: ArrowUpRight };
-    if (desc.includes('settlement') || desc.includes('product')) return { label: 'Paid supplier', dir: 'out', icon: ArrowUpRight };
-    return { label: 'Payment', dir: 'in', icon: ArrowDownRight };
-  };
 
   return (
     <div className="space-y-5">
@@ -42,7 +101,7 @@ const PaymentsPage = () => {
         <div>
           <span className="box-eyebrow">Payments</span>
           <h3>Record &amp; track payments</h3>
-          <p>Pay supplier dues or receive money from customers / suppliers. Today's payments: {fmt(todayTotal)}.</p>
+          <p>Pay supplier dues or receive money from customers / suppliers. Today's payments: {formatMoney(todayTotal)}.</p>
         </div>
         <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setShowModal(true)}>
           <Plus size={16} /> New Payment
@@ -58,12 +117,10 @@ const PaymentsPage = () => {
           <span className="badge badge-teal">{payments.length} total</span>
         </div>
 
-        {payments.length === 0 ? (
-          <div className="empty-state">
-            <CreditCard size={32} className="empty-state-icon" />
-            <p className="empty-state-title">No payments yet</p>
-            <p className="empty-state-sub">Click "New Payment" to record your first money movement.</p>
-          </div>
+        {isLoading ? (
+          <Loader />
+        ) : payments.length === 0 ? (
+          <EmptyRow label="No payments yet. Click 'New Payment' to record your first money movement." />
         ) : (
           <div className="overflow-x-auto rounded-xl border border-slate-200">
             <table className="w-full min-w-[760px] text-sm">
@@ -82,22 +139,21 @@ const PaymentsPage = () => {
                   const cls = classify(t);
                   const Icon = cls.icon;
                   const dirColor = cls.dir === 'in' ? 'text-emerald-700' : 'text-rose-700';
+                  const cancelled = String(t.description || '').toLowerCase().includes('cancellation of');
                   return (
-                    <tr key={t.id} className="hover:bg-slate-50 transition">
-                      <td className="px-4 py-3 font-semibold text-slate-900 whitespace-nowrap">{getDateOnly(t.createdAt || t.date)}</td>
+                    <tr key={t.id} className={`hover:bg-slate-50 transition ${cancelled ? 'opacity-50 line-through' : ''}`}>
+                      <td className="px-4 py-3 font-semibold text-slate-900 whitespace-nowrap">{formatDate(t.createdAt)}</td>
                       <td className="px-4 py-3">
                         <span className={`inline-flex items-center gap-1.5 font-semibold ${dirColor}`}>
                           <Icon size={14} /> {cls.label}
                         </span>
                       </td>
-                      <td className="px-4 py-3 text-slate-800">
-                        {t.customer || t.supplier || '—'}
-                      </td>
+                      <td className="px-4 py-3 text-slate-800">{t.customerName || t.supplierName || '—'}</td>
                       <td className={`px-4 py-3 text-right font-extrabold ${dirColor}`}>
-                        {cls.dir === 'in' ? '+ ' : '− '}{fmt(t.paymentAmount)}
+                        {cls.dir === 'in' ? '+ ' : '− '}{formatMoney(t.paymentAmount)}
                       </td>
-                      <td className="px-4 py-3 text-right text-slate-700">{fmt(t.customerNewDue)}</td>
-                      <td className="px-4 py-3 text-slate-600 truncate max-w-[20rem]">{t.paymentType || t.note || ''}</td>
+                      <td className="px-4 py-3 text-right text-slate-700">{formatMoney(t.dueAmount)}</td>
+                      <td className="px-4 py-3 text-slate-600 truncate max-w-[20rem]">{t.description || '—'}</td>
                     </tr>
                   );
                 })}
@@ -105,6 +161,8 @@ const PaymentsPage = () => {
             </table>
           </div>
         )}
+
+        {queryError && <div className="mt-3"><ErrorBanner message={queryError.message || 'Failed to load payments.'} /></div>}
       </div>
 
       {showModal && <PaymentForm onClose={() => setShowModal(false)} />}

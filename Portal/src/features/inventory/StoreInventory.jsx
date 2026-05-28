@@ -1,7 +1,10 @@
 import { useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import { AlertTriangle, ChevronDown, ChevronRight, Filter, Truck } from 'lucide-react';
 import { useData } from '../../data/DataContext';
+import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../../shared/components/Toast';
+import { queryKeys } from '../../services/queryKeys';
 import OverviewPage from '../overview/OverviewPage';
 
 const WRITE_OFF_REASONS = ['Damaged', 'Spoiled / Rotten', 'Shortage', 'Other'];
@@ -42,31 +45,33 @@ const emojiForProduct = (name) => {
   return null;
 };
 
-const formatCurrency = (value) =>
-  new Intl.NumberFormat('en-BD', {
-    style: 'currency',
-    currency: 'BDT',
-    maximumFractionDigits: 0,
-  }).format(Number(value) || 0);
-
 const formatNumber = (value) =>
   new Intl.NumberFormat('en-BD', {
     maximumFractionDigits: 2,
   }).format(Number(value) || 0);
 
-const getDateOnly = (dateValue) => {
-  if (!dateValue) return '-';
-  return String(dateValue).split('T')[0];
-};
+const StoreInventory = ({ onOpenProfile }) => {
+  const { suppliers, writeOffStock, fetchShipments, fetchInventoryList } = useData();
+  const { admin } = useAuth();
+  const showToast = useToast();
 
-const StoreInventory = () => {
-  const { supplierProducts, suppliers, transactions, shipments, writeOffStock } = useData();
+  // Live inventory + shipments — auto-refresh after sales/shipments/write-offs via
+  // invalidate.inventory() / invalidate.shipments() in DataContext.
+  const { data: supplierProducts = [] } = useQuery({
+    queryKey: queryKeys.inventory.list(admin?.wholesalerId),
+    queryFn: () => fetchInventoryList(),
+    enabled: Boolean(admin?.wholesalerId),
+  });
+  const { data: shipments = [] } = useQuery({
+    queryKey: queryKeys.shipments.list(admin?.wholesalerId),
+    queryFn: () => fetchShipments(),
+    enabled: Boolean(admin?.wholesalerId),
+  });
   const shipmentNameById = useMemo(() => {
     const map = new Map();
     for (const s of shipments) map.set(Number(s.id), s.name || `Lot #${s.id}`);
     return map;
   }, [shipments]);
-  const showToast = useToast();
 
   const [writeOff, setWriteOff] = useState(null); // { product }
   const [woForm, setWoForm] = useState({ quantity: '', reason: WRITE_OFF_REASONS[0], note: '' });
@@ -215,7 +220,7 @@ const StoreInventory = () => {
 
   return (
     <div className="store-inventory space-y-4">
-      <OverviewPage />
+      <OverviewPage onOpenProfile={onOpenProfile} />
 
       <section className="supplier-panel inventory-panel">
         <div className="inventory-panel-header">

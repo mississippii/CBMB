@@ -1,11 +1,14 @@
 import { useEffect, useMemo, useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
 import {
   Truck, UserCheck, Package, Tag, FileText, Save, Plus, X,
   DollarSign, Wallet, Percent,
 } from 'lucide-react';
 import { useData } from '../../data/DataContext';
+import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../../shared/components/Toast';
 import SearchableSelect from '../../shared/components/SearchableSelect';
+import { queryKeys } from '../../services/queryKeys';
 
 const UNITS = ['KG', 'PCS', 'CRATE', 'DOZEN', 'BAG', 'MOUND'];
 
@@ -28,7 +31,13 @@ const formatQuantity = (value, unit) =>
   `${(Number(value) || 0).toLocaleString()} ${String(unit || '').toUpperCase()}`.trim();
 
 const ShipmentsPage = () => {
-  const { suppliers, catalogProducts, subCategories, shipments, addSupplierProduct } = useData();
+  const { suppliers, catalogProducts, subCategories, addSupplierProduct, fetchShipments } = useData();
+  const { admin } = useAuth();
+  const { data: shipments = [] } = useQuery({
+    queryKey: queryKeys.shipments.list(admin?.wholesalerId),
+    queryFn: () => fetchShipments(),
+    enabled: Boolean(admin?.wholesalerId),
+  });
   const showToast = useToast();
   const [formData, setFormData] = useState(initialForm);
   const [isSaving, setIsSaving] = useState(false);

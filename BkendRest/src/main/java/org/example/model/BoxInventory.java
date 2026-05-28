@@ -9,6 +9,7 @@ import jakarta.persistence.Id;
 import jakarta.persistence.JoinColumn;
 import jakarta.persistence.ManyToOne;
 import jakarta.persistence.Table;
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import lombok.Getter;
 import lombok.Setter;
@@ -48,6 +49,13 @@ public class BoxInventory {
 
     @Column(name = "lost_damaged", nullable = false)
     private Integer lostDamaged = 0;
+
+    /**
+     * Running weighted-average cost of crates currently in stock (in_hand + with_customers + with_suppliers).
+     * Recomputed on PURCHASE; consumed (no recompute) on SOLD / LOST / DAMAGED.
+     */
+    @Column(name = "weighted_avg_cost", nullable = false, precision = 14, scale = 2)
+    private BigDecimal weightedAvgCost = BigDecimal.ZERO;
 
     @jakarta.persistence.Version
     @Column(nullable = false)

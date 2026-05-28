@@ -112,7 +112,18 @@ public class SaleService {
         BigDecimal quantity = positive(request.quantity(), "Quantity must be greater than zero.");
         BigDecimal unitPrice = nonNegative(request.unitPrice(), "Unit price cannot be negative.");
         BigDecimal paidAmount = nonNegative(request.paymentAmount(), "Payment amount cannot be negative.");
-        BigDecimal grossAmount = money(quantity.multiply(unitPrice));
+        // Weight-priced sale: line_total = saleWeightKg × unitPrice (unitPrice = per-kg).
+        // Pack-priced sale (default): line_total = quantity × unitPrice (unitPrice = per-pack).
+        // Inventory still deducts `quantity` (pack count) either way.
+        BigDecimal saleWeightKg = null;
+        if (request.saleWeightKg() != null && request.saleWeightKg().signum() > 0) {
+            saleWeightKg = money3(request.saleWeightKg());
+        } else if (request.saleWeightKg() != null && request.saleWeightKg().signum() < 0) {
+            throw new BadRequestException("Sale weight cannot be negative.");
+        }
+        BigDecimal grossAmount = saleWeightKg != null
+                ? money(saleWeightKg.multiply(unitPrice))
+                : money(quantity.multiply(unitPrice));
         BigDecimal discountAmount = nonNegative(request.discountAmount(), "Discount cannot be negative.");
         if (discountAmount.compareTo(grossAmount) > 0) {
             throw new BadRequestException("Discount cannot exceed the sale amount.");
@@ -191,6 +202,7 @@ public class SaleService {
         item.setCategory(inventory.getCategory());
         item.setSubCategory(inventory.getSubCategory());
         item.setQuantity(quantity);
+        item.setSaleWeightKg(saleWeightKg);
         item.setUnit(inventory.getUnit());
         item.setUnitPrice(unitPrice);
         item.setLineTotal(netAmount);
@@ -226,6 +238,7 @@ public class SaleService {
                 supplierAccount.getId(),
                 supplierAccount.getSupplier().getName(),
                 quantity,
+                saleWeightKg,
                 inventory.getUnit().name(),
                 unitPrice,
                 grossAmount,
@@ -509,6 +522,11 @@ public class SaleService {
 
     private BigDecimal money(BigDecimal value) {
         return value.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    /** Three-decimal scale for weight (kg). */
+    private BigDecimal money3(BigDecimal value) {
+        return value.setScale(3, RoundingMode.HALF_UP);
     }
 
     private String requireText(String value, String message) {

@@ -8,5 +8,6 @@ public enum BoxMovementType {
     RETURNED_FROM_SUPPLIER,
     LOST,
     DAMAGED,
+    SOLD,
     ADJUSTMENT
 }

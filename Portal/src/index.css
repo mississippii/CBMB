@@ -5094,3 +5094,36 @@ tbody tr:hover {
     padding-inline: 0.85rem !important;
   }
 }
+
+/* =============================================================
+   Print styles — used by the P&L "Print" button so the output
+   is a clean income statement, not the chrome around it.
+   ============================================================= */
+@media print {
+  .no-print,
+  .left-tree,
+  .topbar,
+  .sidebar,
+  nav,
+  header.app-header,
+  .admin-header,
+  .admin-welcome,
+  button {
+    display: none !important;
+  }
+  body {
+    background: #fff !important;
+  }
+  .main-content,
+  .app-shell,
+  .app-content {
+    padding: 0 !important;
+    margin: 0 !important;
+    background: #fff !important;
+  }
+  /* Force everything to color-print (default browser behavior strips backgrounds) */
+  * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+  }
+}

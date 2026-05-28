@@ -1,5 +1,7 @@
 package org.example.dto;
 
+import java.math.BigDecimal;
+
 public record CrateInventoryTypeResponse(
         Long crateTypeId,
         String crateType,
@@ -7,6 +9,7 @@ public record CrateInventoryTypeResponse(
         Integer inHand,
         Integer withCustomers,
         Integer withSuppliers,
-        Integer lostDamaged
+        Integer lostDamaged,
+        BigDecimal purchasePrice
 ) {
 }

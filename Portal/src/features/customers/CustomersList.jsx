@@ -15,7 +15,7 @@ const EMPTY_FORM = {
   crateJamanot: '',
 };
 
-const CustomersList = () => {
+const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
   const { customers, addCustomer, reloadCustomers } = useData();
   const showToast = useToast();
   const [showForm, setShowForm] = useState(false);
@@ -29,6 +29,16 @@ const CustomersList = () => {
     reloadCustomers(showDisabled);
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [showDisabled]);
+
+  // Auto-open profile when arriving from the Overview money strip.
+  useEffect(() => {
+    if (autoOpenId) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setSelectedCustomerId(autoOpenId);
+      onProfileOpened?.();
+    }
+    /* eslint-disable-next-line react-hooks/exhaustive-deps */
+  }, [autoOpenId]);
   const [formError, setFormError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [formData, setFormData] = useState(EMPTY_FORM);
