@@ -6,12 +6,10 @@ import org.example.dto.PageResponse;
 import org.example.dto.WholesalerListRequest;
 import org.example.dto.WholesalerResponse;
 import org.example.exception.BadRequestException;
-import org.example.model.BoxType;
 import org.example.model.enums.RecordStatus;
 import org.example.model.enums.UserRole;
 import org.example.model.User;
 import org.example.model.Wholesaler;
-import org.example.repository.BoxTypeRepository;
 import org.example.repository.UserRepository;
 import org.example.repository.WholesalerRepository;
 import org.springframework.data.domain.Page;
@@ -27,18 +25,15 @@ public class AdminWholesalerService {
     private final UserRepository userRepository;
     private final WholesalerRepository wholesalerRepository;
     private final PasswordEncoder passwordEncoder;
-    private final BoxTypeRepository boxTypeRepository;
 
     public AdminWholesalerService(
             UserRepository userRepository,
             WholesalerRepository wholesalerRepository,
-            PasswordEncoder passwordEncoder,
-            BoxTypeRepository boxTypeRepository
+            PasswordEncoder passwordEncoder
     ) {
         this.userRepository = userRepository;
         this.wholesalerRepository = wholesalerRepository;
         this.passwordEncoder = passwordEncoder;
-        this.boxTypeRepository = boxTypeRepository;
     }
 
     @Transactional
@@ -73,8 +68,10 @@ public class AdminWholesalerService {
         wholesaler.setAddress(address);
         wholesaler.setStatus(RecordStatus.ACTIVE);
 
+        // Crate types come from the admin-managed global catalog and are mirrored into
+        // each wholesaler's box_types on dashboard load (CrateService.ensureBoxTypesFromCatalog).
+        // No per-wholesaler seeding — the catalog is the single source of truth.
         Wholesaler savedWholesaler = wholesalerRepository.save(wholesaler);
-        createDefaultBoxTypes(savedWholesaler);
 
         return toResponse(savedWholesaler);
     }
@@ -120,19 +117,6 @@ public class AdminWholesalerService {
                 result.getTotalElements(),
                 result.getTotalPages()
         );
-    }
-
-    private void createDefaultBoxTypes(Wholesaler wholesaler) {
-        createBoxType(wholesaler, "BANGLA");
-        createBoxType(wholesaler, "CHINA");
-    }
-
-    private void createBoxType(Wholesaler wholesaler, String name) {
-        BoxType boxType = new BoxType();
-        boxType.setWholesaler(wholesaler);
-        boxType.setName(name);
-        boxType.setStatus(RecordStatus.ACTIVE);
-        boxTypeRepository.save(boxType);
     }
 
     private WholesalerResponse toResponse(Wholesaler wholesaler) {

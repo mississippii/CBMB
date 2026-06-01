@@ -79,14 +79,6 @@ public class BoxLedger {
     @Column(name = "unit_sale_price", precision = 14, scale = 2)
     private BigDecimal unitSalePrice;
 
-    /**
-     * For LOST / DAMAGED rows only: the {@code account_ledger.id} that posted the
-     * receivable on the compensating party. NULL = wholesaler absorbed the loss,
-     * so the row counts in P&L as an expense.
-     */
-    @Column(name = "compensation_account_ledger_id")
-    private Long compensationAccountLedgerId;
-
     @Enumerated(EnumType.STRING)
     @Column(name = "reference_type", nullable = false)
     private BoxReferenceType referenceType = BoxReferenceType.MANUAL;

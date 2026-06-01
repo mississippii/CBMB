@@ -2,6 +2,7 @@ package org.example.dto;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 public record SupplierAccountResponse(
         Long id,
@@ -16,8 +17,7 @@ public record SupplierAccountResponse(
         BigDecimal currentDue,
         BigDecimal totalSales,
         BigDecimal totalCommissionEarned,
-        Integer banglaCratesDue,
-        Integer chinaCratesDue,
+        List<CrateTypeQuantity> crateDues,
         Integer totalCratesDue,
         String status,
         LocalDateTime createdAt

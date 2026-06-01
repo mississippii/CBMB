@@ -12,7 +12,6 @@ public record PaymentCancellationResponse(
         BigDecimal customerBalanceAfter,
         BigDecimal supplierBalanceAfter,
         Integer cratesReinstated,
-        BigDecimal jamanotReinstated,
         Long cancellationTransactionId,
         LocalDateTime cancelledAt
 ) {

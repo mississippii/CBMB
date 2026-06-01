@@ -31,11 +31,8 @@ public record SaleResponse(
         BigDecimal customerDueBalance,
         BigDecimal commissionAmount,
         BigDecimal supplierDueBalance,
+        String crateType,
         Integer cratesGiven,
-        Integer banglaCratesGiven,
-        Integer chinaCratesGiven,
-        BigDecimal jamanotAmount,
-        BigDecimal customerJamanotBalance,
         BigDecimal inventoryQuantityOnHand,
         LocalDateTime saleDate
 ) {

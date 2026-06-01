@@ -5,9 +5,8 @@ import java.util.List;
 public record CrateLossStatsResponse(
         int months,
         long totalLost,
-        long totalBangla,
-        long totalChina,
+        List<CrateTypeQuantity> byType,
         List<MonthBucket> buckets
 ) {
-    public record MonthBucket(String month, long bangla, long china, long total) {}
+    public record MonthBucket(String month, long total, List<CrateTypeQuantity> byType) {}
 }

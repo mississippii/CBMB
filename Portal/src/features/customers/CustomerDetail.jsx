@@ -16,9 +16,6 @@ const renderCustomerTransactionDetails = (transaction) => {
     const parts = []
     if (Number(transaction.paymentAmount) > 0) parts.push('Cash received')
     if (Number(transaction.cratesReturned) > 0) parts.push('Crates returned: ' + transaction.cratesReturned)
-    if (Number(transaction.boxJamanotChange) !== 0) {
-      parts.push('Jamanot: ' + formatCurrency(Math.abs(Number(transaction.boxJamanotChange))))
-    }
     return parts.length ? parts.join(' • ') : (transaction.note || 'Payment recorded')
   }
 
@@ -158,10 +155,6 @@ const CustomerDetail = ({ customerId, onBack }) => {
           <p>Current Due</p>
           <strong>{formatCurrency(customer.amountDue)}</strong>
         </div>
-        <div className="metric-tile">
-          <p>Crate Jamanot</p>
-          <strong>{formatCurrency(customer.crateJamanot || 0)}</strong>
-        </div>
       </div>
 
       <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
@@ -219,26 +212,22 @@ const CustomerDetail = ({ customerId, onBack }) => {
           <p>Crates currently due from this customer.</p>
 
           <div className="mt-4 space-y-3">
-            <div className="box-row">
-              <span>Bangla</span>
-              <strong>{customer.cratesHoldingWooden || 0}</strong>
-            </div>
-            <div className="box-row">
-              <span>China</span>
-              <strong>{customer.cratesHoldingPlastic || 0}</strong>
-            </div>
+            {(customer.crateHoldings || []).length === 0 ? (
+              <div className="box-row"><span>No crates due</span><strong>0</strong></div>
+            ) : (
+              (customer.crateHoldings || []).map((c) => (
+                <div key={c.crateType} className="box-row">
+                  <span>{c.crateType}</span>
+                  <strong>{c.quantity || 0}</strong>
+                </div>
+              ))
+            )}
             <div className="box-row total">
               <span>Total Crates Due</span>
               <strong>{customer.totalCratesHolding || 0}</strong>
             </div>
           </div>
 
-          <div className="mt-5 rounded-xl bg-emerald-50 p-4">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-[#1d63ed]">Crate Jamanot</p>
-            <p className="mt-1 text-xl font-extrabold text-[#1755c9]">
-              {formatCurrency(customer.crateJamanot || 0)}
-            </p>
-          </div>
         </div>
       </div>
 
@@ -260,7 +249,7 @@ const CustomerDetail = ({ customerId, onBack }) => {
             <div className="modal-body">
               <p className="text-sm text-slate-600">
                 The customer will no longer appear in sale dropdowns or active lists, but all transactions,
-                ledger entries, crate movements, and jamanot history remain. You can reactivate them later.
+                ledger entries and crate movements remain. You can reactivate them later.
               </p>
               {disableError && (
                 <div className="status-error mt-4">

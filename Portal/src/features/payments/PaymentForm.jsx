@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import {
-  CreditCard, User, UserCheck, DollarSign, FileText, Save, ArrowDownRight, ArrowUpRight,
+  CreditCard, User, UserCheck, DollarSign, FileText, Save, ArrowDownRight, ArrowUpRight, Wallet,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { useData } from '../../data/DataContext';
@@ -8,6 +8,16 @@ import { useToast } from '../../shared/components/Toast';
 import { postJson, apiPaths } from '../../services/apiClient';
 
 const fmt = (value) => `৳ ${Math.round(Number(value) || 0).toLocaleString()}`;
+
+// Backend PaymentMethod enum (CASH / BANK / BKASH / NAGAD / OTHER). NONE is for crate-only
+// movements, so it isn't offered for a money payment.
+const PAYMENT_METHODS = [
+  { value: 'CASH', label: 'Cash' },
+  { value: 'BANK', label: 'Bank' },
+  { value: 'BKASH', label: 'bKash' },
+  { value: 'NAGAD', label: 'Nagad' },
+  { value: 'OTHER', label: 'Other' },
+];
 
 // Each direction maps to one backend endpoint + a humane label + which party.
 const DIRECTIONS = {
@@ -53,6 +63,7 @@ const PaymentForm = ({ onClose }) => {
   const [direction, setDirection] = useState('CUSTOMER_PAY');
   const [partyId, setPartyId] = useState('');
   const [amount, setAmount] = useState('');
+  const [method, setMethod] = useState('CASH');
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
@@ -94,16 +105,14 @@ const PaymentForm = ({ onClose }) => {
         ? {
             wholesalerCustomerId: Number(partyId),
             cashAmount: amt,
-            banglaCratesReturned: 0,
-            chinaCratesReturned: 0,
-            jamanotAmount: 0,
-            paymentMethod: 'CASH',
+            crateReturns: [],
+            paymentMethod: method,
             note: note?.trim() || null,
           }
         : {
             wholesalerSupplierId: Number(partyId),
             amount: amt,
-            paymentMethod: 'CASH',
+            paymentMethod: method,
             note: note?.trim() || null,
           };
 
@@ -189,6 +198,21 @@ const PaymentForm = ({ onClose }) => {
                 />
                 <span className="input-suffix">৳</span>
               </div>
+            </div>
+            <div className="form-field">
+              <label className="form-label">
+                <Wallet size={13} /> Method <span className="text-red-500">*</span>
+              </label>
+              <select
+                value={method}
+                onChange={(e) => setMethod(e.target.value)}
+                className="input-field"
+                required
+              >
+                {PAYMENT_METHODS.map((m) => (
+                  <option key={m.value} value={m.value}>{m.label}</option>
+                ))}
+              </select>
             </div>
             <div className="form-field form-field-full">
               <label className="form-label"><FileText size={13} /> Note <span className="form-label-hint">optional</span></label>

@@ -3,9 +3,12 @@ package org.example.controller;
 import org.example.dto.CrateDashboardResponse;
 import org.example.dto.CrateLossStatsResponse;
 import org.example.dto.CrateQuantityRequest;
+import org.example.dto.CrateTypeResponse;
 import org.example.dto.SellCratesRequest;
 import org.example.dto.SetCratePriceRequest;
 import org.example.service.CrateService;
+import org.example.service.CrateTypeService;
+import java.util.List;
 import java.util.Map;
 import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.PathVariable;
@@ -20,9 +23,17 @@ import org.springframework.web.bind.annotation.RestController;
 public class CrateController {
 
     private final CrateService crateService;
+    private final CrateTypeService crateTypeService;
 
-    public CrateController(CrateService crateService) {
+    public CrateController(CrateService crateService, CrateTypeService crateTypeService) {
         this.crateService = crateService;
+        this.crateTypeService = crateTypeService;
+    }
+
+    /** Active global crate-type catalog — used to populate crate forms. */
+    @PostMapping("/types/catalog")
+    public List<CrateTypeResponse> listCrateTypes(@PathVariable Long wholesalerId) {
+        return crateTypeService.list(false);
     }
 
     @PostMapping("/dashboard")
@@ -55,26 +66,13 @@ public class CrateController {
         return crateService.getLossStats(wholesalerId, months);
     }
 
-    /**
-     * Mark a previously-absorbed lost/damaged record as compensated by a customer
-     * or supplier. Posts a receivable on that party's account_ledger and stamps
-     * the box_ledger row so the P&L stops counting it as a wholesaler-borne cost.
-     */
+    /** Set / update the wholesaler's purchase cost for a crate type (used to value losses). */
     @PostMapping("/types/set-price")
     public CrateDashboardResponse setCratePrice(
             @PathVariable Long wholesalerId,
             @RequestBody SetCratePriceRequest request
     ) {
         return crateService.setCratePrice(wholesalerId, request);
-    }
-
-    @PostMapping("/loss/{boxLedgerId}/compensate")
-    public CrateDashboardResponse markLossCompensated(
-            @PathVariable Long wholesalerId,
-            @PathVariable Long boxLedgerId,
-            @RequestBody CrateQuantityRequest request
-    ) {
-        return crateService.markLossCompensated(wholesalerId, boxLedgerId, request);
     }
 
     @PostMapping("/sell")

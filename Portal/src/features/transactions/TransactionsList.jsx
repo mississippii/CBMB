@@ -87,7 +87,6 @@ const TransactionsList = () => {
     paymentAmount: Number(t.paymentAmount) || 0,
     customerNewDue: Number(t.dueAmount) || 0,
     cratesReturned: Number(t.cratesReturned) || 0,
-    boxJamanotChange: Number(t.jamanotAmount) ? -Number(t.jamanotAmount) : 0,
     paymentOperationType: t.paymentType || '',
     paymentType: t.paymentType || t.description || '',
     note: t.description || '',
@@ -299,11 +298,9 @@ const TransactionsList = () => {
         return description;
       }
 
-      const bangla = Number(transaction.boxReturnWooden || transaction.banglaCrates || 0);
-      const china = Number(transaction.boxReturnPlastic || transaction.chinaCrates || 0);
+      const crates = Number(transaction.cratesReturned || 0);
       const parts = [getPaymentOperationLabel(transaction)];
-      if (bangla > 0 || china > 0) parts.push('Crates B:' + bangla + ' C:' + china);
-      if (Number(transaction.boxJamanotChange) !== 0) parts.push('Jamanot ' + formatCurrency(transaction.boxJamanotChange));
+      if (crates > 0) parts.push('Crates: ' + crates);
       if (Number(transaction.customerNewDue) > 0) parts.push('Due ' + formatCurrency(transaction.customerNewDue));
       return parts.join(' • ');
     }

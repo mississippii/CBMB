@@ -17,11 +17,9 @@ public record CreateSaleRequest(
         BigDecimal unitPrice,
         BigDecimal discountAmount,
         BigDecimal paymentAmount,
+        /** Crate lent with this sale (one type per sale). Optional — null/blank means no crates. */
         String crateType,
         Integer cratesGiven,
-        Integer banglaCratesGiven,
-        Integer chinaCratesGiven,
-        BigDecimal jamanotAmount,
         String note
 ) {
 }

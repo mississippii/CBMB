@@ -33,7 +33,6 @@ import org.example.model.enums.SaleType;
 import org.example.model.enums.StockDirection;
 import org.example.model.enums.StockReferenceType;
 import org.example.model.enums.TransactionType;
-import org.example.model.enums.UnitType;
 import org.example.repository.AccountBalanceRepository;
 import org.example.repository.AccountLedgerRepository;
 import org.example.repository.BoxBalanceRepository;
@@ -132,22 +131,14 @@ public class SaleService {
         // works off the net (discounted) amount.
         BigDecimal netAmount = money(grossAmount.subtract(discountAmount));
         boolean oneTimeCustomer = request.wholesalerCustomerId() == null;
-        boolean crateSale = inventory.getUnit() == UnitType.CRATE && !oneTimeCustomer;
-        Integer banglaCratesGiven = resolveSpecificCrates(request.banglaCratesGiven());
-        Integer chinaCratesGiven = resolveSpecificCrates(request.chinaCratesGiven());
-        Integer cratesGiven = resolveCratesGiven(quantity, crateSale, request.crateType(), request.cratesGiven(), banglaCratesGiven, chinaCratesGiven);
-        BigDecimal jamanotAmount = crateSale
-                ? nonNegative(request.jamanotAmount(), "Jamanot amount cannot be negative.")
-                : BigDecimal.ZERO;
-        if (!crateSale) {
-            banglaCratesGiven = 0;
-            chinaCratesGiven = 0;
-        } else if (banglaCratesGiven == 0 && chinaCratesGiven == 0) {
-            if ("CHINA".equals(normalizeCrateType(request.crateType()))) {
-                chinaCratesGiven = cratesGiven;
-            } else {
-                banglaCratesGiven = cratesGiven;
-            }
+        // Crate-borrow on a sale is now opt-in: only honoured when the caller explicitly
+        // passes a crateType + cratesGiven > 0. The SaleForm no longer sends these; crate
+        // movement to customers is handled via the dedicated Customer Crate Movement flow.
+        // One crate type per sale.
+        String saleCrateType = oneTimeCustomer ? null : clean(request.crateType());
+        Integer cratesGiven = oneTimeCustomer ? 0 : resolveSpecificCrates(request.cratesGiven());
+        if (cratesGiven > 0 && (saleCrateType == null || saleCrateType.isBlank())) {
+            throw new BadRequestException("Crate type is required when lending crates with a sale.");
         }
         if (inventory.getQuantityOnHand().compareTo(quantity) < 0) {
             throw new BadRequestException("Insufficient stock for selected product.");
@@ -178,7 +169,6 @@ public class SaleService {
         sale.setPaidAmount(paidAmount);
         sale.setDueAmount(dueAmount);
         sale.setBoxesGiven(cratesGiven);
-        sale.setJamanotAmount(jamanotAmount);
         sale.setNote(clean(request.note()));
         sale.setStatus(PostStatus.POSTED);
         sale = saleRepository.save(sale);
@@ -216,7 +206,9 @@ public class SaleService {
 
         saveStockLedger(wholesaler, supplierAccount, inventory, sale, quantity);
         BigDecimal customerBalance = oneTimeCustomer ? BigDecimal.ZERO : applyCustomerSaleBalance(wholesaler, customerAccount, sale, netAmount, paidAmount);
-        BigDecimal customerJamanotBalance = oneTimeCustomer ? BigDecimal.ZERO : applyCustomerCrateMovement(wholesaler, customerAccount, sale, banglaCratesGiven, chinaCratesGiven, jamanotAmount);
+        if (!oneTimeCustomer && cratesGiven > 0) {
+            applyCustomerCrateTypeMovement(wholesaler, customerAccount, sale, saleCrateType, cratesGiven);
+        }
         BigDecimal supplierBalance = applySupplierSaleBalance(wholesaler, supplierAccount, sale, netAmount);
         Transaction transaction = saveTransaction(wholesaler, customerAccount, supplierAccount, sale, netAmount, paidAmount, customerBalance);
 
@@ -249,11 +241,8 @@ public class SaleService {
                 customerBalance,
                 commissionAmount,
                 supplierBalance,
+                saleCrateType,
                 cratesGiven,
-                banglaCratesGiven,
-                chinaCratesGiven,
-                jamanotAmount,
-                customerJamanotBalance,
                 inventory.getQuantityOnHand(),
                 sale.getSaleDate()
         );
@@ -326,28 +315,6 @@ public class SaleService {
         return balance.getBalance();
     }
 
-    private BigDecimal applyCustomerCrateMovement(
-            Wholesaler wholesaler,
-            WholesalerCustomer customerAccount,
-            Sale sale,
-            Integer banglaCratesGiven,
-            Integer chinaCratesGiven,
-            BigDecimal jamanotAmount
-    ) {
-        int banglaCrates = banglaCratesGiven == null ? 0 : banglaCratesGiven;
-        int chinaCrates = chinaCratesGiven == null ? 0 : chinaCratesGiven;
-        if (banglaCrates <= 0 && chinaCrates <= 0) {
-            return customerAccount.getJamanotBalance() == null ? BigDecimal.ZERO : customerAccount.getJamanotBalance();
-        }
-
-        applyCustomerCrateTypeMovement(wholesaler, customerAccount, sale, "BANGLA", banglaCrates);
-        applyCustomerCrateTypeMovement(wholesaler, customerAccount, sale, "CHINA", chinaCrates);
-
-        customerAccount.setJamanotBalance(money((customerAccount.getJamanotBalance() == null ? BigDecimal.ZERO : customerAccount.getJamanotBalance()).add(jamanotAmount)));
-        wholesalerCustomerRepository.save(customerAccount);
-        return customerAccount.getJamanotBalance();
-    }
-
     private void applyCustomerCrateTypeMovement(
             Wholesaler wholesaler,
             WholesalerCustomer customerAccount,
@@ -408,42 +375,6 @@ public class SaleService {
             throw new BadRequestException("Crate quantity cannot be negative.");
         }
         return normalized;
-    }
-
-    private Integer resolveCratesGiven(BigDecimal quantity, boolean crateSale, String crateType, Integer requestedCrates, Integer banglaCratesGiven, Integer chinaCratesGiven) {
-        int banglaCrates = banglaCratesGiven == null ? 0 : banglaCratesGiven;
-        int chinaCrates = chinaCratesGiven == null ? 0 : chinaCratesGiven;
-        int splitCrates = banglaCrates + chinaCrates;
-        if (!crateSale) {
-            if ((requestedCrates != null && requestedCrates > 0) || splitCrates > 0) {
-                throw new BadRequestException("Crates can only be assigned to permanent customer crate sales.");
-            }
-            return 0;
-        }
-        try {
-            int saleCrates = quantity.intValueExact();
-            if (splitCrates > 0) {
-                if (splitCrates != saleCrates) {
-                    throw new BadRequestException("Bangla and China crate quantities must match sold crate quantity.");
-                }
-                return splitCrates;
-            }
-            if (requestedCrates != null && requestedCrates > 0 && requestedCrates != saleCrates) {
-                throw new BadRequestException("Crates given must match sold crate quantity.");
-            }
-            normalizeCrateType(crateType);
-            return saleCrates;
-        } catch (ArithmeticException exception) {
-            throw new BadRequestException("Crate sale quantity must be a whole number.");
-        }
-    }
-
-    private String normalizeCrateType(String value) {
-        String cleaned = requireText(value, "Crate type is required for permanent customer crate sale.").toUpperCase();
-        if (!cleaned.equals("BANGLA") && !cleaned.equals("CHINA")) {
-            throw new BadRequestException("Invalid crate type. Allowed values: BANGLA, CHINA.");
-        }
-        return cleaned;
     }
 
     private BigDecimal applySupplierSaleBalance(

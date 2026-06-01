@@ -28,7 +28,8 @@ import lombok.Setter;
                 @jakarta.persistence.Index(name = "idx_transactions_customer_date", columnList = "wholesaler_id,wholesaler_customer_id,created_at"),
                 @jakarta.persistence.Index(name = "idx_transactions_supplier_date", columnList = "wholesaler_id,wholesaler_supplier_id,created_at"),
                 @jakarta.persistence.Index(name = "idx_transactions_sale", columnList = "sale_id"),
-                @jakarta.persistence.Index(name = "idx_transactions_payment", columnList = "payment_id")
+                @jakarta.persistence.Index(name = "idx_transactions_payment", columnList = "payment_id"),
+                @jakarta.persistence.Index(name = "idx_transactions_settlement", columnList = "settlement_id")
         })
 @IdClass(TransactionId.class)
 public class Transaction {
@@ -50,6 +51,9 @@ public class Transaction {
 
     @Column(name = "payment_id")
     private Long paymentId;
+
+    @Column(name = "settlement_id")
+    private Long settlementId;
 
     @Column(name = "wholesaler_customer_id")
     private Long wholesalerCustomerId;

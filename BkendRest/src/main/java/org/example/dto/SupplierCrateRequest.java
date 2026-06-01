@@ -1,9 +1,10 @@
 package org.example.dto;
 
+import java.util.List;
+
 public record SupplierCrateRequest(
         Long wholesalerSupplierId,
-        Integer banglaCrates,
-        Integer chinaCrates,
+        List<CrateLineRequest> crates,
         String note
 ) {
 }

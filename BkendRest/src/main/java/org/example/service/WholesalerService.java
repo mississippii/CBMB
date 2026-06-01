@@ -4,6 +4,7 @@ import java.math.BigDecimal;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import org.example.dto.CrateTypeQuantity;
 import org.example.dto.CreateCustomerRequest;
 import org.example.dto.CreateSupplierRequest;
 import org.example.dto.CustomerAccountResponse;
@@ -167,12 +168,12 @@ public class WholesalerService {
         }
 
         BigDecimal due = currentBalance(wholesaler.getId(), PartyType.WHOLESALER_SUPPLIER, account.getId(), account.getOpeningDue());
-        CrateDue crates = crateDue(wholesaler.getId(), PartyType.WHOLESALER_SUPPLIER, account.getId());
+        int crateTotal = crateDueTotal(wholesaler.getId(), PartyType.WHOLESALER_SUPPLIER, account.getId());
         if (due.signum() > 0) {
             throw new BadRequestException("Cannot disable — outstanding due ৳" + due.toPlainString() + ". Settle first.");
         }
-        if (crates.total() > 0) {
-            throw new BadRequestException("Cannot disable — " + crates.total() + " crates still with supplier. Settle crates first.");
+        if (crateTotal > 0) {
+            throw new BadRequestException("Cannot disable — " + crateTotal + " crates still with supplier. Settle crates first.");
         }
 
         account.setStatus(RecordStatus.DISABLED);
@@ -220,7 +221,6 @@ public class WholesalerService {
             throw new BadRequestException("Customer is already connected to this wholesaler.");
         }
         account.setOpeningDue(nonNegative(request.openingDue(), "Opening due cannot be negative."));
-        account.setJamanotBalance(nonNegative(request.jamanotBalance(), "Jamanot balance cannot be negative."));
         account.setStatus(RecordStatus.ACTIVE);
 
         return toCustomerResponse(wholesalerCustomerRepository.save(account));
@@ -247,16 +247,12 @@ public class WholesalerService {
         }
 
         BigDecimal due = currentBalance(wholesaler.getId(), PartyType.WHOLESALER_CUSTOMER, account.getId(), account.getOpeningDue());
-        CrateDue crates = crateDue(wholesaler.getId(), PartyType.WHOLESALER_CUSTOMER, account.getId());
-        BigDecimal jamanot = account.getJamanotBalance() == null ? BigDecimal.ZERO : account.getJamanotBalance();
+        int crateTotal = crateDueTotal(wholesaler.getId(), PartyType.WHOLESALER_CUSTOMER, account.getId());
         if (due.signum() > 0) {
             throw new BadRequestException("Cannot disable — customer owes ৳" + due.toPlainString() + ". Settle first.");
         }
-        if (crates.total() > 0) {
-            throw new BadRequestException("Cannot disable — customer still holds " + crates.total() + " crates. Recover first.");
-        }
-        if (jamanot.signum() > 0) {
-            throw new BadRequestException("Cannot disable — ৳" + jamanot.toPlainString() + " jamanot still with you. Refund first.");
+        if (crateTotal > 0) {
+            throw new BadRequestException("Cannot disable — customer still holds " + crateTotal + " crates. Recover first.");
         }
 
         account.setStatus(RecordStatus.DISABLED);
@@ -329,7 +325,7 @@ public class WholesalerService {
         Supplier supplier = account.getSupplier();
         Long wholesalerId = account.getWholesaler().getId();
         BigDecimal currentDue = currentBalance(wholesalerId, PartyType.WHOLESALER_SUPPLIER, account.getId(), account.getOpeningDue());
-        CrateDue crateDue = crateDue(wholesalerId, PartyType.WHOLESALER_SUPPLIER, account.getId());
+        List<CrateTypeQuantity> crateDues = crateDues(wholesalerId, PartyType.WHOLESALER_SUPPLIER, account.getId());
         return new SupplierAccountResponse(
                 account.getId(),
                 wholesalerId,
@@ -343,9 +339,8 @@ public class WholesalerService {
                 currentDue,
                 saleItemRepository.sumLineTotalBySupplier(wholesalerId, account.getId()),
                 saleItemRepository.sumCommissionBySupplier(wholesalerId, account.getId()),
-                crateDue.bangla(),
-                crateDue.china(),
-                crateDue.total(),
+                crateDues,
+                crateTotal(crateDues),
                 account.getStatus().name(),
                 account.getCreatedAt()
         );
@@ -356,7 +351,7 @@ public class WholesalerService {
         Long wholesalerId = account.getWholesaler().getId();
         BigDecimal salePaid = saleRepository.sumPaidAmountByCustomer(wholesalerId, account.getId());
         BigDecimal laterPaid = paymentRepository.sumCashAmountByCustomer(wholesalerId, account.getId());
-        CrateDue crateDue = crateDue(wholesalerId, PartyType.WHOLESALER_CUSTOMER, account.getId());
+        List<CrateTypeQuantity> crateDues = crateDues(wholesalerId, PartyType.WHOLESALER_CUSTOMER, account.getId());
         return new CustomerAccountResponse(
                 account.getId(),
                 wholesalerId,
@@ -369,10 +364,8 @@ public class WholesalerService {
                 currentBalance(wholesalerId, PartyType.WHOLESALER_CUSTOMER, account.getId(), account.getOpeningDue()),
                 saleRepository.sumNetAmountByCustomer(wholesalerId, account.getId()),
                 salePaid.add(laterPaid),
-                account.getJamanotBalance(),
-                crateDue.bangla(),
-                crateDue.china(),
-                crateDue.total(),
+                crateDues,
+                crateTotal(crateDues),
                 account.getStatus().name(),
                 account.getCreatedAt()
         );
@@ -385,24 +378,28 @@ public class WholesalerService {
                 .orElse(openingDue == null ? BigDecimal.ZERO : openingDue);
     }
 
-    private CrateDue crateDue(Long wholesalerId, PartyType partyType, Long partyAccountId) {
-        int bangla = 0;
-        int china = 0;
+    /** Per-type crate dues for a party — one entry per crate type that has a non-zero balance. */
+    private List<CrateTypeQuantity> crateDues(Long wholesalerId, PartyType partyType, Long partyAccountId) {
+        java.util.Map<String, Long> byType = new java.util.LinkedHashMap<>();
         for (BoxBalance balance : boxBalanceRepository.findByWholesaler_IdAndPartyTypeAndPartyAccountId(wholesalerId, partyType, partyAccountId)) {
-            String typeName = balance.getBoxType().getName() == null ? "" : balance.getBoxType().getName().toUpperCase(Locale.ROOT);
-            if (typeName.equals("CHINA")) {
-                china += balance.getBoxesDue();
-            } else {
-                bangla += balance.getBoxesDue();
+            int due = balance.getBoxesDue() == null ? 0 : balance.getBoxesDue();
+            if (due == 0) {
+                continue;
             }
+            String typeName = balance.getBoxType().getName() == null ? "" : balance.getBoxType().getName().toUpperCase(Locale.ROOT);
+            byType.merge(typeName, (long) due, Long::sum);
         }
-        return new CrateDue(bangla, china);
+        return byType.entrySet().stream()
+                .map(e -> new CrateTypeQuantity(e.getKey(), e.getValue()))
+                .toList();
     }
 
-    private record CrateDue(Integer bangla, Integer china) {
-        Integer total() {
-            return bangla + china;
-        }
+    private int crateDueTotal(Long wholesalerId, PartyType partyType, Long partyAccountId) {
+        return crateTotal(crateDues(wholesalerId, partyType, partyAccountId));
+    }
+
+    private int crateTotal(List<CrateTypeQuantity> dues) {
+        return (int) dues.stream().mapToLong(CrateTypeQuantity::quantity).sum();
     }
 
     private BigDecimal positive(BigDecimal value) {

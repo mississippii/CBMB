@@ -12,7 +12,6 @@ const EMPTY_FORM = {
   phone: '',
   address: '',
   openingDue: '',
-  crateJamanot: '',
 };
 
 const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
@@ -102,7 +101,6 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
         case 'due-desc':       return Number(b.amountDue || 0) - Number(a.amountDue || 0);
         case 'due-asc':        return Number(a.amountDue || 0) - Number(b.amountDue || 0);
         case 'crates-desc':    return Number(b.totalCratesHolding || 0) - Number(a.totalCratesHolding || 0);
-        case 'jamanot-desc':   return Number(b.crateJamanot || 0) - Number(a.crateJamanot || 0);
         default: return 0;
       }
     });
@@ -154,7 +152,6 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
               <option value="due-desc">Due (high → low)</option>
               <option value="due-asc">Due (low → high)</option>
               <option value="crates-desc">Crates held (high → low)</option>
-              <option value="jamanot-desc">Jamanot (high → low)</option>
             </select>
           </div>
         </div>
@@ -244,23 +241,6 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
                   </div>
                 </div>
 
-                <div className="form-field">
-                  <label className="form-label">
-                    <Boxes size={13} /> Existing Jamanot
-                    <span className="form-label-hint">optional</span>
-                  </label>
-                  <div className="input-with-suffix">
-                    <span className="input-prefix">৳</span>
-                    <input
-                      type="number"
-                      min="0"
-                      value={formData.crateJamanot}
-                      onChange={handleField('crateJamanot')}
-                      className="input-field !pl-8"
-                      placeholder="0"
-                    />
-                  </div>
-                </div>
               </div>
 
               {formError && (
@@ -330,14 +310,10 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
                       Profile
                     </button>
                   </div>
-                  <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
+                  <div className="mt-3 grid grid-cols-2 gap-2 text-center text-xs">
                     <div className="rounded-lg bg-red-50 px-2 py-2">
                       <p className="text-slate-500">Due</p>
                       <p className="font-bold text-red-600">৳{Number(c.amountDue || 0).toLocaleString()}</p>
-                    </div>
-                    <div className="rounded-lg bg-blue-50 px-2 py-2">
-                      <p className="text-slate-500">Jamanot</p>
-                      <p className="font-bold text-blue-700">৳{Number(c.crateJamanot || 0).toLocaleString()}</p>
                     </div>
                     <div className="rounded-lg bg-slate-50 px-2 py-2">
                       <p className="text-slate-500">Crates</p>
@@ -357,7 +333,6 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
                     <th className="px-4 py-3 text-left font-semibold text-slate-700">Owner</th>
                     <th className="px-4 py-3 text-left font-semibold text-slate-700">Phone</th>
                     <th className="px-4 py-3 text-center font-semibold text-slate-700">Crates Held</th>
-                    <th className="px-4 py-3 text-right font-semibold text-slate-700">Jamanot</th>
                     <th className="px-4 py-3 text-right font-semibold text-slate-700">Payment Due</th>
                     <th className="px-4 py-3 text-center font-semibold text-slate-700">Action</th>
                   </tr>
@@ -382,9 +357,6 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
                       <td className="px-4 py-3 text-slate-700">{c.phone}</td>
                       <td className="px-4 py-3 text-center font-semibold text-slate-700">
                         {c.totalCratesHolding || 0}
-                      </td>
-                      <td className="px-4 py-3 text-right font-semibold text-blue-700">
-                        ৳{Number(c.crateJamanot || 0).toLocaleString()}
                       </td>
                       <td className="px-4 py-3 text-right font-bold text-red-600">
                         ৳{Number(c.amountDue || 0).toLocaleString()}

@@ -29,28 +29,15 @@ const loadSection = async (label, request, fallback) => {
 
 const asArray = (value) => (Array.isArray(value) ? value : []);
 
+// N-type crate inventory: totals plus a per-type map keyed by uppercase crate name.
+// Crate types are entirely backend-driven (admin catalog) — no hard-coded types.
 const EMPTY_CRATE_INVENTORY = {
   totalCratesOwned: 0,
   cratesInShop: 0,
   cratesWithSuppliers: 0,
   cratesWithCustomers: 0,
   cratesLostDamaged: 0,
-  bangla: {
-    total: 0,
-    inShop: 0,
-    withSuppliers: 0,
-    withCustomers: 0,
-    lost: 0,
-    purchasePrice: 0,
-  },
-  china: {
-    total: 0,
-    inShop: 0,
-    withSuppliers: 0,
-    withCustomers: 0,
-    lost: 0,
-    purchasePrice: 0,
-  },
+  byType: {},
 };
 
 const createDefaultState = () => ({
@@ -65,31 +52,13 @@ const createDefaultState = () => ({
 });
 
 
-const normalizeCrateType = (value) => String(value || '').trim().toUpperCase() === 'CHINA' ? 'china' : 'bangla';
-
-const createCrateTypeState = () => ({
-  total: 0,
-  inShop: 0,
-  withSuppliers: 0,
-  withCustomers: 0,
-  lost: 0,
-  purchasePrice: 0,
-});
-
+// N-type crate dashboard: keep totals plus a per-type map keyed by uppercase crate
+// name. Crate types are entirely backend-driven (admin catalog) — no hard-coded types.
 const mapCrateDashboard = (dashboard) => {
-  const next = {
-    totalCratesOwned: Number(dashboard?.totalCratesOwned) || 0,
-    cratesInShop: Number(dashboard?.cratesInShop) || 0,
-    cratesWithSuppliers: Number(dashboard?.cratesWithSuppliers) || 0,
-    cratesWithCustomers: Number(dashboard?.cratesWithCustomers) || 0,
-    cratesLostDamaged: Number(dashboard?.cratesLostDamaged) || 0,
-    bangla: createCrateTypeState(),
-    china: createCrateTypeState(),
-  };
-
+  const byType = {};
   (dashboard?.crateTypes || []).forEach((item) => {
-    const key = normalizeCrateType(item.crateType);
-    next[key] = {
+    const name = String(item.crateType || '').trim().toUpperCase();
+    byType[name] = {
       total: Number(item.total) || 0,
       inShop: Number(item.inHand) || 0,
       withSuppliers: Number(item.withSuppliers) || 0,
@@ -98,8 +67,14 @@ const mapCrateDashboard = (dashboard) => {
       purchasePrice: Number(item.purchasePrice) || 0,
     };
   });
-
-  return next;
+  return {
+    totalCratesOwned: Number(dashboard?.totalCratesOwned) || 0,
+    cratesInShop: Number(dashboard?.cratesInShop) || 0,
+    cratesWithSuppliers: Number(dashboard?.cratesWithSuppliers) || 0,
+    cratesWithCustomers: Number(dashboard?.cratesWithCustomers) || 0,
+    cratesLostDamaged: Number(dashboard?.cratesLostDamaged) || 0,
+    byType,
+  };
 };
 
 
@@ -125,6 +100,14 @@ const mapInventoryItem = (item) => ({
   status: Number(item.quantityOnHand) > 0 ? 'in_stock' : 'sold_out',
 });
 
+// Per-type crate dues from the backend: [{ crateType, quantity }]. Normalized to
+// uppercase names so callers can match against the catalog without surprises.
+const mapCrateDues = (crateDues) =>
+  (crateDues || []).map((d) => ({
+    crateType: String(d.crateType || '').trim().toUpperCase(),
+    quantity: Number(d.quantity) || 0,
+  }));
+
 const mapSupplierAccount = (account) => ({
   id: account.id,
   supplierId: account.supplierId,
@@ -141,8 +124,7 @@ const mapSupplierAccount = (account) => ({
   amountDue: roundMoney(Number(account.currentDue ?? account.openingDue) || 0),
   lastSettlementDate: account.createdAt?.split('T')[0] || getDateOnly(),
   balance: -roundMoney(Number(account.currentDue ?? account.openingDue) || 0),
-  cratesHoldingWooden: Number(account.banglaCratesDue) || 0,
-  cratesHoldingPlastic: Number(account.chinaCratesDue) || 0,
+  crateHoldings: mapCrateDues(account.crateDues),
   totalCratesHolding: Number(account.totalCratesDue) || 0,
   status: account.status || 'ACTIVE',
 });
@@ -159,9 +141,7 @@ const mapCustomerAccount = (account) => ({
   totalPurchases: roundMoney(Number(account.totalPurchases) || 0),
   totalPaid: roundMoney(Number(account.totalPaid) || 0),
   amountDue: roundMoney(Number(account.currentDue ?? account.openingDue) || 0),
-  crateJamanot: roundMoney(Number(account.jamanotBalance) || 0),
-  cratesHoldingWooden: Number(account.banglaCratesDue) || 0,
-  cratesHoldingPlastic: Number(account.chinaCratesDue) || 0,
+  crateHoldings: mapCrateDues(account.crateDues),
   totalCratesHolding: Number(account.totalCratesDue) || 0,
   status: account.status || 'ACTIVE',
 });
@@ -208,6 +188,7 @@ const mapTransaction = (transaction) => ({
   transactionType: transaction.transactionType === 'PAYMENT' ? 'Payment' : 'Sale',
   saleId: transaction.saleId || null,
   paymentId: transaction.paymentId || null,
+  settlementId: transaction.settlementId || null,
   customerId: transaction.wholesalerCustomerId,
   customer: transaction.customerName || null,
   customerPhone: transaction.customerPhone || null,
@@ -229,7 +210,6 @@ const mapTransaction = (transaction) => ({
   paymentAmount: Number(transaction.paymentAmount) || 0,
   customerNewDue: Number(transaction.dueAmount) || 0,
   cratesReturned: Number(transaction.cratesReturned) || 0,
-  boxJamanotChange: Number(transaction.jamanotAmount) ? -Number(transaction.jamanotAmount) : 0,
   paymentOperationType: transaction.paymentType || '',
   paymentType: transaction.paymentType || transaction.description || '',
   note: transaction.description || '',
@@ -599,7 +579,6 @@ export const DataProvider = ({ children }) => {
       phone: customerData.phone,
       address: customerData.address,
       openingDue: Number(customerData.openingDue) || 0,
-      jamanotBalance: Number(customerData.crateJamanot) || 0,
     };
 
     const account = await postJson(apiPaths.wholesalerCustomersCreate(admin.wholesalerId), payload);
@@ -646,10 +625,8 @@ export const DataProvider = ({ children }) => {
       unitPrice,
       discountAmount,
       paymentAmount,
+      crateType: saleData.crateType || null,
       cratesGiven: Number(saleData.cratesGiven) || 0,
-      banglaCratesGiven: Number(saleData.banglaCratesGiven) || 0,
-      chinaCratesGiven: Number(saleData.chinaCratesGiven) || 0,
-      jamanotAmount: Number(saleData.jamanotAmount) || 0,
     });
 
     setSupplierProducts((prev) =>
@@ -672,9 +649,6 @@ export const DataProvider = ({ children }) => {
               amountDue: roundMoney(Number(response.customerDueBalance) || 0),
               totalPurchases: roundMoney((customer.totalPurchases || 0) + Number(response.netAmount || 0)),
               totalPaid: roundMoney((customer.totalPaid || 0) + Number(response.paidAmount || 0)),
-              crateJamanot: roundMoney(Number(response.customerJamanotBalance ?? customer.crateJamanot) || 0),
-              cratesHoldingWooden: roundMoney((customer.cratesHoldingWooden || 0) + Number(response.banglaCratesGiven || 0)),
-              cratesHoldingPlastic: roundMoney((customer.cratesHoldingPlastic || 0) + Number(response.chinaCratesGiven || 0)),
               totalCratesHolding: roundMoney((customer.totalCratesHolding || 0) + Number(response.cratesGiven || 0)),
             }
           : customer,
@@ -695,24 +669,24 @@ export const DataProvider = ({ children }) => {
     );
 
     if (Number(response.cratesGiven || 0) > 0) {
-      const banglaCount = Number(response.banglaCratesGiven || 0);
-      const chinaCount = Number(response.chinaCratesGiven || 0);
-      const crateCount = banglaCount + chinaCount;
-      setCrateInventory((prev) => ({
-        ...prev,
-        cratesInShop: Math.max((prev.cratesInShop || 0) - crateCount, 0),
-        cratesWithCustomers: (prev.cratesWithCustomers || 0) + crateCount,
-        bangla: {
-          ...prev.bangla,
-          inShop: Math.max((prev.bangla?.inShop || 0) - banglaCount, 0),
-          withCustomers: (prev.bangla?.withCustomers || 0) + banglaCount,
-        },
-        china: {
-          ...prev.china,
-          inShop: Math.max((prev.china?.inShop || 0) - chinaCount, 0),
-          withCustomers: (prev.china?.withCustomers || 0) + chinaCount,
-        },
-      }));
+      const crateCount = Number(response.cratesGiven || 0);
+      const type = String(response.crateType || '').trim().toUpperCase();
+      setCrateInventory((prev) => {
+        const prevType = prev.byType?.[type] || {};
+        return {
+          ...prev,
+          cratesInShop: Math.max((prev.cratesInShop || 0) - crateCount, 0),
+          cratesWithCustomers: (prev.cratesWithCustomers || 0) + crateCount,
+          byType: {
+            ...prev.byType,
+            [type]: {
+              ...prevType,
+              inShop: Math.max((prevType.inShop || 0) - crateCount, 0),
+              withCustomers: (prevType.withCustomers || 0) + crateCount,
+            },
+          },
+        };
+      });
     }
 
     const transaction = {
@@ -736,10 +710,8 @@ export const DataProvider = ({ children }) => {
       customerType: response.customerType || 'PERMANENT',
       customerNewDue: Number(response.customerDueBalance) || 0,
       commissionAmount: Number(response.commissionAmount) || 0,
+      crateType: response.crateType || null,
       cratesGiven: Number(response.cratesGiven) || 0,
-      banglaCratesGiven: Number(response.banglaCratesGiven) || 0,
-      chinaCratesGiven: Number(response.chinaCratesGiven) || 0,
-      jamanotAmount: Number(response.jamanotAmount) || 0,
     };
 
     setTransactions((prev) => [...prev, transaction]);
@@ -786,305 +758,6 @@ export const DataProvider = ({ children }) => {
       }),
     );
     return appliedAmount;
-  };
-
-  const recordCustomerBoxReturn = (customerId, woodenReturn, plasticReturn) => {
-    const wooden = Math.max(0, Math.floor(Number(woodenReturn) || 0));
-    const plastic = Math.max(0, Math.floor(Number(plasticReturn) || 0));
-
-    if (!wooden && !plastic) return { wooden: 0, plastic: 0 };
-
-    let appliedWooden = 0;
-    let appliedPlastic = 0;
-
-    const targetCustomer = customers.find((customer) => customer.id === customerId);
-    if (!targetCustomer) return { wooden: 0, plastic: 0 };
-
-    appliedWooden = Math.min(wooden, targetCustomer.cratesHoldingWooden || 0);
-    appliedPlastic = Math.min(plastic, targetCustomer.cratesHoldingPlastic || 0);
-
-    if (!appliedWooden && !appliedPlastic) return { wooden: 0, plastic: 0 };
-
-    setCustomers((prev) =>
-      prev.map((customer) =>
-        customer.id === customerId
-          ? {
-              ...customer,
-              cratesHoldingWooden: Math.max((customer.cratesHoldingWooden || 0) - appliedWooden, 0),
-              cratesHoldingPlastic: Math.max((customer.cratesHoldingPlastic || 0) - appliedPlastic, 0),
-              totalCratesHolding: Math.max(
-                (customer.totalCratesHolding || 0) - (appliedWooden + appliedPlastic),
-                0,
-              ),
-            }
-          : customer,
-      ),
-    );
-
-    setCrateInventory((prev) => ({
-      ...prev,
-      cratesInShop: prev.cratesInShop + appliedWooden + appliedPlastic,
-      cratesWithCustomers: Math.max(prev.cratesWithCustomers - (appliedWooden + appliedPlastic), 0),
-      bangla: {
-        ...prev.bangla,
-        inShop: prev.bangla.inShop + appliedWooden,
-        withCustomers: Math.max(prev.bangla.withCustomers - appliedWooden, 0),
-      },
-      china: {
-        ...prev.china,
-        inShop: prev.china.inShop + appliedPlastic,
-        withCustomers: Math.max(prev.china.withCustomers - appliedPlastic, 0),
-      },
-    }));
-
-    return { wooden: appliedWooden, plastic: appliedPlastic };
-  };
-
-  const recordSupplierBoxReturn = (supplierId, woodenReturn, plasticReturn) => {
-    const wooden = Math.max(0, Math.floor(Number(woodenReturn) || 0));
-    const plastic = Math.max(0, Math.floor(Number(plasticReturn) || 0));
-
-    if (!wooden && !plastic) return { wooden: 0, plastic: 0 };
-
-    let appliedWooden = 0;
-    let appliedPlastic = 0;
-
-    const targetSupplier = suppliers.find((supplier) => supplier.id === supplierId);
-    if (!targetSupplier) return { wooden: 0, plastic: 0 };
-
-    appliedWooden = Math.min(wooden, targetSupplier.cratesHoldingWooden || 0);
-    appliedPlastic = Math.min(plastic, targetSupplier.cratesHoldingPlastic || 0);
-
-    if (!appliedWooden && !appliedPlastic) return { wooden: 0, plastic: 0 };
-
-    setSuppliers((prev) =>
-      prev.map((supplier) =>
-        supplier.id === supplierId
-          ? {
-              ...supplier,
-              cratesHoldingWooden: Math.max((supplier.cratesHoldingWooden || 0) - appliedWooden, 0),
-              cratesHoldingPlastic: Math.max((supplier.cratesHoldingPlastic || 0) - appliedPlastic, 0),
-              totalCratesHolding: Math.max(
-                (supplier.totalCratesHolding || 0) - (appliedWooden + appliedPlastic),
-                0,
-              ),
-            }
-          : supplier,
-      ),
-    );
-
-    setCrateInventory((prev) => ({
-      ...prev,
-      cratesInShop: prev.cratesInShop + appliedWooden + appliedPlastic,
-      cratesWithSuppliers: Math.max(prev.cratesWithSuppliers - (appliedWooden + appliedPlastic), 0),
-      bangla: {
-        ...prev.bangla,
-        inShop: prev.bangla.inShop + appliedWooden,
-        withSuppliers: Math.max(prev.bangla.withSuppliers - appliedWooden, 0),
-      },
-      china: {
-        ...prev.china,
-        inShop: prev.china.inShop + appliedPlastic,
-        withSuppliers: Math.max(prev.china.withSuppliers - appliedPlastic, 0),
-      },
-    }));
-
-    return { wooden: appliedWooden, plastic: appliedPlastic };
-  };
-
-  const recordAccountTransaction = async (transactionData) => {
-    if (!admin?.wholesalerId) {
-      throw new Error('Wholesaler profile not found for this user.');
-    }
-
-    const partyType = transactionData.partyType === 'supplier' ? 'supplier' : 'customer';
-    const partyId = Number(transactionData.partyId);
-    const inputAmount = roundMoney(Math.max(0, Number(transactionData.amount) || 0));
-    const banglaCrates = Math.max(0, Math.floor(Number(transactionData.woodenReturn) || 0));
-    const chinaCrates = Math.max(0, Math.floor(Number(transactionData.plasticReturn) || 0));
-    const jamanotAmount = roundMoney(Math.max(0, Number(transactionData.boxJamanotChange) || 0));
-    const includesCash = inputAmount > 0;
-    const includesCrates = banglaCrates + chinaCrates > 0;
-
-    if (!partyId) {
-      throw new Error('Please select a valid customer or supplier.');
-    }
-    if (!includesCash && !includesCrates) {
-      throw new Error('Enter at least one update: cash amount or crate quantity.');
-    }
-
-    let response;
-    let partyName = '';
-    let operationLabel = 'Payment';
-
-    if (partyType === 'customer') {
-      const customer = customers.find((item) => item.id === partyId);
-      if (!customer) {
-        throw new Error('Customer not found.');
-      }
-      if (inputAmount > Number(customer.amountDue || 0)) {
-        throw new Error('Cash received cannot exceed customer due.');
-      }
-      if (jamanotAmount > Number(customer.crateJamanot || 0)) {
-        throw new Error('Jamanot refund cannot exceed customer jamanot balance.');
-      }
-
-      partyName = customer.name;
-      response = await postJson(apiPaths.paymentsCustomerSettle(admin.wholesalerId), {
-        wholesalerCustomerId: partyId,
-        cashAmount: includesCash ? inputAmount : 0,
-        banglaCratesReturned: includesCrates ? banglaCrates : 0,
-        chinaCratesReturned: includesCrates ? chinaCrates : 0,
-        jamanotAmount: includesCrates ? jamanotAmount : 0,
-        paymentMethod: 'CASH',
-        note: transactionData.note?.trim() || '',
-      });
-
-      setCustomers((prev) =>
-        prev.map((customerItem) =>
-          customerItem.id === partyId
-            ? {
-                ...customerItem,
-                amountDue: roundMoney(Number(response.dueAfter) || 0),
-                totalPaid: roundMoney((customerItem.totalPaid || 0) + Number(response.cashAmount || 0)),
-                crateJamanot: roundMoney(Number(response.jamanotAfter ?? customerItem.crateJamanot) || 0),
-                cratesHoldingWooden: Math.max((customerItem.cratesHoldingWooden || 0) - Number(response.banglaCrates || 0), 0),
-                cratesHoldingPlastic: Math.max((customerItem.cratesHoldingPlastic || 0) - Number(response.chinaCrates || 0), 0),
-                totalCratesHolding: Math.max(
-                  (customerItem.totalCratesHolding || 0) - Number(response.banglaCrates || 0) - Number(response.chinaCrates || 0),
-                  0,
-                ),
-              }
-            : customerItem,
-        ),
-      );
-
-      setCrateInventory((prev) => ({
-        ...prev,
-        cratesInShop: (prev.cratesInShop || 0) + Number(response.banglaCrates || 0) + Number(response.chinaCrates || 0),
-        cratesWithCustomers: Math.max(
-          (prev.cratesWithCustomers || 0) - Number(response.banglaCrates || 0) - Number(response.chinaCrates || 0),
-          0,
-        ),
-        bangla: {
-          ...prev.bangla,
-          inShop: (prev.bangla?.inShop || 0) + Number(response.banglaCrates || 0),
-          withCustomers: Math.max((prev.bangla?.withCustomers || 0) - Number(response.banglaCrates || 0), 0),
-        },
-        china: {
-          ...prev.china,
-          inShop: (prev.china?.inShop || 0) + Number(response.chinaCrates || 0),
-          withCustomers: Math.max((prev.china?.withCustomers || 0) - Number(response.chinaCrates || 0), 0),
-        },
-      }));
-    } else {
-      const supplier = suppliers.find((item) => item.id === partyId);
-      if (!supplier) {
-        throw new Error('Supplier not found.');
-      }
-      partyName = supplier.name;
-
-      if (includesCash) {
-        const supplierPaymentKind = transactionData.supplierPaymentKind || 'PRODUCT_PAYMENT';
-        const pathByKind = {
-          PRODUCT_PAYMENT: apiPaths.paymentsSupplierProductPay,
-          COMMISSION_RECEIVE: apiPaths.paymentsSupplierCommissionReceive,
-          EXPENSE_RECEIVE: apiPaths.paymentsSupplierExpenseReceive,
-        };
-        const endpoint = pathByKind[supplierPaymentKind] || apiPaths.paymentsSupplierProductPay;
-        response = await postJson(endpoint(admin.wholesalerId), {
-          wholesalerSupplierId: partyId,
-          amount: inputAmount,
-          paymentMethod: 'CASH',
-          note: transactionData.note?.trim() || '',
-        });
-        operationLabel = supplierPaymentKind;
-
-        setSuppliers((prev) =>
-          prev.map((supplierItem) =>
-            supplierItem.id === partyId
-              ? {
-                  ...supplierItem,
-                  amountDue: roundMoney(Number(response.dueAfter ?? supplierItem.amountDue) || 0),
-                  advancePaymentsMade:
-                    supplierPaymentKind === 'PRODUCT_PAYMENT'
-                      ? roundMoney((supplierItem.advancePaymentsMade || 0) + Number(response.cashAmount || 0))
-                      : supplierItem.advancePaymentsMade,
-                  lastSettlementDate: getDateOnly(),
-                }
-              : supplierItem,
-          ),
-        );
-      }
-
-      if (includesCrates) {
-        const crateDirection = transactionData.supplierCrateDirection === 'give' ? 'give' : 'return';
-        const endpoint = crateDirection === 'give' ? apiPaths.paymentsSupplierCrateGive : apiPaths.paymentsSupplierCrateReturn;
-        const crateResponse = await postJson(endpoint(admin.wholesalerId), {
-          wholesalerSupplierId: partyId,
-          banglaCrates,
-          chinaCrates,
-          note: transactionData.note?.trim() || '',
-        });
-        response = response || crateResponse;
-        operationLabel = crateDirection === 'give' ? 'SUPPLIER_CRATE_GIVE' : 'SUPPLIER_CRATE_RETURN';
-        const sign = crateDirection === 'give' ? 1 : -1;
-        const inventorySign = crateDirection === 'give' ? -1 : 1;
-
-        setSuppliers((prev) =>
-          prev.map((supplierItem) =>
-            supplierItem.id === partyId
-              ? {
-                  ...supplierItem,
-                  cratesHoldingWooden: Math.max((supplierItem.cratesHoldingWooden || 0) + sign * banglaCrates, 0),
-                  cratesHoldingPlastic: Math.max((supplierItem.cratesHoldingPlastic || 0) + sign * chinaCrates, 0),
-                  totalCratesHolding: Math.max((supplierItem.totalCratesHolding || 0) + sign * (banglaCrates + chinaCrates), 0),
-                }
-              : supplierItem,
-          ),
-        );
-        setCrateInventory((prev) => ({
-          ...prev,
-          cratesInShop: Math.max((prev.cratesInShop || 0) + inventorySign * (banglaCrates + chinaCrates), 0),
-          cratesWithSuppliers: Math.max((prev.cratesWithSuppliers || 0) - inventorySign * (banglaCrates + chinaCrates), 0),
-          bangla: {
-            ...prev.bangla,
-            inShop: Math.max((prev.bangla?.inShop || 0) + inventorySign * banglaCrates, 0),
-            withSuppliers: Math.max((prev.bangla?.withSuppliers || 0) - inventorySign * banglaCrates, 0),
-          },
-          china: {
-            ...prev.china,
-            inShop: Math.max((prev.china?.inShop || 0) + inventorySign * chinaCrates, 0),
-            withSuppliers: Math.max((prev.china?.withSuppliers || 0) - inventorySign * chinaCrates, 0),
-          },
-        }));
-      }
-    }
-
-    const newTransaction = {
-      id: response.transactionId || getNextId(transactions),
-      date: getDateOnly(),
-      createdAt: response.createdAt || new Date().toISOString(),
-      transactionType: 'Payment',
-      partyType: partyType === 'customer' ? 'Customer' : 'Supplier',
-      partyName,
-      partyId,
-      paymentType: operationLabel,
-      totalAmount: inputAmount,
-      paymentAmount: Number(response.cashAmount || inputAmount || 0),
-      dueAmountChange: 0,
-      customerNewDue: partyType === 'customer' ? Number(response.dueAfter || 0) : null,
-      boxReturnWooden: banglaCrates,
-      boxReturnPlastic: chinaCrates,
-      boxJamanotChange: partyType === 'customer' ? -jamanotAmount : 0,
-      note: transactionData.note?.trim() || '',
-    };
-
-    setTransactions((prev) => [...prev, newTransaction]);
-    invalidate.moneyEvent();
-    invalidate.crates();
-    invalidate.profile(partyType, partyAccount.id);
-    return newTransaction;
   };
 
   const getCustomerProfile = async (customerId) => {
@@ -1269,43 +942,25 @@ export const DataProvider = ({ children }) => {
     return mapped;
   };
 
-  /**
-   * Mark crates lost/damaged. Pass `compensation` to charge a party for the loss instead
-   * of absorbing it as a wholesaler expense:
-   *   compensation: {
-   *     partyType: 'WHOLESALER_CUSTOMER' | 'WHOLESALER_SUPPLIER',
-   *     partyAccountId: number,
-   *     amount?: number,          // defaults to quantity × unit_cost on the backend
-   *   }
-   */
-  const markCratesLost = async (crateType, quantityInput, reason = 'lost', compensation = null) => {
+  /** Mark crates lost/damaged. Loss is always absorbed against crate capital at WAC. */
+  const markCratesLost = async (crateType, quantityInput, reason = 'lost') => {
     if (!admin?.wholesalerId) {
       throw new Error('Wholesaler profile not found for this user.');
     }
     const quantity = Math.max(0, Math.floor(Number(quantityInput) || 0));
     if (!quantity) return mapCrateDashboard(null);
 
-    const payload = {
+    const dashboard = await postJson(apiPaths.cratesLostDamagedCreate(admin.wholesalerId), {
       crateType: String(crateType || '').toUpperCase(),
       quantity,
       reason,
       note: 'Manual crate loss/damage update',
-    };
-    if (compensation?.partyType && compensation?.partyAccountId) {
-      payload.compensationPartyType = compensation.partyType;
-      payload.compensationPartyAccountId = compensation.partyAccountId;
-      if (compensation.amount != null && compensation.amount !== '') {
-        payload.compensationAmount = Number(compensation.amount);
-      }
-    }
-
-    const dashboard = await postJson(apiPaths.cratesLostDamagedCreate(admin.wholesalerId), payload);
+    });
     const mapped = mapCrateDashboard(dashboard);
     setCrateInventory(mapped);
     refreshTransactions();
     invalidate.crates();
     invalidate.transactions();
-    if (compensation?.partyAccountId) invalidate.moneyEvent();
     return mapped;
   };
 
@@ -1347,11 +1002,8 @@ export const DataProvider = ({ children }) => {
         reloadCustomers,
         addTransaction: recordSale,
         recordSale,
-        recordAccountTransaction,
         recordCustomerPayment,
         recordSupplierPayment,
-        recordCustomerBoxReturn,
-        recordSupplierBoxReturn,
         addSupplierProduct,
         getSupplierShipments,
         setShipmentCommission,

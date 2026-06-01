@@ -1,14 +1,13 @@
 package org.example.dto;
 
 import java.math.BigDecimal;
+import java.util.List;
 import org.example.model.enums.PaymentMethod;
 
 public record CustomerSettlementRequest(
         Long wholesalerCustomerId,
         BigDecimal cashAmount,
-        Integer banglaCratesReturned,
-        Integer chinaCratesReturned,
-        BigDecimal jamanotAmount,
+        List<CrateLineRequest> crateReturns,
         PaymentMethod paymentMethod,
         String note
 ) {

@@ -39,9 +39,6 @@ public class WholesalerCustomer {
     @Column(name = "opening_due", nullable = false, precision = 14, scale = 2)
     private BigDecimal openingDue = BigDecimal.ZERO;
 
-    @Column(name = "jamanot_balance", nullable = false, precision = 14, scale = 2)
-    private BigDecimal jamanotBalance = BigDecimal.ZERO;
-
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private RecordStatus status = RecordStatus.ACTIVE;
@@ -82,14 +79,6 @@ public class WholesalerCustomer {
 
     public void setOpeningDue(BigDecimal openingDue) {
         this.openingDue = openingDue;
-    }
-
-    public BigDecimal getJamanotBalance() {
-        return jamanotBalance;
-    }
-
-    public void setJamanotBalance(BigDecimal jamanotBalance) {
-        this.jamanotBalance = jamanotBalance;
     }
 
     public RecordStatus getStatus() {

@@ -5,13 +5,16 @@ import java.time.LocalDateTime;
 import java.time.YearMonth;
 import java.time.format.DateTimeFormatter;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import org.example.dto.CrateDashboardResponse;
 import org.example.dto.CrateInventoryTypeResponse;
 import org.example.dto.CrateLossStatsResponse;
+import org.example.dto.CrateTypeQuantity;
 import org.example.dto.CrateQuantityRequest;
 import org.example.exception.BadRequestException;
 import org.example.model.AccountBalance;
@@ -19,6 +22,7 @@ import org.example.model.AccountLedger;
 import org.example.model.BoxInventory;
 import org.example.model.BoxLedger;
 import org.example.model.BoxType;
+import org.example.model.CrateType;
 import org.example.model.Transaction;
 import org.example.model.Wholesaler;
 import org.example.model.WholesalerCustomer;
@@ -35,6 +39,7 @@ import org.example.repository.AccountLedgerRepository;
 import org.example.repository.BoxInventoryRepository;
 import org.example.repository.BoxLedgerRepository;
 import org.example.repository.BoxTypeRepository;
+import org.example.repository.CrateTypeRepository;
 import org.example.repository.TransactionRepository;
 import org.example.repository.WholesalerCustomerRepository;
 import org.example.repository.WholesalerRepository;
@@ -55,6 +60,7 @@ public class CrateService {
     private final AccountBalanceService accountBalanceService;
     private final AccountBalanceRepository accountBalanceRepository;
     private final AccountLedgerRepository accountLedgerRepository;
+    private final CrateTypeRepository crateTypeRepository;
 
     public CrateService(
             WholesalerRepository wholesalerRepository,
@@ -66,7 +72,8 @@ public class CrateService {
             WholesalerSupplierRepository wholesalerSupplierRepository,
             AccountBalanceService accountBalanceService,
             AccountBalanceRepository accountBalanceRepository,
-            AccountLedgerRepository accountLedgerRepository
+            AccountLedgerRepository accountLedgerRepository,
+            CrateTypeRepository crateTypeRepository
     ) {
         this.wholesalerRepository = wholesalerRepository;
         this.boxTypeRepository = boxTypeRepository;
@@ -78,12 +85,13 @@ public class CrateService {
         this.accountBalanceService = accountBalanceService;
         this.accountBalanceRepository = accountBalanceRepository;
         this.accountLedgerRepository = accountLedgerRepository;
+        this.crateTypeRepository = crateTypeRepository;
     }
 
     @Transactional
     public CrateDashboardResponse getDashboard(Long wholesalerId) {
         Wholesaler wholesaler = findWholesaler(wholesalerId);
-        ensureDefaultBoxTypes(wholesaler);
+        ensureBoxTypesFromCatalog(wholesaler);
         List<CrateInventoryTypeResponse> typeResponses = boxTypeRepository
                 .findByWholesaler_IdAndStatusOrderByNameAsc(wholesalerId, RecordStatus.ACTIVE)
                 .stream()
@@ -116,32 +124,37 @@ public class CrateService {
         LocalDateTime since = thisMonth.minusMonths(months - 1L).atDay(1).atStartOfDay();
         List<Object[]> rows = boxLedgerRepository.findLostStats(wholesalerId, since);
 
-        // Pre-fill the last N months so the chart has zero buckets too
-        Map<String, long[]> map = new LinkedHashMap<>();
+        // Pre-fill the last N months so the chart has zero buckets too. Each month maps
+        // crate-type name -> quantity lost (N-type, driven entirely by the data).
+        Map<String, Map<String, Long>> byMonth = new LinkedHashMap<>();
         DateTimeFormatter fmt = DateTimeFormatter.ofPattern("yyyy-MM");
         for (int i = months - 1; i >= 0; i--) {
-            map.put(thisMonth.minusMonths(i).format(fmt), new long[]{0, 0});
+            byMonth.put(thisMonth.minusMonths(i).format(fmt), new LinkedHashMap<>());
         }
 
+        Map<String, Long> grandByType = new LinkedHashMap<>();
         for (Object[] row : rows) {
             String month = (String) row[0];
-            String boxType = ((String) row[1]).toUpperCase();
+            String boxType = ((String) row[1]).toUpperCase(Locale.ROOT);
             long qty = ((Number) row[3]).longValue();
-            long[] entry = map.computeIfAbsent(month, k -> new long[]{0, 0});
-            if ("BANGLA".equals(boxType)) entry[0] += qty;
-            else if ("CHINA".equals(boxType)) entry[1] += qty;
+            byMonth.computeIfAbsent(month, k -> new LinkedHashMap<>()).merge(boxType, qty, Long::sum);
+            grandByType.merge(boxType, qty, Long::sum);
         }
 
         List<CrateLossStatsResponse.MonthBucket> buckets = new ArrayList<>();
-        long totalBangla = 0, totalChina = 0;
-        for (Map.Entry<String, long[]> e : map.entrySet()) {
-            long b = e.getValue()[0];
-            long c = e.getValue()[1];
-            totalBangla += b;
-            totalChina += c;
-            buckets.add(new CrateLossStatsResponse.MonthBucket(e.getKey(), b, c, b + c));
+        for (Map.Entry<String, Map<String, Long>> e : byMonth.entrySet()) {
+            List<CrateTypeQuantity> monthTypes = e.getValue().entrySet().stream()
+                    .map(t -> new CrateTypeQuantity(t.getKey(), t.getValue()))
+                    .toList();
+            long monthTotal = monthTypes.stream().mapToLong(CrateTypeQuantity::quantity).sum();
+            buckets.add(new CrateLossStatsResponse.MonthBucket(e.getKey(), monthTotal, monthTypes));
         }
-        return new CrateLossStatsResponse(months, totalBangla + totalChina, totalBangla, totalChina, buckets);
+
+        List<CrateTypeQuantity> byType = grandByType.entrySet().stream()
+                .map(t -> new CrateTypeQuantity(t.getKey(), t.getValue()))
+                .toList();
+        long totalLost = byType.stream().mapToLong(CrateTypeQuantity::quantity).sum();
+        return new CrateLossStatsResponse(months, totalLost, byType, buckets);
     }
 
     /**
@@ -218,71 +231,13 @@ public class CrateService {
         boxInventoryRepository.save(inventory);
 
         // Snapshot weighted-average cost so future purchases / price edits don't shift historical P&L.
+        // Loss is always absorbed against crate capital — snapshot the WAC for the P&L.
         BigDecimal unitCost = money(inventory.getWeightedAvgCost());
-        BoxLedger lossLedger = saveLossLedger(wholesaler, boxType, movementType, quantity, request.note(), unitCost);
+        saveLossLedger(wholesaler, boxType, movementType, quantity, request.note(), unitCost);
 
-        // If the caller named a compensating party, post the receivable now.
-        PartyType compParty = parseCompensationParty(request.compensationPartyType());
-        if (compParty != null) {
-            BigDecimal compAmount = compensationAmountFor(request.compensationAmount(), unitCost, quantity);
-            Long compLedgerId = postCompensationReceivable(
-                    wholesaler, compParty, request.compensationPartyAccountId(), compAmount,
-                    quantity, boxType, movementType
-            );
-            lossLedger.setCompensationAccountLedgerId(compLedgerId);
-            boxLedgerRepository.save(lossLedger);
-        }
-
-        String txnDesc = quantity + " " + boxType.getName() + " crates marked " + movementType.name().toLowerCase()
-                + (compParty == null ? " (absorbed)" : " (charged to " + compParty.name() + ")");
+        String txnDesc = quantity + " " + boxType.getName() + " crates marked "
+                + movementType.name().toLowerCase() + " (absorbed)";
         saveTransaction(wholesalerId, txnDesc);
-        return getDashboard(wholesalerId);
-    }
-
-    /**
-     * Retroactively mark a previously-absorbed loss as compensated. Posts the receivable
-     * against the named party and stamps the box_ledger row with the new ledger id so
-     * the P&L stops counting it as a wholesaler-borne cost.
-     *
-     * Idempotent guard: re-calling on an already-compensated row throws.
-     */
-    @Transactional
-    public CrateDashboardResponse markLossCompensated(Long wholesalerId, Long boxLedgerId, CrateQuantityRequest request) {
-        Wholesaler wholesaler = findWholesaler(wholesalerId);
-        BoxLedger lossLedger = boxLedgerRepository
-                .findOneByWholesalerAndId(wholesalerId, boxLedgerId)
-                .orElseThrow(() -> new BadRequestException("Loss record not found."));
-
-        if (lossLedger.getMovementType() != BoxMovementType.LOST && lossLedger.getMovementType() != BoxMovementType.DAMAGED) {
-            throw new BadRequestException("Only LOST or DAMAGED rows can be compensated.");
-        }
-        if (lossLedger.getCompensationAccountLedgerId() != null) {
-            throw new BadRequestException("This loss is already marked as compensated.");
-        }
-
-        PartyType compParty = parseCompensationParty(request.compensationPartyType());
-        if (compParty == null) {
-            throw new BadRequestException("compensationPartyType is required (WHOLESALER_CUSTOMER or WHOLESALER_SUPPLIER).");
-        }
-
-        BigDecimal unitCost = lossLedger.getUnitCostSnapshot() != null
-                ? lossLedger.getUnitCostSnapshot()
-                : money(lossLedger.getBoxType().getPurchasePrice());
-        BigDecimal compAmount = compensationAmountFor(request.compensationAmount(), unitCost, lossLedger.getQuantity());
-
-        Long compLedgerId = postCompensationReceivable(
-                wholesaler, compParty, request.compensationPartyAccountId(), compAmount,
-                lossLedger.getQuantity(), lossLedger.getBoxType(), lossLedger.getMovementType()
-        );
-        lossLedger.setCompensationAccountLedgerId(compLedgerId);
-        if (lossLedger.getUnitCostSnapshot() == null) {
-            lossLedger.setUnitCostSnapshot(unitCost);
-        }
-        boxLedgerRepository.save(lossLedger);
-
-        saveTransaction(wholesalerId,
-                "Loss compensated — " + lossLedger.getQuantity() + " " + lossLedger.getBoxType().getName()
-                        + " charged to " + compParty.name());
         return getDashboard(wholesalerId);
     }
 
@@ -374,77 +329,6 @@ public class CrateService {
                             + " (cash ৳" + saleAmount + ")");
         }
         return getDashboard(wholesalerId);
-    }
-
-    private Long postCompensationReceivable(
-            Wholesaler wholesaler,
-            PartyType partyType,
-            Long partyAccountId,
-            BigDecimal amount,
-            int quantity,
-            BoxType boxType,
-            BoxMovementType movementType
-    ) {
-        if (partyAccountId == null) {
-            throw new BadRequestException("compensationPartyAccountId is required when a party is named.");
-        }
-        if (amount == null || amount.signum() <= 0) {
-            throw new BadRequestException("Compensation amount must be greater than zero.");
-        }
-        // Validate the party belongs to this wholesaler — keep cross-tenant safety.
-        if (partyType == PartyType.WHOLESALER_CUSTOMER) {
-            WholesalerCustomer customer = wholesalerCustomerRepository
-                    .findByWholesaler_IdAndId(wholesaler.getId(), partyAccountId)
-                    .orElseThrow(() -> new BadRequestException("Customer not found for this wholesaler."));
-            accountBalanceService.getOrCreate(wholesaler, partyType, customer.getId(), customer.getOpeningDue());
-        } else if (partyType == PartyType.WHOLESALER_SUPPLIER) {
-            WholesalerSupplier supplier = wholesalerSupplierRepository
-                    .findByWholesaler_IdAndId(wholesaler.getId(), partyAccountId)
-                    .orElseThrow(() -> new BadRequestException("Supplier not found for this wholesaler."));
-            accountBalanceService.getOrCreate(wholesaler, partyType, supplier.getId(), supplier.getOpeningDue());
-        } else {
-            throw new BadRequestException("Unsupported party type for crate compensation.");
-        }
-
-        AccountBalance balance = accountBalanceRepository
-                .findByWholesaler_IdAndPartyTypeAndPartyAccountId(wholesaler.getId(), partyType, partyAccountId)
-                .orElseThrow(() -> new BadRequestException("Account balance not initialized."));
-
-        // Customer: +amount (customer owes more). Supplier: -amount (reduces what we owe / supplier credits us).
-        BigDecimal delta = partyType == PartyType.WHOLESALER_CUSTOMER ? amount : amount.negate();
-        balance.setBalance(money(balance.getBalance().add(delta)));
-        accountBalanceRepository.save(balance);
-
-        AccountLedger ledger = new AccountLedger();
-        ledger.setWholesaler(wholesaler);
-        ledger.setPartyType(partyType);
-        ledger.setPartyAccountId(partyAccountId);
-        ledger.setReferenceType(AccountReferenceType.CRATE_LOSS_COMPENSATION);
-        // referenceId will be back-filled with the box_ledger id by caller (we don't have it yet
-        // when this is called from markLostOrDamaged — the loss ledger is saved first but not flushed).
-        ledger.setReferenceId(null);
-        // Charging a party = DEBIT (they owe us this amount).
-        ledger.setDebit(amount);
-        ledger.setCredit(BigDecimal.ZERO);
-        ledger.setNote("Charge for " + quantity + " " + boxType.getName() + " " + movementType.name().toLowerCase());
-        AccountLedger saved = accountLedgerRepository.save(ledger);
-        return saved.getId();
-    }
-
-    private static PartyType parseCompensationParty(String raw) {
-        if (raw == null) return null;
-        String upper = raw.trim().toUpperCase(Locale.ROOT);
-        if (upper.isEmpty() || upper.equals("NONE")) return null;
-        return switch (upper) {
-            case "WHOLESALER_CUSTOMER", "CUSTOMER" -> PartyType.WHOLESALER_CUSTOMER;
-            case "WHOLESALER_SUPPLIER", "SUPPLIER" -> PartyType.WHOLESALER_SUPPLIER;
-            default -> throw new BadRequestException("Invalid compensationPartyType: " + raw);
-        };
-    }
-
-    private static BigDecimal compensationAmountFor(BigDecimal override, BigDecimal unitCost, int quantity) {
-        if (override != null) return money(override);
-        return money(unitCost.multiply(BigDecimal.valueOf(quantity)));
     }
 
     private static BigDecimal money(BigDecimal value) {
@@ -573,21 +457,50 @@ public class CrateService {
     private BoxType findBoxType(Long wholesalerId, String value) {
         Wholesaler wholesaler = findWholesaler(wholesalerId);
         String boxType = normalizeBoxType(value);
-        return boxTypeRepository.findByWholesaler_IdAndNameIgnoreCaseAndStatus(wholesalerId, boxType, RecordStatus.ACTIVE)
+        // Reactivate an existing (possibly disabled) row, else create a fresh one — never
+        // insert a duplicate name (unique key on (wholesaler_id, name)). This covers a type
+        // that was disabled and then re-added to the catalog before the dashboard reconciled.
+        return boxTypeRepository.findByWholesaler_IdAndNameIgnoreCase(wholesalerId, boxType)
+                .map((existing) -> {
+                    if (existing.getStatus() != RecordStatus.ACTIVE) {
+                        existing.setStatus(RecordStatus.ACTIVE);
+                        return boxTypeRepository.save(existing);
+                    }
+                    return existing;
+                })
                 .orElseGet(() -> createBoxType(wholesaler, boxType));
     }
 
-    private void ensureDefaultBoxTypes(Wholesaler wholesaler) {
-        ensureBoxType(wholesaler, "BANGLA");
-        ensureBoxType(wholesaler, "CHINA");
-    }
+    /**
+     * Reconcile this wholesaler's box_types to mirror the active global crate-type catalog
+     * exactly — so the dashboard shows whatever set the admin defined (2, 3, 4, or more),
+     * never a fixed/stale list. Adds any missing catalog type (price 0 until first purchase)
+     * and disables any leftover box_type no longer in the catalog (e.g. types an admin
+     * removed, or rows seeded by older builds).
+     */
+    private void ensureBoxTypesFromCatalog(Wholesaler wholesaler) {
+        List<CrateType> catalog = crateTypeRepository.findByStatusOrderByNameAsc(RecordStatus.ACTIVE);
+        Set<String> catalogNames = new HashSet<>();
+        for (CrateType crateType : catalog) {
+            catalogNames.add(crateType.getName().toUpperCase(Locale.ROOT));
+            // Reactivate an existing (possibly disabled) row, else create a fresh one — never
+            // insert a duplicate name (unique key on (wholesaler_id, name)).
+            boxTypeRepository.findByWholesaler_IdAndNameIgnoreCase(wholesaler.getId(), crateType.getName())
+                    .ifPresentOrElse((existing) -> {
+                        if (existing.getStatus() != RecordStatus.ACTIVE) {
+                            existing.setStatus(RecordStatus.ACTIVE);
+                            boxTypeRepository.save(existing);
+                        }
+                    }, () -> createBoxType(wholesaler, crateType.getName()));
+        }
 
-    private void ensureBoxType(Wholesaler wholesaler, String boxType) {
-        boxTypeRepository.findByWholesaler_IdAndNameIgnoreCaseAndStatus(
-                wholesaler.getId(),
-                boxType,
-                RecordStatus.ACTIVE
-        ).orElseGet(() -> createBoxType(wholesaler, boxType));
+        for (BoxType boxType : boxTypeRepository
+                .findByWholesaler_IdAndStatusOrderByNameAsc(wholesaler.getId(), RecordStatus.ACTIVE)) {
+            if (!catalogNames.contains(boxType.getName().toUpperCase(Locale.ROOT))) {
+                boxType.setStatus(RecordStatus.DISABLED);
+                boxTypeRepository.save(boxType);
+            }
+        }
     }
 
     private BoxType createBoxType(Wholesaler wholesaler, String boxType) {
@@ -599,9 +512,9 @@ public class CrateService {
     }
 
     private String normalizeBoxType(String value) {
-        String boxType = requireText(value, "Box type is required.").toUpperCase(Locale.ROOT);
-        if (!boxType.equals("BANGLA") && !boxType.equals("CHINA")) {
-            throw new BadRequestException("Invalid box type. Allowed values: BANGLA, CHINA.");
+        String boxType = requireText(value, "Crate type is required.").toUpperCase(Locale.ROOT);
+        if (crateTypeRepository.findByNameIgnoreCaseAndStatus(boxType, RecordStatus.ACTIVE).isEmpty()) {
+            throw new BadRequestException("Crate type '" + boxType + "' is not in the catalog. Ask admin to add it.");
         }
         return boxType;
     }

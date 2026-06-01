@@ -432,8 +432,13 @@ const SupplierDetail = ({ supplierId, onBack }) => {
         <div className="supplier-panel">
           <h3 className="flex items-center gap-2"><Boxes size={17} className="text-blue-600" /> Crates</h3>
           <div className="mt-3 space-y-2">
-            <div className="box-row"><span>Bangla</span><strong>{supplier.cratesHoldingWooden || 0}</strong></div>
-            <div className="box-row"><span>China</span><strong>{supplier.cratesHoldingPlastic || 0}</strong></div>
+            {(supplier.crateHoldings || []).length === 0 ? (
+              <div className="box-row"><span>No crates due</span><strong>0</strong></div>
+            ) : (
+              (supplier.crateHoldings || []).map((c) => (
+                <div key={c.crateType} className="box-row"><span>{c.crateType}</span><strong>{c.quantity || 0}</strong></div>
+              ))
+            )}
             <div className="box-row total"><span>Total Due</span><strong>{supplier.totalCratesHolding || 0}</strong></div>
           </div>
         </div>

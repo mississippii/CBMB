@@ -3,6 +3,13 @@ package org.example.service;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Locale;
+import java.util.Map;
+import org.example.dto.CrateLineRequest;
+import org.example.dto.CrateTypeQuantity;
 import org.example.dto.CustomerSettlementRequest;
 import org.example.dto.PaymentOperationResponse;
 import org.example.dto.SupplierCrateRequest;
@@ -100,16 +107,11 @@ public class PaymentService {
         Wholesaler wholesaler = findWholesaler(wholesalerId);
         WholesalerCustomer customerAccount = findCustomerAccount(wholesalerId, request.wholesalerCustomerId());
         BigDecimal cashAmount = nonNegative(request.cashAmount(), "Cash amount cannot be negative.");
-        BigDecimal jamanotAmount = nonNegative(request.jamanotAmount(), "Jamanot amount cannot be negative.");
-        int banglaReturned = nonNegativeInt(request.banglaCratesReturned(), "Bangla crate quantity cannot be negative.");
-        int chinaReturned = nonNegativeInt(request.chinaCratesReturned(), "China crate quantity cannot be negative.");
-        int boxesReturned = banglaReturned + chinaReturned;
+        Map<String, Integer> returns = normalizeLines(request.crateReturns(), "Returned crate quantity cannot be negative.");
+        int boxesReturned = returns.values().stream().mapToInt(Integer::intValue).sum();
 
         if (cashAmount.signum() == 0 && boxesReturned == 0) {
             throw new BadRequestException("Enter cash received or returned crates.");
-        }
-        if (boxesReturned == 0 && jamanotAmount.signum() > 0) {
-            throw new BadRequestException("Jamanot can be settled only when customer returns crates.");
         }
 
         BigDecimal previousDue = currentBalance(wholesaler, PartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), customerAccount.getOpeningDue());
@@ -117,11 +119,6 @@ public class PaymentService {
             throw new BadRequestException("Cash received cannot be greater than customer due.");
         }
         BigDecimal dueAfter = money(previousDue.subtract(cashAmount));
-        BigDecimal previousJamanot = money(customerAccount.getJamanotBalance() == null ? BigDecimal.ZERO : customerAccount.getJamanotBalance());
-        if (jamanotAmount.compareTo(previousJamanot) > 0) {
-            throw new BadRequestException("Jamanot refund cannot be greater than customer jamanot balance.");
-        }
-        BigDecimal jamanotAfter = money(previousJamanot.subtract(jamanotAmount));
 
         AccountBalance balance = getOrCreateBalance(wholesaler, PartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), customerAccount.getOpeningDue());
         balance.setBalance(dueAfter);
@@ -133,11 +130,8 @@ public class PaymentService {
         payment.setPaymentType(resolvePaymentType(cashAmount, boxesReturned));
         payment.setCashAmount(cashAmount);
         payment.setBoxesReturned(boxesReturned);
-        payment.setJamanotAmount(jamanotAmount);
         payment.setPreviousDue(previousDue);
         payment.setDueAfterPayment(dueAfter);
-        payment.setPreviousJamanot(previousJamanot);
-        payment.setJamanotAfterPayment(jamanotAfter);
         payment.setPaymentMethod(resolveCustomerPaymentMethod(request.paymentMethod(), cashAmount));
         payment.setNote(clean(request.note()));
         payment = paymentRepository.save(payment);
@@ -146,23 +140,17 @@ public class PaymentService {
             saveAccountLedger(wholesaler, PartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), AccountReferenceType.PAYMENT, payment.getId(), BigDecimal.ZERO, cashAmount, "Customer due payment");
         }
 
-        if (banglaReturned > 0) {
-            applyCustomerCrateReturn(wholesaler, customerAccount, "BANGLA", banglaReturned, payment.getId(), request.note());
+        List<CrateTypeQuantity> crateLines = new ArrayList<>();
+        for (Map.Entry<String, Integer> line : returns.entrySet()) {
+            applyCustomerCrateReturn(wholesaler, customerAccount, line.getKey(), line.getValue(), payment.getId(), request.note());
+            crateLines.add(new CrateTypeQuantity(line.getKey(), line.getValue()));
         }
-        if (chinaReturned > 0) {
-            applyCustomerCrateReturn(wholesaler, customerAccount, "CHINA", chinaReturned, payment.getId(), request.note());
-        }
-        if (jamanotAmount.signum() > 0) {
-            customerAccount.setJamanotBalance(jamanotAfter);
-            wholesalerCustomerRepository.save(customerAccount);
-        }
-
-        String description = buildCustomerPaymentDescription(payment.getId(), cashAmount, banglaReturned, chinaReturned, jamanotAmount);
+        String description = buildCustomerPaymentDescription(payment.getId(), cashAmount, crateLines);
         Transaction transaction = savePaymentTransaction(
-                wholesaler.getId(), payment.getId(), customerAccount.getId(), null, cashAmount, dueAfter,
+                wholesaler.getId(), payment.getId(), null, customerAccount.getId(), null, cashAmount, dueAfter,
                 description
         );
-        return response(transaction, payment.getId(), null, customerAccount.getId(), null, previousDue, dueAfter, cashAmount, banglaReturned, chinaReturned, previousJamanot, jamanotAfter, payment.getPaymentType().name());
+        return response(transaction, payment.getId(), null, customerAccount.getId(), null, previousDue, dueAfter, cashAmount, boxesReturned, crateLines, payment.getPaymentType().name());
     }
 
     @Transactional
@@ -192,35 +180,24 @@ public class PaymentService {
     public PaymentOperationResponse borrowCustomerCrates(Long wholesalerId, org.example.dto.CustomerCrateBorrowRequest request) {
         Wholesaler wholesaler = findWholesaler(wholesalerId);
         WholesalerCustomer customerAccount = findCustomerAccount(wholesalerId, request.wholesalerCustomerId());
-        int bangla = nonNegativeInt(request.banglaCrates(), "Bangla crate quantity cannot be negative.");
-        int china = nonNegativeInt(request.chinaCrates(), "China crate quantity cannot be negative.");
-        int total = bangla + china;
+        Map<String, Integer> lines = normalizeLines(request.crates(), "Crate quantity cannot be negative.");
+        int total = lines.values().stream().mapToInt(Integer::intValue).sum();
         if (total == 0) {
             throw new BadRequestException("Enter at least one crate to borrow.");
         }
-        BigDecimal jamanot = nonNegative(request.jamanotAmount(), "Jamanot amount cannot be negative.");
 
-        if (bangla > 0) {
-            applyCustomerCrateBorrow(wholesaler, customerAccount, "BANGLA", bangla, request.note());
-        }
-        if (china > 0) {
-            applyCustomerCrateBorrow(wholesaler, customerAccount, "CHINA", china, request.note());
-        }
-
-        BigDecimal previousJamanot = money(customerAccount.getJamanotBalance() == null ? BigDecimal.ZERO : customerAccount.getJamanotBalance());
-        BigDecimal jamanotAfter = money(previousJamanot.add(jamanot));
-        if (jamanot.signum() > 0) {
-            customerAccount.setJamanotBalance(jamanotAfter);
-            wholesalerCustomerRepository.save(customerAccount);
+        List<CrateTypeQuantity> crateLines = new ArrayList<>();
+        for (Map.Entry<String, Integer> line : lines.entrySet()) {
+            applyCustomerCrateBorrow(wholesaler, customerAccount, line.getKey(), line.getValue(), request.note());
+            crateLines.add(new CrateTypeQuantity(line.getKey(), line.getValue()));
         }
 
         BigDecimal currentDue = currentBalance(wholesaler, PartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), customerAccount.getOpeningDue());
-        String description = "Customer crate borrow — B:" + bangla + " C:" + china
-                + (jamanot.signum() > 0 ? " · Jamanot ৳" + jamanot.toPlainString() : "");
+        String description = "Customer crate borrow — " + describeLines(crateLines);
         Transaction transaction = savePaymentTransaction(
-                wholesaler.getId(), null, customerAccount.getId(), null, BigDecimal.ZERO, currentDue, description
+                wholesaler.getId(), null, null, customerAccount.getId(), null, BigDecimal.ZERO, currentDue, description
         );
-        return response(transaction, null, null, customerAccount.getId(), null, currentDue, currentDue, BigDecimal.ZERO, bangla, china, previousJamanot, jamanotAfter, "CUSTOMER_CRATE_BORROW");
+        return response(transaction, null, null, customerAccount.getId(), null, currentDue, currentDue, BigDecimal.ZERO, total, crateLines, "CUSTOMER_CRATE_BORROW");
     }
 
     @Transactional
@@ -267,36 +244,67 @@ public class PaymentService {
         }
 
         Transaction transaction = savePaymentTransaction(
-                wholesaler.getId(), null, null, supplierAccount.getId(), amount, dueAfter,
+                wholesaler.getId(), null, settlement.getId(), null, supplierAccount.getId(), amount, dueAfter,
                 label + " #" + settlement.getId()
         );
-        return response(transaction, null, settlement.getId(), null, supplierAccount.getId(), previousDue, dueAfter, amount, 0, 0, BigDecimal.ZERO, BigDecimal.ZERO, type.name());
+        return response(transaction, null, settlement.getId(), null, supplierAccount.getId(), previousDue, dueAfter, amount, 0, List.of(), type.name());
     }
 
     private PaymentOperationResponse moveSupplierCrates(Long wholesalerId, SupplierCrateRequest request, boolean giveToSupplier) {
         Wholesaler wholesaler = findWholesaler(wholesalerId);
         WholesalerSupplier supplierAccount = findSupplierAccount(wholesalerId, request.wholesalerSupplierId());
-        int bangla = nonNegativeInt(request.banglaCrates(), "Bangla crate quantity cannot be negative.");
-        int china = nonNegativeInt(request.chinaCrates(), "China crate quantity cannot be negative.");
-        if (bangla + china == 0) {
+        Map<String, Integer> lines = normalizeLines(request.crates(), "Crate quantity cannot be negative.");
+        int total = lines.values().stream().mapToInt(Integer::intValue).sum();
+        if (total == 0) {
             throw new BadRequestException("Enter crate quantity.");
         }
 
-        if (bangla > 0) {
-            applySupplierCrateMovement(wholesaler, supplierAccount, "BANGLA", bangla, giveToSupplier, request.note());
-        }
-        if (china > 0) {
-            applySupplierCrateMovement(wholesaler, supplierAccount, "CHINA", china, giveToSupplier, request.note());
+        List<CrateTypeQuantity> crateLines = new ArrayList<>();
+        for (Map.Entry<String, Integer> line : lines.entrySet()) {
+            applySupplierCrateMovement(wholesaler, supplierAccount, line.getKey(), line.getValue(), giveToSupplier, request.note());
+            crateLines.add(new CrateTypeQuantity(line.getKey(), line.getValue()));
         }
 
         BigDecimal currentDue = currentBalance(wholesaler, PartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), supplierAccount.getOpeningDue());
         String operationType = giveToSupplier ? "SUPPLIER_CRATE_GIVE" : "SUPPLIER_CRATE_RETURN";
         String verb = giveToSupplier ? "Crates given to supplier" : "Crates returned from supplier";
-        String description = verb + " — B:" + bangla + " C:" + china;
+        String description = verb + " — " + describeLines(crateLines);
         Transaction transaction = savePaymentTransaction(
-                wholesaler.getId(), null, null, supplierAccount.getId(), BigDecimal.ZERO, currentDue, description
+                wholesaler.getId(), null, null, null, supplierAccount.getId(), BigDecimal.ZERO, currentDue, description
         );
-        return response(transaction, null, null, null, supplierAccount.getId(), currentDue, currentDue, BigDecimal.ZERO, bangla, china, BigDecimal.ZERO, BigDecimal.ZERO, operationType);
+        return response(transaction, null, null, null, supplierAccount.getId(), currentDue, currentDue, BigDecimal.ZERO, total, crateLines, operationType);
+    }
+
+    /** Collapse request lines into a name→quantity map (uppercased, positive only, merged by type). */
+    private Map<String, Integer> normalizeLines(List<CrateLineRequest> lines, String negativeMessage) {
+        Map<String, Integer> result = new LinkedHashMap<>();
+        if (lines == null) {
+            return result;
+        }
+        for (CrateLineRequest line : lines) {
+            if (line == null) {
+                continue;
+            }
+            int qty = nonNegativeInt(line.quantity(), negativeMessage);
+            if (qty == 0) {
+                continue;
+            }
+            String type = requireText(line.crateType(), "Crate type is required.").toUpperCase(Locale.ROOT);
+            result.merge(type, qty, Integer::sum);
+        }
+        return result;
+    }
+
+    private String describeLines(List<CrateTypeQuantity> lines) {
+        if (lines.isEmpty()) {
+            return "no crates";
+        }
+        StringBuilder sb = new StringBuilder();
+        for (CrateTypeQuantity line : lines) {
+            if (sb.length() > 0) sb.append(", ");
+            sb.append(line.crateType()).append(":").append(line.quantity());
+        }
+        return sb.toString();
     }
 
     private void applyCustomerCrateBorrow(Wholesaler wholesaler, WholesalerCustomer customerAccount, String crateTypeValue, int quantity, String note) {
@@ -388,11 +396,12 @@ public class PaymentService {
         boxBalanceRepository.save(balance);
     }
 
-    private Transaction savePaymentTransaction(Long wholesalerId, Long paymentId, Long customerAccountId, Long supplierAccountId, BigDecimal amount, BigDecimal dueAfter, String description) {
+    private Transaction savePaymentTransaction(Long wholesalerId, Long paymentId, Long settlementId, Long customerAccountId, Long supplierAccountId, BigDecimal amount, BigDecimal dueAfter, String description) {
         Transaction transaction = new Transaction();
         transaction.setWholesalerId(wholesalerId);
         transaction.setTransactionType(TransactionType.PAYMENT);
         transaction.setPaymentId(paymentId);
+        transaction.setSettlementId(settlementId);
         transaction.setWholesalerCustomerId(customerAccountId);
         transaction.setWholesalerSupplierId(supplierAccountId);
         transaction.setSaleAmount(BigDecimal.ZERO);
@@ -429,7 +438,7 @@ public class PaymentService {
         boxLedgerRepository.save(ledger);
     }
 
-    private PaymentOperationResponse response(Transaction transaction, Long paymentId, Long settlementId, Long customerAccountId, Long supplierAccountId, BigDecimal previousDue, BigDecimal dueAfter, BigDecimal cashAmount, int banglaCrates, int chinaCrates, BigDecimal previousJamanot, BigDecimal jamanotAfter, String operationType) {
+    private PaymentOperationResponse response(Transaction transaction, Long paymentId, Long settlementId, Long customerAccountId, Long supplierAccountId, BigDecimal previousDue, BigDecimal dueAfter, BigDecimal cashAmount, int cratesMoved, List<CrateTypeQuantity> crateLines, String operationType) {
         return new PaymentOperationResponse(
                 transaction.getId(),
                 paymentId,
@@ -439,10 +448,8 @@ public class PaymentService {
                 money(previousDue),
                 money(dueAfter),
                 money(cashAmount),
-                banglaCrates,
-                chinaCrates,
-                money(previousJamanot),
-                money(jamanotAfter),
+                cratesMoved,
+                crateLines,
                 operationType,
                 transaction.getCreatedAt()
         );
@@ -475,20 +482,14 @@ public class PaymentService {
         return method;
     }
 
-    private String buildCustomerPaymentDescription(Long paymentId, BigDecimal cashAmount, int banglaReturned, int chinaReturned, BigDecimal jamanotAmount) {
+    private String buildCustomerPaymentDescription(Long paymentId, BigDecimal cashAmount, List<CrateTypeQuantity> crateLines) {
         StringBuilder sb = new StringBuilder("Customer payment #").append(paymentId);
         if (cashAmount.signum() > 0) {
             sb.append(", cash ").append(money(cashAmount).toPlainString());
         }
-        int crates = banglaReturned + chinaReturned;
+        long crates = crateLines.stream().mapToLong(CrateTypeQuantity::quantity).sum();
         if (crates > 0) {
-            sb.append(", ").append(crates).append(" crates returned");
-            if (banglaReturned > 0 && chinaReturned > 0) {
-                sb.append(" (BANGLA ").append(banglaReturned).append(", CHINA ").append(chinaReturned).append(")");
-            }
-        }
-        if (jamanotAmount.signum() > 0) {
-            sb.append(", jamanot ").append(money(jamanotAmount).toPlainString());
+            sb.append(", ").append(crates).append(" crates returned (").append(describeLines(crateLines)).append(")");
         }
         return sb.toString();
     }
@@ -574,6 +575,14 @@ public class PaymentService {
 
     private BigDecimal money(BigDecimal value) {
         return value.setScale(2, RoundingMode.HALF_UP);
+    }
+
+    private String requireText(String value, String message) {
+        String cleaned = clean(value);
+        if (cleaned == null || cleaned.isBlank()) {
+            throw new BadRequestException(message);
+        }
+        return cleaned;
     }
 
     private String clean(String value) {

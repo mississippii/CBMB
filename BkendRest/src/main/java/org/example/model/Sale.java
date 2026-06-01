@@ -28,7 +28,7 @@ import lombok.Setter;
                 @jakarta.persistence.Index(name = "idx_sales_wh_customer_date", columnList = "wholesaler_id,wholesaler_customer_id,sale_date"),
                 @jakarta.persistence.Index(name = "idx_sales_customer_phone", columnList = "wholesaler_id,customer_phone_snapshot,sale_date")
         })
-@org.hibernate.annotations.Check(constraints = "gross_amount >= 0 and discount_amount >= 0 and net_amount >= 0 and paid_amount >= 0 and due_amount >= 0 and boxes_given >= 0 and jamanot_amount >= 0")
+@org.hibernate.annotations.Check(constraints = "gross_amount >= 0 and discount_amount >= 0 and net_amount >= 0 and paid_amount >= 0 and due_amount >= 0 and boxes_given >= 0")
 @org.hibernate.annotations.Check(constraints = "customer_type in ('PERMANENT','ONE_TIME')")
 public class Sale {
 
@@ -77,9 +77,6 @@ public class Sale {
 
     @Column(name = "boxes_given", nullable = false)
     private Integer boxesGiven = 0;
-
-    @Column(name = "jamanot_amount", nullable = false, precision = 14, scale = 2)
-    private BigDecimal jamanotAmount = BigDecimal.ZERO;
 
     @Column(columnDefinition = "TEXT")
     private String note;

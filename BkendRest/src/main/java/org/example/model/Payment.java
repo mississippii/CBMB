@@ -28,7 +28,7 @@ import lombok.Setter;
                 @jakarta.persistence.Index(name = "idx_payments_customer_date", columnList = "wholesaler_id,wholesaler_customer_id,created_at"),
                 @jakarta.persistence.Index(name = "idx_payments_type_date", columnList = "wholesaler_id,payment_type,created_at")
         })
-@org.hibernate.annotations.Check(constraints = "cash_amount >= 0 and boxes_returned >= 0 and jamanot_amount >= 0 and previous_due >= 0 and due_after_payment >= 0 and previous_jamanot >= 0 and jamanot_after_payment >= 0")
+@org.hibernate.annotations.Check(constraints = "cash_amount >= 0 and boxes_returned >= 0 and previous_due >= 0 and due_after_payment >= 0")
 @org.hibernate.annotations.Check(constraints = "((payment_type = 'CASH_RECEIVE' and cash_amount > 0 and boxes_returned = 0) or (payment_type = 'CRATE_RETURN' and cash_amount = 0 and boxes_returned > 0) or (payment_type = 'CASH_AND_CRATE_RETURN' and cash_amount > 0 and boxes_returned > 0))")
 @IdClass(PaymentId.class)
 public class Payment {
@@ -54,20 +54,11 @@ public class Payment {
     @Column(name = "boxes_returned", nullable = false)
     private Integer boxesReturned = 0;
 
-    @Column(name = "jamanot_amount", nullable = false, precision = 14, scale = 2)
-    private BigDecimal jamanotAmount = BigDecimal.ZERO;
-
     @Column(name = "previous_due", nullable = false, precision = 14, scale = 2)
     private BigDecimal previousDue = BigDecimal.ZERO;
 
     @Column(name = "due_after_payment", nullable = false, precision = 14, scale = 2)
     private BigDecimal dueAfterPayment = BigDecimal.ZERO;
-
-    @Column(name = "previous_jamanot", nullable = false, precision = 14, scale = 2)
-    private BigDecimal previousJamanot = BigDecimal.ZERO;
-
-    @Column(name = "jamanot_after_payment", nullable = false, precision = 14, scale = 2)
-    private BigDecimal jamanotAfterPayment = BigDecimal.ZERO;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "payment_method", nullable = false)

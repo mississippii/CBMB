@@ -2,6 +2,7 @@ package org.example.dto;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 public record PaymentOperationResponse(
         Long transactionId,
@@ -12,10 +13,8 @@ public record PaymentOperationResponse(
         BigDecimal previousDue,
         BigDecimal dueAfter,
         BigDecimal cashAmount,
-        Integer banglaCrates,
-        Integer chinaCrates,
-        BigDecimal previousJamanot,
-        BigDecimal jamanotAfter,
+        Integer cratesMoved,
+        List<CrateTypeQuantity> crateLines,
         String operationType,
         LocalDateTime createdAt
 ) {

@@ -97,7 +97,6 @@ CREATE TABLE `wholesaler_customers` (
   `wholesaler_id` bigint unsigned NOT NULL,
   `customer_id` bigint unsigned NOT NULL,
   `opening_due` decimal(14,2) NOT NULL DEFAULT '0.00',
-  `jamanot_balance` decimal(14,2) NOT NULL DEFAULT '0.00',
   `status` enum('ACTIVE','DISABLED') NOT NULL DEFAULT 'ACTIVE',
   `version` bigint NOT NULL DEFAULT '0',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -323,7 +322,6 @@ CREATE TABLE `sales` (
   `paid_amount` decimal(14,2) NOT NULL DEFAULT '0.00',
   `due_amount` decimal(14,2) NOT NULL DEFAULT '0.00',
   `boxes_given` int NOT NULL DEFAULT '0',
-  `jamanot_amount` decimal(14,2) NOT NULL DEFAULT '0.00',
   `note` text,
   `status` enum('POSTED','CANCELLED') NOT NULL DEFAULT 'POSTED',
   `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
@@ -344,7 +342,7 @@ CREATE TABLE `sales` (
   CONSTRAINT `chk_sales_amounts_nonnegative` CHECK (
     `gross_amount` >= 0 AND `discount_amount` >= 0 AND `net_amount` >= 0
     AND `paid_amount` >= 0 AND `due_amount` >= 0
-    AND `boxes_given` >= 0 AND `jamanot_amount` >= 0
+    AND `boxes_given` >= 0
   ),
   CONSTRAINT `chk_sales_customer_type` CHECK (`customer_type` IN ('PERMANENT','ONE_TIME'))
 ) ENGINE=InnoDB;
@@ -407,11 +405,8 @@ CREATE TABLE `payments` (
   `payment_type` enum('CASH_RECEIVE','CRATE_RETURN','CASH_AND_CRATE_RETURN') NOT NULL,
   `cash_amount` decimal(14,2) NOT NULL DEFAULT '0.00',
   `boxes_returned` int NOT NULL DEFAULT '0',
-  `jamanot_amount` decimal(14,2) NOT NULL DEFAULT '0.00',
   `previous_due` decimal(14,2) NOT NULL DEFAULT '0.00',
   `due_after_payment` decimal(14,2) NOT NULL DEFAULT '0.00',
-  `previous_jamanot` decimal(14,2) NOT NULL DEFAULT '0.00',
-  `jamanot_after_payment` decimal(14,2) NOT NULL DEFAULT '0.00',
   `payment_method` enum('CASH','BANK','BKASH','NAGAD','OTHER','NONE') NOT NULL DEFAULT 'CASH',
   `status` enum('POSTED','CANCELLED') NOT NULL DEFAULT 'POSTED',
   `note` text,
@@ -421,16 +416,15 @@ CREATE TABLE `payments` (
   KEY `idx_payments_customer_date` (`wholesaler_id`,`wholesaler_customer_id`,`created_at`),
   KEY `idx_payments_type_date` (`wholesaler_id`,`payment_type`,`created_at`),
   CONSTRAINT `chk_payments_nonnegative` CHECK (
-    `cash_amount` >= 0 AND `boxes_returned` >= 0 AND `jamanot_amount` >= 0
+    `cash_amount` >= 0 AND `boxes_returned` >= 0
     AND `previous_due` >= 0 AND `due_after_payment` >= 0
-    AND `previous_jamanot` >= 0 AND `jamanot_after_payment` >= 0
   ),
   CONSTRAINT `chk_payments_type_values` CHECK (
-    (`payment_type` = 'CASH_RECEIVE'         AND `cash_amount` > 0 AND `boxes_returned` = 0 AND `jamanot_amount` = 0)
+    (`payment_type` = 'CASH_RECEIVE'         AND `cash_amount` > 0 AND `boxes_returned` = 0)
     OR
-    (`payment_type` = 'CRATE_RETURN'           AND `cash_amount` = 0 AND `boxes_returned` > 0 AND `jamanot_amount` >= 0)
+    (`payment_type` = 'CRATE_RETURN'           AND `cash_amount` = 0 AND `boxes_returned` > 0)
     OR
-    (`payment_type` = 'CASH_AND_CRATE_RETURN'  AND `cash_amount` > 0 AND `boxes_returned` > 0 AND `jamanot_amount` >= 0)
+    (`payment_type` = 'CASH_AND_CRATE_RETURN'  AND `cash_amount` > 0 AND `boxes_returned` > 0)
   )
 ) ENGINE=InnoDB
 PARTITION BY RANGE COLUMNS(created_at) (
@@ -601,6 +595,17 @@ CREATE TABLE `other_due_balances` (
 -- Crates (boxes)
 -- =============================================================
 
+-- Global, admin-managed crate-type catalog (shared across all wholesalers).
+CREATE TABLE `crate_types` (
+  `id` bigint unsigned NOT NULL AUTO_INCREMENT,
+  `name` varchar(80) NOT NULL,
+  `status` enum('ACTIVE','DISABLED') NOT NULL DEFAULT 'ACTIVE',
+  `created_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `updated_at` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  PRIMARY KEY (`id`),
+  UNIQUE KEY `uk_crate_types_name` (`name`)
+) ENGINE=InnoDB;
+
 CREATE TABLE `box_types` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,
   `wholesaler_id` bigint unsigned NOT NULL,
@@ -697,8 +702,8 @@ CREATE TABLE `box_ledger` (
   KEY `idx_box_ledger_party` (`wholesaler_id`,`party_type`,`party_account_id`,`created_at`),
   KEY `idx_box_ledger_type_date` (`wholesaler_id`,`box_type_id`,`created_at`),
   KEY `idx_box_ledger_reference` (`reference_type`,`reference_id`),
-  -- Fast P&L lookup: uncompensated losses in a period for one wholesaler.
-  KEY `idx_box_ledger_loss_pnl` (`wholesaler_id`,`movement_type`,`compensation_account_ledger_id`,`created_at`),
+  -- Fast P&L lookup: crate losses in a period for one wholesaler.
+  KEY `idx_box_ledger_loss_pnl` (`wholesaler_id`,`movement_type`,`created_at`),
   CONSTRAINT `chk_box_ledger_party` CHECK (
     (`party_type` = 'WHOLESALER' AND `party_account_id` IS NULL)
     OR
@@ -812,6 +817,7 @@ CREATE TABLE `transactions` (
   `transaction_type` enum('SALE','PAYMENT') NOT NULL,
   `sale_id` bigint unsigned DEFAULT NULL,
   `payment_id` bigint unsigned DEFAULT NULL,
+  `settlement_id` bigint unsigned DEFAULT NULL,
   `wholesaler_customer_id` bigint unsigned DEFAULT NULL,
   `wholesaler_supplier_id` bigint unsigned DEFAULT NULL,
   `sale_amount` decimal(14,2) NOT NULL DEFAULT '0.00',
@@ -825,7 +831,8 @@ CREATE TABLE `transactions` (
   KEY `idx_transactions_customer_date` (`wholesaler_id`,`wholesaler_customer_id`,`created_at`),
   KEY `idx_transactions_supplier_date` (`wholesaler_id`,`wholesaler_supplier_id`,`created_at`),
   KEY `idx_transactions_sale` (`sale_id`),
-  KEY `idx_transactions_payment` (`payment_id`)
+  KEY `idx_transactions_payment` (`payment_id`),
+  KEY `idx_transactions_settlement` (`settlement_id`)
 ) ENGINE=InnoDB
 PARTITION BY RANGE COLUMNS(created_at) (
   PARTITION p202605 VALUES LESS THAN ('2026-06-01'),

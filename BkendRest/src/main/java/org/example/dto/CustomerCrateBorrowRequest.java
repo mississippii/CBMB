@@ -1,12 +1,10 @@
 package org.example.dto;
 
-import java.math.BigDecimal;
+import java.util.List;
 
 public record CustomerCrateBorrowRequest(
         Long wholesalerCustomerId,
-        Integer banglaCrates,
-        Integer chinaCrates,
-        BigDecimal jamanotAmount,
+        List<CrateLineRequest> crates,
         String note
 ) {
 }

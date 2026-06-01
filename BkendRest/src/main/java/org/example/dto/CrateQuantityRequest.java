@@ -20,9 +20,6 @@ public record CrateQuantityRequest(
         Integer quantity,
         BigDecimal unitPrice,
         String reason,
-        String note,
-        String compensationPartyType,
-        Long compensationPartyAccountId,
-        BigDecimal compensationAmount
+        String note
 ) {
 }

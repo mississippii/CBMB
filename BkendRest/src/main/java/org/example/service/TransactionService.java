@@ -105,6 +105,7 @@ public class TransactionService {
                 transaction.getTransactionType().name(),
                 transaction.getSaleId(),
                 transaction.getPaymentId(),
+                transaction.getSettlementId(),
                 transaction.getWholesalerCustomerId(),
                 party.customerName(),
                 party.customerPhone(),
@@ -126,7 +127,6 @@ public class TransactionService {
                 transaction.getPaymentAmount(),
                 transaction.getDueAmount(),
                 payment == null ? 0 : payment.getBoxesReturned(),
-                payment == null ? java.math.BigDecimal.ZERO : payment.getJamanotAmount(),
                 payment == null ? null : payment.getPaymentType().name(),
                 transaction.getDescription(),
                 transaction.getCreatedAt()

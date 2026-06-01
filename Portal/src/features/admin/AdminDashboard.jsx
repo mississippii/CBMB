@@ -1,8 +1,8 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import {
-  Users, ShieldCheck, ShieldOff, Calendar, Plus, Search, KeyRound,
+  Users, Plus, Search, KeyRound,
   Building2, User, Mail, Phone, MapPin, Lock, Database,
-  ChevronLeft, ChevronRight, ChevronDown, Pencil, FolderPlus, Tag, MoreVertical, X, LifeBuoy,
+  ChevronLeft, ChevronRight, ChevronDown, Pencil, FolderPlus, Tag, MoreVertical, X, LifeBuoy, Boxes,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { useLang } from '../../shared/contexts/LanguageContext';
@@ -13,6 +13,12 @@ import { apiPaths, postJson } from '../../services/apiClient';
 const emptyForm = {
   name: '', email: '', password: '', businessName: '', phone: '', address: '',
 };
+
+// Left-side modules (mirrors the wholesaler workspace nav). Add more here as the admin grows.
+const modules = [
+  { id: 'list', label: 'Wholesalers', icon: Users },
+  { id: 'support', label: 'Admin Support', icon: LifeBuoy },
+];
 
 const Field = ({ icon: Icon, label, required, children, hint }) => (
   <div className="form-field">
@@ -78,6 +84,14 @@ const AdminDashboard = () => {
   const [catEditor, setCatEditor] = useState(null); // { mode:'add'|'rename', productId, parentId?, categoryId?, value }
   const [catSaving, setCatSaving] = useState(false);
 
+  // Crates Service — global crate-type catalog
+  const [crateTypes, setCrateTypes] = useState([]);
+  const [crateTypesLoading, setCrateTypesLoading] = useState(false);
+  const [showCrateTypeModal, setShowCrateTypeModal] = useState(false);
+  const [crateTypeForm, setCrateTypeForm] = useState({ name: '' });
+  const [crateTypeError, setCrateTypeError] = useState('');
+  const [crateTypeSaving, setCrateTypeSaving] = useState(false);
+
   const loadCatalog = async () => {
     setCatalogLoading(true);
     try {
@@ -90,8 +104,20 @@ const AdminDashboard = () => {
     }
   };
 
+  const loadCrateTypes = async () => {
+    setCrateTypesLoading(true);
+    try {
+      const list = await postJson(apiPaths.adminCrateTypesList);
+      setCrateTypes(Array.isArray(list) ? list : []);
+    } catch (err) {
+      showToast(err.message || 'Failed to load crate types.', 'error');
+    } finally {
+      setCrateTypesLoading(false);
+    }
+  };
+
   useEffect(() => {
-    if (activeTab === 'support') loadCatalog();
+    if (activeTab === 'support') { loadCatalog(); loadCrateTypes(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
 
@@ -161,6 +187,34 @@ const AdminDashboard = () => {
     }
   };
 
+  const handleCreateCrateType = async (e) => {
+    e.preventDefault();
+    if (!crateTypeForm.name.trim()) { setCrateTypeError('Crate type name is required.'); return; }
+    setCrateTypeSaving(true); setCrateTypeError('');
+    try {
+      const created = await postJson(apiPaths.adminCrateTypesCreate, { name: crateTypeForm.name.trim() });
+      showToast(`Crate type "${created.name}" added`, 'success');
+      setShowCrateTypeModal(false);
+      loadCrateTypes();
+    } catch (err) {
+      setCrateTypeError(err.message || 'Failed to add crate type.');
+    } finally {
+      setCrateTypeSaving(false);
+    }
+  };
+
+  const toggleCrateTypeStatus = async (ct) => {
+    try {
+      await postJson(apiPaths.adminCrateTypesUpdate, {
+        id: ct.id,
+        status: ct.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE',
+      });
+      loadCrateTypes();
+    } catch (err) {
+      showToast(err.message || 'Failed to update crate type.', 'error');
+    }
+  };
+
   const fetchPage = useCallback(async (p = page, s = pageSize, q = phoneSearch) => {
     setIsLoading(true);
     try {
@@ -187,16 +241,6 @@ const AdminDashboard = () => {
     return () => searchTimer.current && clearTimeout(searchTimer.current);
     /* eslint-disable-next-line react-hooks/exhaustive-deps */
   }, [phoneSearch]);
-
-  // KPI computed from all items? We only have current page — show running total instead
-  const stats = useMemo(() => {
-    const active = items.filter((w) => w.status === 'ACTIVE').length;
-    const disabled = items.length - active;
-    const monthStart = new Date();
-    monthStart.setDate(1); monthStart.setHours(0, 0, 0, 0);
-    const thisMonth = items.filter((w) => w.createdAt && new Date(w.createdAt) >= monthStart).length;
-    return { active, disabled, thisMonth };
-  }, [items]);
 
   // Add wholesaler
   const handleChange = (f, v) => setFormData((p) => ({ ...p, [f]: v }));
@@ -283,57 +327,26 @@ const AdminDashboard = () => {
           </button>
         </header>
 
-        <div className="admin-layout">
-          {/* LEFT: sticky KPI sidebar */}
-          <aside className="admin-kpi-sidebar">
-            <div className="stat-card">
-              <div className="stat-card-icon stat-icon-slate"><Users size={16} /></div>
-              <div className="stat-card-body">
-                <p className="stat-card-label">{t('admin.kpi.total')}</p>
-                <p className="stat-card-value">{formatNumber(total)}</p>
-              </div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-card-icon stat-icon-emerald"><ShieldCheck size={16} /></div>
-              <div className="stat-card-body">
-                <p className="stat-card-label">{t('admin.kpi.active')}</p>
-                <p className="stat-card-value">{formatNumber(stats.active)}</p>
-              </div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-card-icon stat-icon-rose"><ShieldOff size={16} /></div>
-              <div className="stat-card-body">
-                <p className="stat-card-label">{t('admin.kpi.disabled')}</p>
-                <p className="stat-card-value">{formatNumber(stats.disabled)}</p>
-              </div>
-            </div>
-            <div className="stat-card">
-              <div className="stat-card-icon stat-icon-teal"><Calendar size={16} /></div>
-              <div className="stat-card-body">
-                <p className="stat-card-label">{t('admin.kpi.thisMonth')}</p>
-                <p className="stat-card-value">{formatNumber(stats.thisMonth)}</p>
-              </div>
-            </div>
+        <div className="workspace-layout">
+          {/* LEFT: module nav (same pattern as the wholesaler workspace) */}
+          <aside className="workspace-sidebar">
+            <nav className="sidebar-nav">
+              {modules.map(({ id, label, icon: Icon }) => (
+                <button
+                  key={id}
+                  type="button"
+                  onClick={() => setActiveTab(id)}
+                  className={`sidebar-nav-item ${activeTab === id ? 'active' : ''}`}
+                >
+                  <Icon size={16} className="sidebar-nav-icon" />
+                  <span className="sidebar-nav-title">{label}</span>
+                </button>
+              ))}
+            </nav>
           </aside>
 
-          {/* RIGHT: tabs + content */}
-          <div className="admin-main space-y-4">
-        {/* Tabs */}
-        <div className="seg-tabs">
-          <button
-            onClick={() => setActiveTab('list')}
-            className={`seg-tab ${activeTab === 'list' ? 'active' : ''}`}
-          >
-            <Users size={14} /> {t('support.tab.list')}
-          </button>
-          <button
-            onClick={() => setActiveTab('support')}
-            className={`seg-tab ${activeTab === 'support' ? 'active' : ''}`}
-          >
-            <LifeBuoy size={14} /> {t('support.tab.support')}
-          </button>
-        </div>
-
+          {/* RIGHT: active module content */}
+          <main className="workspace-content space-y-4">
         {/* Admin Support Tab */}
         {activeTab === 'support' && (
           <div className="space-y-4">
@@ -468,6 +481,49 @@ const AdminDashboard = () => {
                       </div>
                     );
                   })}
+                </div>
+              )}
+            </div>
+
+            {/* Crates Service — global crate-type catalog */}
+            <div className="support-panel">
+              <div className="support-panel-header">
+                <div className="support-panel-icon support-panel-icon-teal"><Boxes size={20} /></div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="support-panel-title">Crates Service</h3>
+                  <p className="support-panel-sub">Crate types available to all wholesalers</p>
+                </div>
+                <button
+                  onClick={() => { setCrateTypeForm({ name: '' }); setCrateTypeError(''); setShowCrateTypeModal(true); }}
+                  className="btn-primary flex items-center gap-2 shrink-0"
+                >
+                  <Plus size={15} /> Add Crate Type
+                </button>
+              </div>
+
+              {crateTypesLoading ? (
+                <p className="mt-3 text-sm text-slate-500">Loading crate types…</p>
+              ) : crateTypes.length === 0 ? (
+                <p className="mt-3 text-sm text-slate-500">No crate types yet. Click "Add Crate Type" to start.</p>
+              ) : (
+                <div className="mt-3 flex flex-wrap gap-2">
+                  {crateTypes.map((ct) => (
+                    <div key={ct.id} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
+                      <Boxes size={13} className="text-slate-400" />
+                      <span className="font-semibold text-slate-800">{ct.name}</span>
+                      <span className={`badge ${ct.status === 'ACTIVE' ? 'badge-emerald' : 'badge-rose'}`}>
+                        {ct.status === 'ACTIVE' ? 'Active' : 'Disabled'}
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => toggleCrateTypeStatus(ct)}
+                        className="btn-compact"
+                        title={ct.status === 'ACTIVE' ? 'Disable' : 'Enable'}
+                      >
+                        {ct.status === 'ACTIVE' ? 'Disable' : 'Enable'}
+                      </button>
+                    </div>
+                  ))}
                 </div>
               )}
             </div>
@@ -686,7 +742,7 @@ const AdminDashboard = () => {
           </div>
         </div>
         )}
-          </div>
+          </main>
         </div>
       </main>
 
@@ -886,6 +942,50 @@ const AdminDashboard = () => {
                 </button>
                 <button type="submit" className="btn-primary flex items-center gap-2" disabled={productSaving}>
                   {productSaving ? t('common.saving') : (<><Plus size={14} /> {t('product.add')}</>)}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
+      {/* ADD CRATE TYPE MODAL */}
+      {showCrateTypeModal && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: '24rem' }}>
+            <div className="modal-header">
+              <div className="flex items-center gap-2.5">
+                <div className="modal-icon-circle bg-blue-100 text-blue-700"><Boxes size={18} /></div>
+                <div>
+                  <h2>Add Crate Type</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">Available to all wholesalers</p>
+                </div>
+              </div>
+              <button onClick={() => setShowCrateTypeModal(false)} className="modal-close-btn">✕</button>
+            </div>
+            <form onSubmit={handleCreateCrateType}>
+              <div className="modal-body">
+                <div className="form-field">
+                  <label className="form-label"><Boxes size={13} /> Crate type name <span className="text-red-500">*</span></label>
+                  <input
+                    type="text"
+                    value={crateTypeForm.name}
+                    onChange={(e) => setCrateTypeForm({ name: e.target.value })}
+                    className="input-field"
+                    placeholder="e.g. PLASTIC"
+                    autoFocus
+                  />
+                </div>
+                {crateTypeError && (
+                  <div className="status-error mt-4"><span>!</span><span>{crateTypeError}</span></div>
+                )}
+              </div>
+              <div className="modal-footer">
+                <button type="button" onClick={() => setShowCrateTypeModal(false)} className="btn-secondary" disabled={crateTypeSaving}>
+                  Cancel
+                </button>
+                <button type="submit" className="btn-primary flex items-center gap-2" disabled={crateTypeSaving}>
+                  {crateTypeSaving ? '…' : (<><Plus size={14} /> Add</>)}
                 </button>
               </div>
             </form>

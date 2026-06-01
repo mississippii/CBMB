@@ -11,7 +11,6 @@ public record SaleCancellationResponse(
         BigDecimal supplierBalanceAfter,
         Long wholesalerSupplierId,
         Integer cratesReturned,
-        BigDecimal jamanotReturned,
         Long cancellationTransactionId,
         LocalDateTime cancelledAt
 ) {

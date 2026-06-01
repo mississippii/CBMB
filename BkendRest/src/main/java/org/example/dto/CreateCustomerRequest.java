@@ -7,7 +7,6 @@ public record CreateCustomerRequest(
         String ownerName,
         String phone,
         String address,
-        BigDecimal openingDue,
-        BigDecimal jamanotBalance
+        BigDecimal openingDue
 ) {
 }

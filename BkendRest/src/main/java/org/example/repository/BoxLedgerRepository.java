@@ -71,7 +71,8 @@ public interface BoxLedgerRepository extends JpaRepository<BoxLedger, BoxLedgerI
     );
 
     /**
-     * Sum of uncompensated loss value (quantity × unit_cost_snapshot) in a period.
+     * Sum of crate loss value (quantity × unit_cost_snapshot) in a period.
+     * Every loss is absorbed by the wholesaler, so all LOST/DAMAGED rows count.
      * Returns null if no rows match. Used by the P&L report.
      */
     @Query("""
@@ -80,7 +81,6 @@ public interface BoxLedgerRepository extends JpaRepository<BoxLedger, BoxLedgerI
         WHERE l.wholesaler.id = :wholesalerId
           AND l.movementType IN (org.example.model.enums.BoxMovementType.LOST,
                                  org.example.model.enums.BoxMovementType.DAMAGED)
-          AND l.compensationAccountLedgerId IS NULL
           AND l.unitCostSnapshot IS NOT NULL
           AND (:from IS NULL OR l.createdAt >= :from)
           AND (:to   IS NULL OR l.createdAt <  :to)

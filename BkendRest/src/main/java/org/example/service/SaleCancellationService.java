@@ -51,7 +51,6 @@ import org.springframework.transaction.annotation.Transactional;
  *   - sale is already CANCELLED
  *   - the sale's shipment is already SETTLED (financial close would have to be reopened too)
  *   - reversal would underflow box_inventory (crates already moved by a later payment)
- *   - reversal would underflow customer jamanot balance
  *
  * Reversal sources:
  *   AccountLedger SALE debit       → write DUE_ADJUSTMENT credit for netAmount.
@@ -59,7 +58,6 @@ import org.springframework.transaction.annotation.Transactional;
  *   Supplier AccountLedger SALE    → write DUE_ADJUSTMENT debit for saleAmount.
  *   StockLedger SALE OUT           → write ADJUSTMENT IN; restore inventory.qty_on_hand.
  *   BoxLedger GIVEN_TO_CUSTOMER    → write RETURNED_FROM_CUSTOMER; flip box_inventory + box_balance.
- *   customer.jamanotBalance        → decremented back.
  */
 @Service
 public class SaleCancellationService {
@@ -159,7 +157,6 @@ public class SaleCancellationService {
                 supplierBalanceAfter,
                 supplierAccountId,
                 crateResult.cratesReturned(),
-                crateResult.jamanotReturned(),
                 tx.getId(),
                 LocalDateTime.now()
         );
@@ -257,7 +254,6 @@ public class SaleCancellationService {
     private CrateReversalResult reverseCrateMovements(Wholesaler wholesaler, Sale sale, String reason) {
         WholesalerCustomer customer = sale.getWholesalerCustomer();
         int totalCrates = 0;
-        BigDecimal jamanotReturned = BigDecimal.ZERO;
         List<BoxLedger> entries = boxLedgerRepository.findByWholesaler_IdAndReferenceTypeAndReferenceId(
                 wholesaler.getId(), BoxReferenceType.SALE, sale.getId());
         for (BoxLedger entry : entries) {
@@ -305,17 +301,7 @@ public class SaleCancellationService {
             totalCrates += qty;
         }
 
-        if (customer != null && sale.getJamanotAmount() != null && sale.getJamanotAmount().signum() > 0) {
-            BigDecimal cur = customer.getJamanotBalance() == null ? BigDecimal.ZERO : customer.getJamanotBalance();
-            BigDecimal jamanot = money(sale.getJamanotAmount());
-            if (cur.compareTo(jamanot) < 0) {
-                throw new BadRequestException("Cannot cancel: customer jamanot balance (৳" + cur + ") < sale jamanot (৳" + jamanot + "). Customer settled crates earlier.");
-            }
-            customer.setJamanotBalance(money(cur.subtract(jamanot)));
-            wholesalerCustomerRepository.save(customer);
-            jamanotReturned = jamanot;
-        }
-        return new CrateReversalResult(totalCrates, jamanotReturned);
+        return new CrateReversalResult(totalCrates);
     }
 
     private void writeAccountAdjustment(Wholesaler wholesaler, PartyType partyType, Long partyAccountId,
@@ -352,6 +338,6 @@ public class SaleCancellationService {
     private record ReverseInventoryResult() {
     }
 
-    private record CrateReversalResult(int cratesReturned, BigDecimal jamanotReturned) {
+    private record CrateReversalResult(int cratesReturned) {
     }
 }

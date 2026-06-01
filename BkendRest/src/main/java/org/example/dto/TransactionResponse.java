@@ -8,6 +8,7 @@ public record TransactionResponse(
         String transactionType,
         Long saleId,
         Long paymentId,
+        Long settlementId,
         Long wholesalerCustomerId,
         String customerName,
         String customerPhone,
@@ -29,7 +30,6 @@ public record TransactionResponse(
         BigDecimal paymentAmount,
         BigDecimal dueAmount,
         Integer cratesReturned,
-        BigDecimal jamanotAmount,
         String paymentType,
         String description,
         LocalDateTime createdAt

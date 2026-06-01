@@ -9,8 +9,12 @@ import org.example.dto.ResetPasswordRequest;
 import org.example.dto.WholesalerListRequest;
 import org.example.dto.WholesalerResponse;
 import org.example.dto.BalanceAuditResponse;
+import org.example.dto.CrateTypeResponse;
+import org.example.dto.CreateCrateTypeRequest;
+import org.example.dto.UpdateCrateTypeRequest;
 import org.example.service.AdminWholesalerService;
 import org.example.service.BalanceAuditService;
+import org.example.service.CrateTypeService;
 import org.example.service.ProductService;
 import org.springframework.http.HttpStatus;
 import org.springframework.web.bind.annotation.CrossOrigin;
@@ -29,12 +33,14 @@ public class AdminController {
     private final AdminWholesalerService adminWholesalerService;
     private final ProductService productService;
     private final BalanceAuditService balanceAuditService;
+    private final CrateTypeService crateTypeService;
 
     public AdminController(AdminWholesalerService adminWholesalerService, ProductService productService,
-                           BalanceAuditService balanceAuditService) {
+                           BalanceAuditService balanceAuditService, CrateTypeService crateTypeService) {
         this.adminWholesalerService = adminWholesalerService;
         this.productService = productService;
         this.balanceAuditService = balanceAuditService;
+        this.crateTypeService = crateTypeService;
     }
 
     @PostMapping("/wholesalers/list")
@@ -86,6 +92,24 @@ public class AdminController {
     @PostMapping("/sub-categories/list")
     public java.util.List<org.example.dto.SubCategoryResponse> listSubCategories() {
         return productService.listSubCategories();
+    }
+
+    // ---- Crates Service: global crate-type catalog ----
+
+    @PostMapping("/crate-types/list")
+    public List<CrateTypeResponse> listCrateTypes() {
+        return crateTypeService.list(true);
+    }
+
+    @PostMapping("/crate-types/create")
+    @ResponseStatus(HttpStatus.CREATED)
+    public CrateTypeResponse createCrateType(@RequestBody CreateCrateTypeRequest request) {
+        return crateTypeService.create(request);
+    }
+
+    @PostMapping("/crate-types/update")
+    public CrateTypeResponse updateCrateType(@RequestBody UpdateCrateTypeRequest request) {
+        return crateTypeService.update(request);
     }
 
     @PostMapping("/wholesalers/{wholesalerId}/balances/audit")

@@ -227,11 +227,11 @@ const SaleForm = ({ onClose }) => {
             </div>
             <div className="form-field">
               <label className="form-label">
-                <DollarSign size={13} /> Price per kg <span className="text-red-500">*</span>
+                <DollarSign size={13} /> {pricedByWeight ? 'Price per kg' : 'Unit price'} <span className="text-red-500">*</span>
               </label>
               <div className="input-with-suffix">
                 <input type="number" min="0" step="0.01" value={form.unitPrice} onChange={(e) => set('unitPrice', e.target.value)} className="input-field" placeholder="0" required />
-                <span className="input-suffix">৳/kg</span>
+                <span className="input-suffix">{pricedByWeight ? '৳/kg' : (selectedProduct ? `৳/${String(selectedProduct.unit || 'unit').toLowerCase()}` : '৳')}</span>
               </div>
             </div>
           </div>

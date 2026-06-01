@@ -121,16 +121,6 @@ public class PaymentCancellationService {
         // 2. Reverse crate returns: each customer-return BoxLedger entry against this payment.
         int cratesReinstated = reverseCrateReturns(wholesaler, customer, payment, cleanReason);
 
-        // 3. Reverse jamanot refund.
-        BigDecimal jamanotReinstated = BigDecimal.ZERO;
-        BigDecimal jamanot = money(payment.getJamanotAmount());
-        if (jamanot.signum() > 0) {
-            BigDecimal cur = customer.getJamanotBalance() == null ? BigDecimal.ZERO : customer.getJamanotBalance();
-            customer.setJamanotBalance(money(cur.add(jamanot)));
-            wholesalerCustomerRepository.save(customer);
-            jamanotReinstated = jamanot;
-        }
-
         payment.setStatus(PostStatus.CANCELLED);
         payment.setNote(joinNote(payment.getNote(), cleanReason));
         paymentRepository.save(payment);
@@ -141,7 +131,7 @@ public class PaymentCancellationService {
                 paymentId, null, payment.getStatus().name(),
                 customer.getId(), null,
                 customerBalanceAfter, null,
-                cratesReinstated, jamanotReinstated,
+                cratesReinstated,
                 tx.getId(), LocalDateTime.now()
         );
     }
@@ -190,7 +180,7 @@ public class PaymentCancellationService {
                 null, settlementId, settlement.getStatus().name(),
                 null, supplier.getId(),
                 null, supplierBalanceAfter,
-                0, BigDecimal.ZERO,
+                0,
                 tx.getId(), LocalDateTime.now()
         );
     }

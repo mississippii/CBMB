@@ -11,27 +11,22 @@ import { postJson, apiPaths } from '../../services/apiClient';
 import { useAuth } from '../auth/AuthContext';
 import { queryKeys } from '../../services/queryKeys';
 
-// Same shape as DataContext.mapCrateDashboard — kept local so the dashboard query
-// produces an identical object regardless of which place loaded it.
-const EMPTY_TYPE = { total: 0, inShop: 0, withSuppliers: 0, withCustomers: 0, lost: 0, purchasePrice: 0 };
-const EMPTY_INV = {
-  totalCratesOwned: 0, cratesInShop: 0, cratesWithSuppliers: 0,
-  cratesWithCustomers: 0, cratesLostDamaged: 0,
-  bangla: { ...EMPTY_TYPE }, china: { ...EMPTY_TYPE },
+// Crate types are an admin-managed global catalog. The dashboard mirrors the active
+// catalog into the wholesaler's box_types on every load, so `d.crateTypes` is the
+// full list of selectable types (with their live inventory) — no hard-coding.
+const EMPTY_TYPE = { name: '', label: '', total: 0, inShop: 0, withSuppliers: 0, withCustomers: 0, lost: 0, purchasePrice: 0 };
+
+const titleCase = (s) => {
+  const str = String(s || '').trim();
+  return str ? str.charAt(0).toUpperCase() + str.slice(1).toLowerCase() : str;
 };
+
 const mapDashboard = (d) => {
-  if (!d) return EMPTY_INV;
-  const out = {
-    totalCratesOwned: Number(d.totalCratesOwned) || 0,
-    cratesInShop: Number(d.cratesInShop) || 0,
-    cratesWithSuppliers: Number(d.cratesWithSuppliers) || 0,
-    cratesWithCustomers: Number(d.cratesWithCustomers) || 0,
-    cratesLostDamaged: Number(d.cratesLostDamaged) || 0,
-    bangla: { ...EMPTY_TYPE }, china: { ...EMPTY_TYPE },
-  };
-  (d.crateTypes || []).forEach((t) => {
-    const key = String(t.crateType || '').trim().toUpperCase() === 'CHINA' ? 'china' : 'bangla';
-    out[key] = {
+  const types = (d?.crateTypes || []).map((t) => {
+    const name = String(t.crateType || '').trim().toUpperCase();
+    return {
+      name,
+      label: titleCase(t.crateType),
       total: Number(t.total) || 0,
       inShop: Number(t.inHand) || 0,
       withSuppliers: Number(t.withSuppliers) || 0,
@@ -40,27 +35,60 @@ const mapDashboard = (d) => {
       purchasePrice: Number(t.purchasePrice) || 0,
     };
   });
-  return out;
+  const byType = {};
+  types.forEach((t) => { byType[t.name] = t; });
+  return {
+    totalCratesOwned: Number(d?.totalCratesOwned) || 0,
+    cratesInShop: Number(d?.cratesInShop) || 0,
+    cratesWithSuppliers: Number(d?.cratesWithSuppliers) || 0,
+    cratesWithCustomers: Number(d?.cratesWithCustomers) || 0,
+    cratesLostDamaged: Number(d?.cratesLostDamaged) || 0,
+    types,
+    byType,
+  };
 };
 
-const EMPTY_PURCHASE = { crateType: 'BANGLA', quantity: '', unitPrice: '' };
-const EMPTY_SELL = { crateType: 'BANGLA', quantity: '', unitSalePrice: '', buyerKind: 'customer', customerId: '', note: '' };
-const EMPTY_LOSS = {
-  crateType: 'BANGLA',
-  quantity: '',
-  reason: 'lost',
-  compensationKind: 'absorbed', // 'absorbed' | 'customer' | 'supplier'
-  compensationPartyId: '',
-  compensationAmount: '',       // optional override
-};
-const EMPTY_PRICE = { crateType: 'BANGLA', purchasePrice: '' };
-const EMPTY_SUPPLIER = { supplierId: '', direction: 'give', banglaCrates: '', chinaCrates: '', note: '' };
-const EMPTY_CUSTOMER = { customerId: '', direction: 'borrow', banglaCrates: '', chinaCrates: '', jamanotAmount: '', note: '' };
+const EMPTY_PURCHASE = { crateType: '', quantity: '', unitPrice: '' };
+const EMPTY_SELL = { crateType: '', quantity: '', unitSalePrice: '', buyerKind: 'customer', customerId: '', note: '' };
+const EMPTY_LOSS = { crateType: '', quantity: '', reason: 'lost' };
+const EMPTY_PRICE = { crateType: '', purchasePrice: '' };
+// One crate type per transaction — borrow/return/give/receive are each recorded separately.
+const EMPTY_SUPPLIER = { supplierId: '', direction: 'give', crateType: '', quantity: '', note: '' };
+const EMPTY_CUSTOMER = { customerId: '', direction: 'borrow', crateType: '', quantity: '', note: '' };
 
-const BOX_TYPES = [
-  { value: 'BANGLA', label: 'Bangla Crate' },
-  { value: 'CHINA', label: 'China Crate' },
-];
+// Line colors for the N-type loss chart, cycled per crate type.
+const LOSS_COLORS = ['#1d63ed', '#f43f5e', '#059669', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#65a30d'];
+
+// Empty-catalog hint shared by every crate picker — keeps the forms self-explanatory
+// when no crate types exist yet (all types are admin-managed, fully backend-driven).
+const NoCrateTypes = () => (
+  <p className="rounded-lg border border-dashed border-slate-300 bg-slate-50 px-3 py-2.5 text-xs text-slate-500">
+    No crate types yet — ask an admin to add one under <span className="font-semibold">Crates Service</span>.
+  </p>
+);
+
+// Single-type dropdown used by every Crate Toolkit form. Lists all available catalog
+// types; `hintOf(value)` renders an optional contextual line under the select (e.g.
+// "5 in shop" / "3 held by customer"). One type per transaction — borrow/return/sell
+// are each recorded separately.
+const CrateTypeSelect = ({ types, value, onChange, hintOf, placeholder = 'Choose crate type…' }) => {
+  if (!types.length) return <NoCrateTypes />;
+  return (
+    <div className="space-y-1">
+      <select
+        value={value}
+        onChange={(e) => onChange(e.target.value)}
+        className="input-field"
+      >
+        <option value="">{placeholder}</option>
+        {types.map((t) => (
+          <option key={t.value} value={t.value}>{t.label}</option>
+        ))}
+      </select>
+      {hintOf && value && <p className="text-[11px] text-slate-500">{hintOf(value)}</p>}
+    </div>
+  );
+};
 
 const KPI = ({ icon: Icon, label, value, tone = 'default' }) => (
   <div className={`kpi-tile kpi-tile-${tone}`}>
@@ -84,6 +112,11 @@ const BoxDashboard = () => {
     enabled: Boolean(admin?.wholesalerId),
   });
   const crateInventory = mapDashboard(dashboardRaw);
+
+  // Selectable types come straight from the dashboard (mirrors the active admin catalog).
+  const boxTypes = crateInventory.types.map((t) => ({ value: t.name, label: t.label }));
+  const defaultType = boxTypes[0]?.value || '';
+  const statOf = (name) => crateInventory.byType[String(name || '').toUpperCase()] || EMPTY_TYPE;
 
   // Modals
   const [showPurchaseModal, setShowPurchaseModal] = useState(false);
@@ -137,10 +170,14 @@ const BoxDashboard = () => {
     enabled: Boolean(admin?.wholesalerId),
   });
 
-  const crateTypes = [
-    { key: 'bangla', label: 'Bangla', data: crateInventory.bangla || {} },
-    { key: 'china', label: 'China', data: crateInventory.china || {} },
-  ];
+  const crateTypes = crateInventory.types.map((t) => ({ key: t.name, label: t.label, data: t }));
+
+  // Selected-party crate holdings (per type) — drives the contextual hints in the
+  // customer/supplier movement forms so the user sees what's available before typing.
+  const selectedCustomer = customers.find((c) => String(c.id) === String(customerForm.customerId));
+  const selectedSupplier = suppliers.find((s) => String(s.id) === String(supplierForm.supplierId));
+  const holdingOf = (party, type) =>
+    (party?.crateHoldings || []).find((h) => h.crateType === String(type || '').toUpperCase())?.quantity || 0;
 
   // Handlers
   const handlePurchase = async () => {
@@ -166,10 +203,10 @@ const BoxDashboard = () => {
   };
 
   const openPurchaseModal = () => {
-    const key = (purchaseForm.crateType || 'BANGLA').toLowerCase();
-    const currentPrice = crateInventory[key]?.purchasePrice || 0;
+    const type = purchaseForm.crateType || defaultType;
+    const currentPrice = statOf(type).purchasePrice || 0;
     setPurchaseForm({
-      crateType: purchaseForm.crateType || 'BANGLA',
+      crateType: type,
       quantity: '',
       unitPrice: currentPrice ? String(currentPrice) : '',
     });
@@ -178,8 +215,7 @@ const BoxDashboard = () => {
   };
 
   const handlePurchaseTypeChange = (newType) => {
-    const key = newType.toLowerCase();
-    const typePrice = crateInventory[key]?.purchasePrice || 0;
+    const typePrice = statOf(newType).purchasePrice || 0;
     setPurchaseForm((p) => ({
       ...p,
       crateType: newType,
@@ -189,9 +225,15 @@ const BoxDashboard = () => {
   };
 
   const openSellModal = () => {
-    setSellForm({ ...EMPTY_SELL, crateType: 'BANGLA' });
+    setSellForm({ ...EMPTY_SELL, crateType: defaultType });
     setSellError('');
     setShowSellModal(true);
+  };
+
+  const openLossModal = () => {
+    setLossForm({ ...EMPTY_LOSS, crateType: defaultType });
+    setLossError('');
+    setShowLossModal(true);
   };
 
   const handleSell = async () => {
@@ -208,8 +250,7 @@ const BoxDashboard = () => {
       return;
     }
 
-    const key = (sellForm.crateType || 'BANGLA').toLowerCase();
-    const inShopAvail = Number(crateInventory[key]?.inShop) || 0;
+    const inShopAvail = Number(statOf(sellForm.crateType).inShop) || 0;
     if (qty > inShopAvail) {
       setSellError(`Only ${inShopAvail} ${sellForm.crateType} crates in shop.`);
       return;
@@ -239,26 +280,10 @@ const BoxDashboard = () => {
     const qty = Number(lossForm.quantity) || 0;
     if (qty <= 0) { setLossError('Enter a quantity greater than 0.'); return; }
 
-    let compensation = null;
-    if (lossForm.compensationKind !== 'absorbed') {
-      if (!lossForm.compensationPartyId) {
-        setLossError('Select the party who is paying for the loss.');
-        return;
-      }
-      compensation = {
-        partyType: lossForm.compensationKind === 'customer' ? 'WHOLESALER_CUSTOMER' : 'WHOLESALER_SUPPLIER',
-        partyAccountId: Number(lossForm.compensationPartyId),
-        amount: lossForm.compensationAmount || null,
-      };
-    }
-
     setIsSavingLoss(true); setLossError('');
     try {
-      await markCratesLost(lossForm.crateType, qty, lossForm.reason, compensation);
-      const suffix = compensation
-        ? ` (charged to ${lossForm.compensationKind})`
-        : ' (absorbed by shop)';
-      showToast(`Marked ${qty} ${lossForm.crateType} crates as ${lossForm.reason}${suffix}`, 'warning');
+      await markCratesLost(lossForm.crateType, qty, lossForm.reason);
+      showToast(`Marked ${qty} ${lossForm.crateType} crates as ${lossForm.reason} (absorbed by shop)`, 'warning');
       setLossForm(EMPTY_LOSS);
       setShowLossModal(false);
     } catch (err) {
@@ -287,41 +312,38 @@ const BoxDashboard = () => {
   };
 
   const openPriceModal = (crateType) => {
-    const existing = crateInventory[crateType.toLowerCase()] || {};
+    const existing = statOf(crateType);
     setPriceForm({ crateType, purchasePrice: existing.purchasePrice || '' });
     setPriceError('');
     setShowPriceModal(true);
   };
 
   const handleCustomerCrate = async () => {
-    const bangla = Number(customerForm.banglaCrates) || 0;
-    const china = Number(customerForm.chinaCrates) || 0;
-    const jamanot = Number(customerForm.jamanotAmount) || 0;
+    const qty = Number(customerForm.quantity) || 0;
     if (!customerForm.customerId) { setCustomerError('Please select a customer.'); return; }
-    if (bangla + china <= 0) { setCustomerError('Enter at least 1 crate.'); return; }
+    if (!customerForm.crateType) { setCustomerError('Please choose a crate type.'); return; }
+    if (qty <= 0) { setCustomerError('Enter a quantity greater than 0.'); return; }
+    // One type per record — send a single crate line.
+    const lines = [{ crateType: customerForm.crateType, quantity: qty }];
     setIsSavingCustomer(true); setCustomerError('');
     try {
       if (customerForm.direction === 'borrow') {
         await postJson(apiPaths.paymentsCustomerCrateBorrow(admin.wholesalerId), {
           wholesalerCustomerId: Number(customerForm.customerId),
-          banglaCrates: bangla,
-          chinaCrates: china,
-          jamanotAmount: jamanot,
+          crates: lines,
           note: customerForm.note,
         });
-        showToast(`${bangla + china} crates borrowed${jamanot > 0 ? ` · ৳${jamanot} jamanot collected` : ''}`, 'success');
+        showToast(`${qty} ${customerForm.crateType} crates borrowed`, 'success');
       } else {
-        // Return — use customer/settle (cash=0, jamanot = refund)
+        // Return — use customer/settle (cash=0, crates only)
         await postJson(apiPaths.paymentsCustomerSettle(admin.wholesalerId), {
           wholesalerCustomerId: Number(customerForm.customerId),
           cashAmount: 0,
-          banglaCratesReturned: bangla,
-          chinaCratesReturned: china,
-          jamanotAmount: jamanot,
+          crateReturns: lines,
           paymentMethod: 'CASH',
           note: customerForm.note,
         });
-        showToast(`${bangla + china} crates returned${jamanot > 0 ? ` · ৳${jamanot} jamanot refunded` : ''}`, 'success');
+        showToast(`${qty} ${customerForm.crateType} crates returned`, 'success');
       }
       setCustomerForm(EMPTY_CUSTOMER);
       setShowCustomerModal(false);
@@ -334,10 +356,12 @@ const BoxDashboard = () => {
   };
 
   const handleSupplierCrate = async () => {
-    const bangla = Number(supplierForm.banglaCrates) || 0;
-    const china = Number(supplierForm.chinaCrates) || 0;
+    const qty = Number(supplierForm.quantity) || 0;
     if (!supplierForm.supplierId) { setSupplierError('Please select a supplier.'); return; }
-    if (bangla + china <= 0) { setSupplierError('Enter at least 1 crate.'); return; }
+    if (!supplierForm.crateType) { setSupplierError('Please choose a crate type.'); return; }
+    if (qty <= 0) { setSupplierError('Enter a quantity greater than 0.'); return; }
+    // One type per record — send a single crate line.
+    const lines = [{ crateType: supplierForm.crateType, quantity: qty }];
     setIsSavingSupplier(true); setSupplierError('');
     try {
       const endpoint = supplierForm.direction === 'give'
@@ -345,12 +369,11 @@ const BoxDashboard = () => {
         : apiPaths.paymentsSupplierCrateReturn(admin.wholesalerId);
       await postJson(endpoint, {
         wholesalerSupplierId: Number(supplierForm.supplierId),
-        banglaCrates: bangla,
-        chinaCrates: china,
+        crates: lines,
         note: supplierForm.note,
       });
       const action = supplierForm.direction === 'give' ? 'given to' : 'received from';
-      showToast(`${bangla + china} crates ${action} supplier`, 'success');
+      showToast(`${qty} ${supplierForm.crateType} crates ${action} supplier`, 'success');
       setSupplierForm(EMPTY_SUPPLIER);
       setShowSupplierModal(false);
       refreshTransactions();
@@ -370,7 +393,7 @@ const BoxDashboard = () => {
           <div className="min-w-0">
             <h2 className="crate-hero-title">Crate Operations</h2>
             <p className="crate-hero-sub">
-              Track every Bangla &amp; China crate — in shop, with customers, with suppliers, or lost
+              Track every crate — in shop, with customers, with suppliers, or lost
             </p>
           </div>
         </div>
@@ -433,7 +456,7 @@ const BoxDashboard = () => {
                 </div>
                 <button
                   type="button"
-                  onClick={() => openPriceModal(type.label.toUpperCase())}
+                  onClick={() => openPriceModal(type.key)}
                   className="mt-2 w-full text-xs font-semibold text-slate-600 hover:text-blue-700 hover:bg-blue-50 rounded px-2 py-1 flex items-center justify-between gap-2 border border-slate-200"
                   title="Used to value lost/damaged crates in P&L"
                 >
@@ -465,7 +488,7 @@ const BoxDashboard = () => {
               <span className="quick-action-label">Supplier Crates</span>
               <ArrowUpRight size={13} className="quick-action-arrow" />
             </button>
-            <button onClick={() => setShowLossModal(true)} className="quick-action-row">
+            <button onClick={openLossModal} className="quick-action-row">
               <span className="quick-action-icon" style={{ background: '#fff1f2', color: '#be123c' }}><AlertTriangle size={14} /></span>
               <span className="quick-action-label">Mark Lost / Damaged</span>
               <ArrowUpRight size={13} className="quick-action-arrow" />
@@ -523,19 +546,23 @@ const BoxDashboard = () => {
                 <p className="loss-chart-summary-label">Total Lost</p>
                 <p className="loss-chart-summary-value text-rose-600">{lossStats.totalLost.toLocaleString()}</p>
               </div>
-              <div>
-                <p className="loss-chart-summary-label">Bangla</p>
-                <p className="loss-chart-summary-value">{lossStats.totalBangla.toLocaleString()}</p>
-              </div>
-              <div>
-                <p className="loss-chart-summary-label">China</p>
-                <p className="loss-chart-summary-value">{lossStats.totalChina.toLocaleString()}</p>
-              </div>
+              {(lossStats.byType || []).map((t) => (
+                <div key={t.crateType}>
+                  <p className="loss-chart-summary-label">{titleCase(t.crateType)}</p>
+                  <p className="loss-chart-summary-value">{(Number(t.quantity) || 0).toLocaleString()}</p>
+                </div>
+              ))}
             </div>
 
             {(() => {
               const buckets = lossStats.buckets;
-              const maxRaw = Math.max(...buckets.map((b) => b.total), 1);
+              // One line per crate type that actually had a loss in this window.
+              const types = (lossStats.byType || []).map((t) => t.crateType);
+              const qtyOf = (bucket, type) => {
+                const hit = (bucket.byType || []).find((x) => x.crateType === type);
+                return hit ? Number(hit.quantity) || 0 : 0;
+              };
+              const maxRaw = Math.max(...buckets.map((b) => Number(b.total) || 0), 1);
               // Round max up to a nice number for gridlines
               const niceMax = (() => {
                 const exp = Math.pow(10, Math.floor(Math.log10(maxRaw)));
@@ -551,12 +578,7 @@ const BoxDashboard = () => {
               const stepX = buckets.length > 1 ? chartW / (buckets.length - 1) : 0;
               const yOf = (v) => padT + chartH - (v / safeMax) * chartH;
               const xOf = (i) => padL + i * stepX;
-
-              const points = (key) => buckets.map((b, i) => `${xOf(i)},${yOf(b[key])}`).join(' ');
-              const areaPath = (key) => {
-                const top = buckets.map((b, i) => `${i === 0 ? 'M' : 'L'} ${xOf(i)} ${yOf(b[key])}`).join(' ');
-                return `${top} L ${xOf(buckets.length - 1)} ${padT + chartH} L ${xOf(0)} ${padT + chartH} Z`;
-              };
+              const pointsFor = (type) => buckets.map((b, i) => `${xOf(i)},${yOf(qtyOf(b, type))}`).join(' ');
 
               const gridSteps = 4;
               const gridLines = Array.from({ length: gridSteps + 1 }, (_, i) => i);
@@ -578,29 +600,28 @@ const BoxDashboard = () => {
                       );
                     })}
 
-                    {/* Areas — China first (background) then Bangla (foreground) */}
-                    <defs>
-                      <linearGradient id="banglaGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#1d63ed" stopOpacity="0.4" />
-                        <stop offset="100%" stopColor="#1d63ed" stopOpacity="0.02" />
-                      </linearGradient>
-                      <linearGradient id="chinaGradient" x1="0" y1="0" x2="0" y2="1">
-                        <stop offset="0%" stopColor="#f43f5e" stopOpacity="0.4" />
-                        <stop offset="100%" stopColor="#f43f5e" stopOpacity="0.02" />
-                      </linearGradient>
-                    </defs>
-
-                    <path d={areaPath('china')} fill="url(#chinaGradient)" />
-                    <polyline points={points('china')} fill="none" stroke="#f43f5e" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-
-                    <path d={areaPath('bangla')} fill="url(#banglaGradient)" />
-                    <polyline points={points('bangla')} fill="none" stroke="#1d63ed" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-
-                    {/* Data points */}
-                    {buckets.map((b, i) => (
-                      <g key={`pts-${i}`}>
-                        <circle cx={xOf(i)} cy={yOf(b.china)} r="3.5" fill="#fff" stroke="#f43f5e" strokeWidth="2" />
-                        <circle cx={xOf(i)} cy={yOf(b.bangla)} r="3.5" fill="#fff" stroke="#1d63ed" strokeWidth="2" />
+                    {/* One polyline + points per crate type */}
+                    {types.map((type, ti) => (
+                      <g key={`line-${type}`}>
+                        <polyline
+                          points={pointsFor(type)}
+                          fill="none"
+                          stroke={LOSS_COLORS[ti % LOSS_COLORS.length]}
+                          strokeWidth="2"
+                          strokeLinecap="round"
+                          strokeLinejoin="round"
+                        />
+                        {buckets.map((b, i) => (
+                          <circle
+                            key={`pt-${type}-${i}`}
+                            cx={xOf(i)}
+                            cy={yOf(qtyOf(b, type))}
+                            r="3.5"
+                            fill="#fff"
+                            stroke={LOSS_COLORS[ti % LOSS_COLORS.length]}
+                            strokeWidth="2"
+                          />
+                        ))}
                       </g>
                     ))}
 
@@ -629,7 +650,7 @@ const BoxDashboard = () => {
                         height={chartH}
                         fill="transparent"
                       >
-                        <title>{`${b.month}\nBangla: ${b.bangla}\nChina: ${b.china}\nTotal: ${b.total}`}</title>
+                        <title>{`${b.month}\n${(b.byType || []).map((x) => `${x.crateType}: ${x.quantity}`).join('\n')}\nTotal: ${b.total}`}</title>
                       </rect>
                     ))}
                   </svg>
@@ -638,8 +659,11 @@ const BoxDashboard = () => {
             })()}
 
             <div className="loss-chart-legend">
-              <span className="flex items-center gap-1.5"><span className="allocation-dot" style={{ background: '#1d63ed' }} /> Bangla</span>
-              <span className="flex items-center gap-1.5"><span className="allocation-dot" style={{ background: '#f43f5e' }} /> China</span>
+              {(lossStats.byType || []).map((t, i) => (
+                <span key={t.crateType} className="flex items-center gap-1.5">
+                  <span className="allocation-dot" style={{ background: LOSS_COLORS[i % LOSS_COLORS.length] }} /> {titleCase(t.crateType)}
+                </span>
+              ))}
             </div>
           </>
         )}
@@ -660,21 +684,12 @@ const BoxDashboard = () => {
               <div className="space-y-4">
                 <div className="form-field">
                   <label className="form-label"><Boxes size={13} /> Crate Type</label>
-                  <div className="unit-type-grid">
-                    {BOX_TYPES.map((t) => (
-                      <button
-                        type="button"
-                        key={t.value}
-                        onClick={() => handlePurchaseTypeChange(t.value)}
-                        className={`unit-type-btn ${purchaseForm.crateType === t.value ? 'active' : ''}`}
-                      >
-                        <span className="unit-type-icon">{t.value === 'BANGLA' ? 'BA' : 'CH'}</span>
-                        <div className="text-left">
-                          <p className="font-bold">{t.label}</p>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
+                  <CrateTypeSelect
+                    types={boxTypes}
+                    value={purchaseForm.crateType}
+                    onChange={handlePurchaseTypeChange}
+                    hintOf={(v) => `${(statOf(v).inShop || 0).toLocaleString()} in shop`}
+                  />
                 </div>
                 <div className="form-field">
                   <label className="form-label"><Hash size={13} /> Quantity</label>
@@ -692,7 +707,7 @@ const BoxDashboard = () => {
                     type="number" min="0.01" step="0.01" value={purchaseForm.unitPrice}
                     onChange={(e) => setPurchaseForm((p) => ({ ...p, unitPrice: e.target.value }))}
                     className="input-field"
-                    placeholder={`Current ৳ ${(crateInventory[purchaseForm.crateType.toLowerCase()]?.purchasePrice || 0)}`}
+                    placeholder={`Current ৳ ${statOf(purchaseForm.crateType).purchasePrice || 0}`}
                   />
                   <p className="text-xs text-slate-500 mt-1">
                     Crates are a capital investment — this price doesn&apos;t hit P&amp;L, it sets the cost basis for resale &amp; loss accounting.
@@ -728,19 +743,12 @@ const BoxDashboard = () => {
               <div className="space-y-4">
                 <div className="form-field">
                   <label className="form-label"><Boxes size={13} /> Crate Type</label>
-                  <div className="unit-type-grid">
-                    {BOX_TYPES.map((t) => (
-                      <button
-                        type="button"
-                        key={t.value}
-                        onClick={() => setLossForm((p) => ({ ...p, crateType: t.value }))}
-                        className={`unit-type-btn ${lossForm.crateType === t.value ? 'active' : ''}`}
-                      >
-                        <span className="unit-type-icon">{t.value === 'BANGLA' ? 'BA' : 'CH'}</span>
-                        <div className="text-left"><p className="font-bold">{t.label}</p></div>
-                      </button>
-                    ))}
-                  </div>
+                  <CrateTypeSelect
+                    types={boxTypes}
+                    value={lossForm.crateType}
+                    onChange={(v) => setLossForm((p) => ({ ...p, crateType: v }))}
+                    hintOf={(v) => `${(statOf(v).inShop || 0).toLocaleString()} in shop`}
+                  />
                 </div>
                 <div className="form-field">
                   <label className="form-label"><Hash size={13} /> Quantity</label>
@@ -766,65 +774,9 @@ const BoxDashboard = () => {
                   </div>
                 </div>
 
-                <div className="form-field">
-                  <label className="form-label"><Wallet size={13} /> Who pays for it?</label>
-                  <div className="unit-pills">
-                    {[
-                      { value: 'absorbed', label: 'Shop absorbs' },
-                      { value: 'customer', label: 'Customer' },
-                      { value: 'supplier', label: 'Supplier' },
-                    ].map((c) => (
-                      <button
-                        type="button"
-                        key={c.value}
-                        onClick={() => setLossForm((p) => ({
-                          ...p,
-                          compensationKind: c.value,
-                          compensationPartyId: '',
-                          compensationAmount: '',
-                        }))}
-                        className={`unit-pill ${lossForm.compensationKind === c.value ? 'active' : ''}`}
-                      >
-                        {c.label}
-                      </button>
-                    ))}
-                  </div>
-                  <p className="text-xs text-slate-500 mt-1">
-                    "Shop absorbs" counts as a loss in P&amp;L. Otherwise the party is charged at cost per crate.
-                  </p>
-                </div>
-
-                {lossForm.compensationKind !== 'absorbed' && (
-                  <>
-                    <div className="form-field">
-                      <label className="form-label">
-                        <Users size={13} /> {lossForm.compensationKind === 'customer' ? 'Customer' : 'Supplier'}
-                      </label>
-                      <select
-                        className="input-field"
-                        value={lossForm.compensationPartyId}
-                        onChange={(e) => setLossForm((p) => ({ ...p, compensationPartyId: e.target.value }))}
-                      >
-                        <option value="">— Select —</option>
-                        {(lossForm.compensationKind === 'customer' ? customers : suppliers).map((p) => (
-                          <option key={p.id} value={p.id}>{p.name}</option>
-                        ))}
-                      </select>
-                    </div>
-                    <div className="form-field">
-                      <label className="form-label"><Hash size={13} /> Amount to charge (optional)</label>
-                      <input
-                        type="number"
-                        min="0"
-                        step="0.01"
-                        value={lossForm.compensationAmount}
-                        onChange={(e) => setLossForm((p) => ({ ...p, compensationAmount: e.target.value }))}
-                        className="input-field"
-                        placeholder={`Defaults to qty × ৳ ${(crateInventory[lossForm.crateType.toLowerCase()]?.purchasePrice || 0)}`}
-                      />
-                    </div>
-                  </>
-                )}
+                <p className="text-xs text-slate-500">
+                  Lost / damaged crates are written off against crate capital (absorbed by the shop) and valued at the weighted-average cost for P&amp;L.
+                </p>
 
                 {lossError && (
                   <div className="status-error"><span>!</span><span>{lossError}</span></div>
@@ -850,7 +802,7 @@ const BoxDashboard = () => {
                 <div className="modal-icon-circle bg-blue-100 text-blue-700"><Users size={18} /></div>
                 <div>
                   <h2>Customer Crate Movement</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">Lend crates against jamanot deposit, or accept return</p>
+                  <p className="text-xs text-slate-500 mt-0.5">Lend crates to a customer, or accept their return</p>
                 </div>
               </div>
               <button onClick={() => setShowCustomerModal(false)} className="modal-close-btn">✕</button>
@@ -867,7 +819,7 @@ const BoxDashboard = () => {
                     <option value="">Choose permanent customer…</option>
                     {customers.map((c) => (
                       <option key={c.id} value={c.id}>
-                        {c.name} (holds {c.totalCratesHolding || 0} · ৳{Number(c.jamanotBalance || 0).toLocaleString()})
+                        {c.name} (holds {c.totalCratesHolding || 0})
                       </option>
                     ))}
                   </select>
@@ -884,7 +836,7 @@ const BoxDashboard = () => {
                       <span className="unit-type-icon"><ArrowUpRight size={16} /></span>
                       <div className="text-left">
                         <p className="font-bold">Borrow</p>
-                        <p className="text-xs opacity-75">Out → customer (collect jamanot)</p>
+                        <p className="text-xs opacity-75">Out → customer</p>
                       </div>
                     </button>
                     <button
@@ -895,7 +847,7 @@ const BoxDashboard = () => {
                       <span className="unit-type-icon"><ArrowDownLeft size={16} /></span>
                       <div className="text-left">
                         <p className="font-bold">Return</p>
-                        <p className="text-xs opacity-75">Customer → in shop (refund jamanot)</p>
+                        <p className="text-xs opacity-75">Customer → in shop</p>
                       </div>
                     </button>
                   </div>
@@ -903,38 +855,28 @@ const BoxDashboard = () => {
 
                 <div className="form-grid">
                   <div className="form-field">
-                    <label className="form-label">Bangla Crates</label>
-                    <input
-                      type="number" min="0" value={customerForm.banglaCrates}
-                      onChange={(e) => setCustomerForm((p) => ({ ...p, banglaCrates: e.target.value }))}
-                      className="input-field" placeholder="0"
+                    <label className="form-label"><Boxes size={13} /> Crate Type <span className="text-red-500">*</span></label>
+                    <CrateTypeSelect
+                      types={boxTypes}
+                      value={customerForm.crateType}
+                      onChange={(v) => setCustomerForm((p) => ({ ...p, crateType: v }))}
+                      hintOf={(v) => customerForm.direction === 'return'
+                        ? `${holdingOf(selectedCustomer, v).toLocaleString()} held by customer`
+                        : `${(statOf(v).inShop || 0).toLocaleString()} in shop`}
                     />
                   </div>
                   <div className="form-field">
-                    <label className="form-label">China Crates</label>
+                    <label className="form-label"><Hash size={13} /> Quantity</label>
                     <input
-                      type="number" min="0" value={customerForm.chinaCrates}
-                      onChange={(e) => setCustomerForm((p) => ({ ...p, chinaCrates: e.target.value }))}
-                      className="input-field" placeholder="0"
+                      type="number" min="1" value={customerForm.quantity}
+                      onChange={(e) => setCustomerForm((p) => ({ ...p, quantity: e.target.value }))}
+                      className="input-field" placeholder="e.g. 10"
                     />
                   </div>
                 </div>
-
-                <div className="form-field">
-                  <label className="form-label">
-                    <Wallet size={13} /> Jamanot {customerForm.direction === 'borrow' ? 'Deposit' : 'Refund'}
-                    <span className="form-label-hint">optional</span>
-                  </label>
-                  <div className="input-with-suffix">
-                    <span className="input-prefix">৳</span>
-                    <input
-                      type="number" min="0" value={customerForm.jamanotAmount}
-                      onChange={(e) => setCustomerForm((p) => ({ ...p, jamanotAmount: e.target.value }))}
-                      className="input-field !pl-8"
-                      placeholder="Leave 0 if no deposit"
-                    />
-                  </div>
-                </div>
+                <p className="text-[11px] text-slate-500 -mt-2">
+                  One crate type per entry — record each type separately.
+                </p>
 
                 <div className="form-field">
                   <label className="form-label"><FileText size={13} /> Note <span className="form-label-hint">optional</span></label>
@@ -1022,22 +964,28 @@ const BoxDashboard = () => {
 
                 <div className="form-grid">
                   <div className="form-field">
-                    <label className="form-label">Bangla Crates</label>
-                    <input
-                      type="number" min="0" value={supplierForm.banglaCrates}
-                      onChange={(e) => setSupplierForm((p) => ({ ...p, banglaCrates: e.target.value }))}
-                      className="input-field" placeholder="0"
+                    <label className="form-label"><Boxes size={13} /> Crate Type <span className="text-red-500">*</span></label>
+                    <CrateTypeSelect
+                      types={boxTypes}
+                      value={supplierForm.crateType}
+                      onChange={(v) => setSupplierForm((p) => ({ ...p, crateType: v }))}
+                      hintOf={(v) => supplierForm.direction === 'return'
+                        ? `${holdingOf(selectedSupplier, v).toLocaleString()} held by supplier`
+                        : `${(statOf(v).inShop || 0).toLocaleString()} in shop`}
                     />
                   </div>
                   <div className="form-field">
-                    <label className="form-label">China Crates</label>
+                    <label className="form-label"><Hash size={13} /> Quantity</label>
                     <input
-                      type="number" min="0" value={supplierForm.chinaCrates}
-                      onChange={(e) => setSupplierForm((p) => ({ ...p, chinaCrates: e.target.value }))}
-                      className="input-field" placeholder="0"
+                      type="number" min="1" value={supplierForm.quantity}
+                      onChange={(e) => setSupplierForm((p) => ({ ...p, quantity: e.target.value }))}
+                      className="input-field" placeholder="e.g. 10"
                     />
                   </div>
                 </div>
+                <p className="text-[11px] text-slate-500 -mt-2">
+                  One crate type per entry — record each type separately.
+                </p>
 
                 <div className="form-field">
                   <label className="form-label"><FileText size={13} /> Note <span className="form-label-hint">optional</span></label>
@@ -1081,24 +1029,12 @@ const BoxDashboard = () => {
               <div className="space-y-4">
                 <div className="form-field">
                   <label className="form-label"><Boxes size={13} /> Crate Type</label>
-                  <div className="unit-type-grid">
-                    {BOX_TYPES.map((t) => (
-                      <button
-                        type="button"
-                        key={t.value}
-                        onClick={() => setSellForm((p) => ({ ...p, crateType: t.value }))}
-                        className={`unit-type-btn ${sellForm.crateType === t.value ? 'active' : ''}`}
-                      >
-                        <span className="unit-type-icon">{t.value === 'BANGLA' ? 'BA' : 'CH'}</span>
-                        <div className="text-left">
-                          <p className="font-bold">{t.label}</p>
-                          <p className="text-xs opacity-75">
-                            {(crateInventory[t.value.toLowerCase()]?.inShop || 0).toLocaleString()} in shop
-                          </p>
-                        </div>
-                      </button>
-                    ))}
-                  </div>
+                  <CrateTypeSelect
+                    types={boxTypes}
+                    value={sellForm.crateType}
+                    onChange={(v) => setSellForm((p) => ({ ...p, crateType: v }))}
+                    hintOf={(v) => `${(statOf(v).inShop || 0).toLocaleString()} in shop`}
+                  />
                 </div>
 
                 <div className="form-field">
@@ -1166,8 +1102,7 @@ const BoxDashboard = () => {
                 {Number(sellForm.quantity) > 0 && Number(sellForm.unitSalePrice) >= 0 && (() => {
                   const qty = Number(sellForm.quantity) || 0;
                   const unit = Number(sellForm.unitSalePrice) || 0;
-                  const key = (sellForm.crateType || 'BANGLA').toLowerCase();
-                  const costBasis = Number(crateInventory[key]?.purchasePrice) || 0;
+                  const costBasis = Number(statOf(sellForm.crateType).purchasePrice) || 0;
                   const gross = qty * unit;
                   const cost = qty * costBasis;
                   const profit = gross - cost;
