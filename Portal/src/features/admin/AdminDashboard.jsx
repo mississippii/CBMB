@@ -7,6 +7,7 @@ import {
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../../shared/components/Toast';
 import Navbar from '../../shared/components/Navbar';
+import { TablePager } from '../../shared/components';
 import { apiPaths, postJson } from '../../services/apiClient';
 import { formatNumber, formatDate } from '../../shared/utils/format';
 
@@ -14,11 +15,40 @@ const emptyForm = {
   name: '', email: '', password: '', businessName: '', phone: '', address: '',
 };
 
+// Deterministic colourful avatar gradient per wholesaler — same key always maps
+// to the same colour, so the list looks varied but stable across reloads.
+const AVATAR_GRADIENTS = [
+  'linear-gradient(135deg, #2563eb, #4f46e5)',
+  'linear-gradient(135deg, #16a34a, #059669)',
+  'linear-gradient(135deg, #db2777, #be185d)',
+  'linear-gradient(135deg, #ea580c, #d97706)',
+  'linear-gradient(135deg, #7c3aed, #6d28d9)',
+  'linear-gradient(135deg, #0891b2, #0e7490)',
+  'linear-gradient(135deg, #dc2626, #b91c1c)',
+  'linear-gradient(135deg, #ca8a04, #a16207)',
+];
+const avatarGradient = (key) => {
+  const s = String(key ?? '');
+  let h = 0;
+  for (let i = 0; i < s.length; i += 1) h = (h * 31 + s.charCodeAt(i)) >>> 0;
+  return AVATAR_GRADIENTS[h % AVATAR_GRADIENTS.length];
+};
+
 // Left-side modules (mirrors the wholesaler workspace nav). Add more here as the admin grows.
 const modules = [
-  { id: 'list', label: 'Wholesalers', icon: Users },
-  { id: 'support', label: 'Admin Support', icon: LifeBuoy },
+  { id: 'list', label: 'Wholesalers', icon: Users, color: '#FF0000' },     // red
+  { id: 'support', label: 'Admin Support', icon: LifeBuoy, color: '#008000' }, // green
 ];
+
+// White icon on dark colours, black on bright ones (e.g. yellow) for readability.
+const readableInk = (hex) => {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.6 ? '#000000' : '#ffffff';
+};
 
 const Field = ({ icon: Icon, label, required, children, hint }) => (
   <div className="form-field">
@@ -58,6 +88,12 @@ const AdminDashboard = () => {
   const [resetPwd, setResetPwd] = useState('');
   const [isResetting, setIsResetting] = useState(false);
   const [resetError, setResetError] = useState('');
+
+  // Edit wholesaler modal
+  const [editTarget, setEditTarget] = useState(null);
+  const [editForm, setEditForm] = useState({ name: '', businessName: '', phone: '', address: '' });
+  const [isEditSaving, setIsEditSaving] = useState(false);
+  const [editError, setEditError] = useState('');
 
   // Row menu
   const [openMenuId, setOpenMenuId] = useState(null);
@@ -298,8 +334,35 @@ const AdminDashboard = () => {
     }
   };
 
-  const adminName = admin?.fullName || 'Admin';
-  const initials = adminName.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase();
+  // Edit wholesaler info (name, business name, phone, address)
+  const openEdit = (w) => {
+    setEditTarget(w);
+    setEditForm({ name: w.name || '', businessName: w.businessName || '', phone: w.phone || '', address: w.address || '' });
+    setEditError('');
+    setOpenMenuId(null);
+  };
+  const closeEdit = () => { setEditTarget(null); setEditError(''); };
+  const handleEditField = (f, v) => setEditForm((p) => ({ ...p, [f]: v }));
+
+  const handleEditSave = async (e) => {
+    e.preventDefault();
+    if (!editForm.name.trim() || !editForm.businessName.trim() || !editForm.phone.trim()) {
+      setEditError('Name, business name and phone are required.');
+      return;
+    }
+    setIsEditSaving(true); setEditError('');
+    try {
+      await postJson(apiPaths.adminWholesalerUpdate(editTarget.id), editForm);
+      showToast('Updated {name}'.replace('{name}', editForm.businessName), 'success');
+      closeEdit();
+      fetchPage(page, pageSize, phoneSearch);
+    } catch (err) {
+      setEditError(err.message || 'Failed to update wholesaler.');
+    } finally {
+      setIsEditSaving(false);
+    }
+  };
+
 
   const showingFrom = total === 0 ? 0 : page * pageSize + 1;
   const showingTo = Math.min(total, (page + 1) * pageSize);
@@ -310,32 +373,23 @@ const AdminDashboard = () => {
       <Navbar subtitle={'Admin Console'} />
 
       <main className="container-main space-y-4">
-        {/* Compact header bar */}
-        <header className="admin-header-bar">
-          <div className="flex items-center gap-3 min-w-0">
-            <div className="admin-avatar">{initials}</div>
-            <div className="min-w-0">
-              <h2 className="admin-header-title">{adminName}</h2>
-              <p className="admin-header-sub">{admin?.email}</p>
-            </div>
-          </div>
-          <button onClick={openForm} className="btn-primary flex items-center gap-2 shrink-0">
-            <Plus size={16} /> {'Add Wholesaler'}
-          </button>
-        </header>
-
         <div className="workspace-layout">
           {/* LEFT: module nav (same pattern as the wholesaler workspace) */}
           <aside className="workspace-sidebar">
             <nav className="sidebar-nav">
-              {modules.map(({ id, label, icon: Icon }) => (
+              {modules.map(({ id, label, icon: Icon, color }) => (
                 <button
                   key={id}
                   type="button"
                   onClick={() => setActiveTab(id)}
                   className={`sidebar-nav-item ${activeTab === id ? 'active' : ''}`}
                 >
-                  <Icon size={16} className="sidebar-nav-icon" />
+                  <span
+                    className="sidebar-nav-badge"
+                    style={{ background: color, boxShadow: `0 4px 10px ${color}59` }}
+                  >
+                    <Icon size={13} strokeWidth={2.4} color={readableInk(color)} />
+                  </span>
                   <span className="sidebar-nav-title">{label}</span>
                 </button>
               ))}
@@ -388,7 +442,7 @@ const AdminDashboard = () => {
             {/* Product Catalog — search sits inline in the header */}
             <div className="support-panel">
               <div className="support-panel-header">
-                <div className="support-panel-icon support-panel-icon-teal"><Database size={20} /></div>
+                <div className="support-panel-icon support-panel-icon-emerald"><Database size={20} /></div>
                 <div className="min-w-0 flex-1">
                   <h3 className="support-panel-title">{'Product Catalog'}</h3>
                 </div>
@@ -510,7 +564,7 @@ const AdminDashboard = () => {
                 <div className="modal-content" style={{ maxWidth: '24rem' }}>
                   <div className="modal-header">
                     <div className="flex items-center gap-2.5">
-                      <div className="modal-icon-circle bg-blue-100 text-blue-700">
+                      <div className="modal-icon-circle bg-gradient-to-br from-blue-500 to-indigo-600 text-white">
                         {catEditor.mode === 'add' ? <FolderPlus size={18} /> : <Pencil size={18} />}
                       </div>
                       <div>
@@ -564,28 +618,35 @@ const AdminDashboard = () => {
         <div className="data-card">
           <div className="data-card-header">
             <div className="flex items-center gap-2">
-              <Users size={16} className="text-blue-600" />
+              <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-sm">
+                <Users size={15} />
+              </span>
               <h3 className="data-card-title">{'Wholesalers'}</h3>
               <span className="badge badge-teal">{formatNumber(total)}</span>
             </div>
-            <div className="relative w-full sm:w-[300px]">
-              <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-              <input
-                type="tel"
-                value={phoneSearch}
-                onChange={(e) => setPhoneSearch(e.target.value)}
-                className="input-field !pl-9 !pr-8 !py-2 text-sm"
-                placeholder={'Search by phone number…'}
-              />
-              {phoneSearch && (
-                <button
-                  onClick={() => setPhoneSearch('')}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-slate-100"
-                  aria-label="Clear"
-                >
-                  <X size={13} className="text-slate-400" />
-                </button>
-              )}
+            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
+              <div className="relative w-full sm:w-[260px]">
+                <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                <input
+                  type="tel"
+                  value={phoneSearch}
+                  onChange={(e) => setPhoneSearch(e.target.value)}
+                  className="input-field !pl-9 !pr-8 !py-2 text-sm"
+                  placeholder={'Search by phone number…'}
+                />
+                {phoneSearch && (
+                  <button
+                    onClick={() => setPhoneSearch('')}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-slate-100"
+                    aria-label="Clear"
+                  >
+                    <X size={13} className="text-slate-400" />
+                  </button>
+                )}
+              </div>
+              <button onClick={openForm} className="btn-primary flex shrink-0 items-center gap-2 whitespace-nowrap">
+                <Plus size={16} /> {'Add Wholesaler'}
+              </button>
             </div>
           </div>
 
@@ -631,7 +692,12 @@ const AdminDashboard = () => {
                       <tr key={w.id} className="data-table-row">
                         <td>
                           <div className="flex items-center gap-2.5">
-                            <div className="wholesaler-avatar !w-8 !h-8 !text-[11px]">{wInitials}</div>
+                            <div
+                              className="wholesaler-avatar !w-8 !h-8 !text-[11px]"
+                              style={{ background: avatarGradient(w.id ?? w.businessName ?? w.name) }}
+                            >
+                              {wInitials}
+                            </div>
                             <span className="font-semibold text-slate-900">{w.businessName}</span>
                           </div>
                         </td>
@@ -656,6 +722,9 @@ const AdminDashboard = () => {
                             <>
                               <div className="row-menu-backdrop" onClick={() => setOpenMenuId(null)} />
                               <div className="row-menu">
+                                <button onClick={() => openEdit(w)} className="row-menu-item">
+                                  <Pencil size={13} /> {'Edit Info'}
+                                </button>
                                 <button onClick={() => openReset(w)} className="row-menu-item">
                                   <KeyRound size={13} /> {'Reset Password'}
                                 </button>
@@ -671,50 +740,19 @@ const AdminDashboard = () => {
             </table>
           </div>
 
-          {/* Pagination footer */}
-          <div className="data-card-footer">
-            <div className="text-xs text-slate-500">
-              {'Showing {from}–{to} of {total}'
-                .replace('{from}', formatNumber(showingFrom))
-                .replace('{to}', formatNumber(showingTo))
-                .replace('{total}', formatNumber(total))}
-            </div>
-            <div className="flex items-center gap-3">
-              <div className="flex items-center gap-1.5 text-xs text-slate-500">
-                <select
-                  value={pageSize}
-                  onChange={(e) => { const s = Number(e.target.value); setPageSize(s); fetchPage(0, s, phoneSearch); }}
-                  className="data-card-select"
-                >
-                  <option value={10}>10</option>
-                  <option value={20}>20</option>
-                  <option value={50}>50</option>
-                  <option value={100}>100</option>
-                </select>
-                <span>{'per page'}</span>
-              </div>
-              <div className="flex items-center gap-1">
-                <button
-                  onClick={() => fetchPage(Math.max(0, page - 1), pageSize, phoneSearch)}
-                  disabled={page === 0 || isLoading}
-                  className="page-btn"
-                  aria-label={'Previous'}
-                >
-                  <ChevronLeft size={14} />
-                </button>
-                <span className="text-xs font-semibold text-slate-700 px-2">
-                  {formatNumber(page + 1)} / {formatNumber(Math.max(1, totalPages))}
-                </span>
-                <button
-                  onClick={() => fetchPage(Math.min(totalPages - 1, page + 1), pageSize, phoneSearch)}
-                  disabled={page >= totalPages - 1 || isLoading}
-                  className="page-btn"
-                  aria-label={'Next'}
-                >
-                  <ChevronRight size={14} />
-                </button>
-              </div>
-            </div>
+          {/* Pagination — same control as the wholesaler tables */}
+          <div className="px-4 pb-3">
+            <TablePager
+              page={page + 1}
+              setPage={(p) => fetchPage(p - 1, pageSize, phoneSearch)}
+              totalPages={Math.max(1, totalPages)}
+              total={total}
+              rangeStart={showingFrom}
+              rangeEnd={showingTo}
+              pageSize={pageSize}
+              setPageSize={(s) => { setPageSize(s); fetchPage(0, s, phoneSearch); }}
+              pageSizeOptions={[10, 20, 50, 100]}
+            />
           </div>
         </div>
         )}
@@ -842,13 +880,67 @@ const AdminDashboard = () => {
         </div>
       )}
 
+      {/* EDIT WHOLESALER MODAL */}
+      {editTarget && (
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && closeEdit()}>
+          <div className="modal-content" style={{ maxWidth: '34rem' }}>
+            <div className="modal-header">
+              <div className="flex items-center gap-2.5">
+                <div className="modal-icon-circle bg-gradient-to-br from-blue-500 to-indigo-600 text-white">
+                  <Pencil size={18} />
+                </div>
+                <div>
+                  <h2>{'Edit Wholesaler'}</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">{editTarget.email}</p>
+                </div>
+              </div>
+              <button onClick={closeEdit} className="modal-close-btn">✕</button>
+            </div>
+            <form onSubmit={handleEditSave}>
+              <div className="modal-body">
+                <div className="form-grid">
+                  <Field icon={User} label={'Owner Name'} required>
+                    <input className="input-field" value={editForm.name}
+                      onChange={(e) => handleEditField('name', e.target.value)} autoFocus />
+                  </Field>
+                  <Field icon={Building2} label={'Business Name'} required>
+                    <input className="input-field" value={editForm.businessName}
+                      onChange={(e) => handleEditField('businessName', e.target.value)} />
+                  </Field>
+                  <Field icon={Phone} label={'Phone'} required>
+                    <input className="input-field" type="tel" value={editForm.phone}
+                      onChange={(e) => handleEditField('phone', e.target.value)} />
+                  </Field>
+                  <Field icon={MapPin} label={'Address'}>
+                    <input className="input-field" value={editForm.address}
+                      onChange={(e) => handleEditField('address', e.target.value)} />
+                  </Field>
+                </div>
+                <p className="mt-3 text-xs text-slate-500">Email is the login ID and can&apos;t be changed here.</p>
+                {editError && (
+                  <div className="status-error mt-3"><span>!</span><span>{editError}</span></div>
+                )}
+              </div>
+              <div className="modal-footer">
+                <button type="button" onClick={closeEdit} className="btn-secondary" disabled={isEditSaving}>
+                  {'Cancel'}
+                </button>
+                <button type="submit" className="btn-primary flex items-center gap-2" disabled={isEditSaving}>
+                  {isEditSaving ? 'Saving…' : (<><Pencil size={14} /> {'Save Changes'}</>)}
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
+
       {/* ADD PRODUCT MODAL */}
       {showProductModal && (
         <div className="modal-overlay">
           <div className="modal-content" style={{ maxWidth: '40rem' }}>
             <div className="modal-header">
               <div className="flex items-center gap-2.5">
-                <div className="modal-icon-circle bg-blue-100 text-blue-700">
+                <div className="modal-icon-circle bg-gradient-to-br from-blue-500 to-indigo-600 text-white">
                   <Database size={18} />
                 </div>
                 <div>
@@ -931,7 +1023,7 @@ const AdminDashboard = () => {
           <div className="modal-content" style={{ maxWidth: '24rem' }}>
             <div className="modal-header">
               <div className="flex items-center gap-2.5">
-                <div className="modal-icon-circle bg-blue-100 text-blue-700"><Boxes size={18} /></div>
+                <div className="modal-icon-circle bg-gradient-to-br from-blue-500 to-indigo-600 text-white"><Boxes size={18} /></div>
                 <div>
                   <h2>Add Crate Type</h2>
                 </div>

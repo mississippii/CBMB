@@ -7,17 +7,11 @@ import {
 import { useData } from '../../data/DataContext';
 import { useAuth } from '../auth/AuthContext';
 import { queryKeys } from '../../services/queryKeys';
+import { DateRangeFilter, todayLocalIso, nextDayLocalIso } from '../../shared/components';
 
 const formatMoney = (value) => '৳ ' + (Number(value) || 0).toLocaleString();
 const formatRate = (value) => (value == null ? '—' : `${Number(value).toFixed(2)}%`);
 const formatCount = (value) => (Number(value) || 0).toLocaleString();
-
-const PERIOD_OPTIONS = [
-  { value: 'today', label: 'Today' },
-  { value: 'week',  label: '7 days' },
-  { value: 'month', label: 'Month' },
-  { value: 'year',  label: 'Year' },
-];
 
 const TODAY_TILES = [
   { key: 'totalSale',    label: 'Total Sale',     icon: TrendingUp, accent: 'sky'     },
@@ -38,7 +32,8 @@ const ACCENT = {
 const OverviewPage = ({ onOpenProfile }) => {
   const { admin } = useAuth();
   const { fetchDashboardSummary, fetchInventoryList, suppliers, customers } = useData();
-  const [period, setPeriod] = useState('month');
+  const [fromDate, setFromDate] = useState(todayLocalIso());
+  const [toDate, setToDate] = useState(todayLocalIso());
 
   const { data: todayData } = useQuery({
     queryKey: queryKeys.dashboardSummary(admin?.wholesalerId, 'today'),
@@ -47,8 +42,8 @@ const OverviewPage = ({ onOpenProfile }) => {
   });
 
   const { data, isLoading: loading, error: queryError } = useQuery({
-    queryKey: queryKeys.dashboardSummary(admin?.wholesalerId, period),
-    queryFn: () => fetchDashboardSummary(period),
+    queryKey: queryKeys.dashboardSummary(admin?.wholesalerId, `${fromDate}_${toDate}`),
+    queryFn: () => fetchDashboardSummary('custom', `${fromDate}T00:00:00`, `${nextDayLocalIso(toDate)}T00:00:00`),
     enabled: Boolean(admin?.wholesalerId),
   });
   const error = queryError ? (queryError.message || 'Failed to load dashboard.') : '';
@@ -101,8 +96,6 @@ const OverviewPage = ({ onOpenProfile }) => {
     });
     return { list, owesYou, credit };
   }, [customers]);
-
-  const periodLabel = PERIOD_OPTIONS.find((p) => p.value === period)?.label || 'Period';
 
   return (
     <div className="space-y-4">
@@ -193,29 +186,14 @@ const OverviewPage = ({ onOpenProfile }) => {
               <TrendingUp size={16} />
             </span>
             <div>
-              <h3 className="text-sm font-extrabold text-slate-900">{periodLabel} cash flow</h3>
+              <h3 className="text-sm font-extrabold text-slate-900">Cash flow</h3>
               <p className="text-[11px] text-slate-500 inline-flex items-center gap-1">
                 <Calendar size={10} />
                 {data?.from ? new Date(data.from).toLocaleDateString() : '—'} → {data?.to ? new Date(data.to).toLocaleDateString() : 'now'}
               </p>
             </div>
           </div>
-          <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 p-0.5 text-[11px] font-semibold text-slate-600">
-            {PERIOD_OPTIONS.map(({ value, label }) => (
-              <button
-                key={value}
-                type="button"
-                onClick={() => setPeriod(value)}
-                className={`px-2.5 py-1 rounded-full transition ${
-                  period === value
-                    ? 'bg-blue-600 text-white shadow-sm'
-                    : 'text-slate-600 hover:text-slate-900'
-                }`}
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+          <DateRangeFilter from={fromDate} to={toDate} setFrom={setFromDate} setTo={setToDate} />
         </div>
 
         {/* Big Net Profit + the two breakdown cards */}
@@ -243,8 +221,6 @@ const OverviewPage = ({ onOpenProfile }) => {
               accent="emerald"
               rows={[
                 { label: 'Customer payments', value: data?.moneyIn?.customerPayments },
-                { label: 'Supplier commission', value: data?.moneyIn?.supplierCommissionReceive },
-                { label: 'Supplier expense', value: data?.moneyIn?.supplierExpenseReceive },
               ]}
               total={data?.moneyIn?.total}
             />

@@ -7,6 +7,7 @@ import {
 import { useData } from '../../data/DataContext'
 import { useAuth } from '../auth/AuthContext'
 import { useToast } from '../../shared/components/Toast'
+import { TablePager, usePagination } from '../../shared/components'
 import { postJson, apiPaths } from '../../services/apiClient'
 
 const formatCurrency = (value) => `৳ ${Math.round(Number(value) || 0).toLocaleString()}`
@@ -274,6 +275,7 @@ const SupplierDetail = ({ supplierId, onBack }) => {
   const filteredTransactions = txFilter === 'all'
     ? supplierTransactions
     : supplierTransactions.filter((t) => txCategory(t) === txFilter)
+  const { pageItems: pagedTransactions, ...txnPager } = usePagination(filteredTransactions, 12, [txFilter, supplierId])
   const openShipments = shipments.filter((s) => s.settlementStatus !== 'SETTLED')
   const settledShipments = shipments.filter((s) => s.settlementStatus === 'SETTLED')
   const pendingRateCount = openShipments.filter((s) => s.commissionRate == null).length
@@ -333,7 +335,6 @@ const SupplierDetail = ({ supplierId, onBack }) => {
     )
   }
 
-  const initials = supplier.name.split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()
 
   return (
     <div className="space-y-5">
@@ -346,7 +347,9 @@ const SupplierDetail = ({ supplierId, onBack }) => {
                 <ArrowLeft size={18} />
               </button>
             )}
-            <div className="supplier-avatar" style={{ width: '2.75rem', height: '2.75rem', fontSize: '0.95rem' }}>{initials}</div>
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-md shadow-blue-500/30">
+              <UserCheck size={20} />
+            </div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
                 <h2 className="text-lg font-extrabold text-slate-900 truncate">{supplier.name}</h2>
@@ -514,7 +517,7 @@ const SupplierDetail = ({ supplierId, onBack }) => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {filteredTransactions.map((t) => {
+                {pagedTransactions.map((t) => {
                   const method = txMethod(t)
                   return (
                     <tr key={t.id} className="hover:bg-slate-50 transition">
@@ -537,6 +540,7 @@ const SupplierDetail = ({ supplierId, onBack }) => {
                 })}
                   </tbody>
                 </table>
+                <TablePager {...txnPager} />
               </div>
             )}
           </div>

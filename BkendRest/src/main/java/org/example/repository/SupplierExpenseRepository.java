@@ -54,8 +54,8 @@ public interface SupplierExpenseRepository extends JpaRepository<SupplierExpense
 
     /**
      * Cash the wholesaler fronted on supplier/shipment expenses in [from, to) — the
-     * wholesaler-funded slice (amount − supplier-funded) = dueAmount. This is the
-     * drawer outflow for the cash book; it returns later as an EXPENSE_RECEIVE inflow.
+     * wholesaler-funded slice (amount − supplier-funded) = dueAmount. This is a drawer
+     * outflow for the cash book; the expense is a deduction from the supplier's net due.
      */
     @Query("""
         SELECT COALESCE(SUM(e.dueAmount), 0) FROM SupplierExpense e

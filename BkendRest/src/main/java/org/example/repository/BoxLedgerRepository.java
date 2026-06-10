@@ -110,4 +110,27 @@ public interface BoxLedgerRepository extends JpaRepository<BoxLedger, BoxLedgerI
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to
     );
+
+    /**
+     * Gross cash from walk-in crate sales in a period: sum(qty × unitSalePrice) for
+     * SOLD rows with no party account (partyType = WHOLESALER). The full sale price
+     * enters the drawer immediately, so the cash book counts the gross — not the
+     * P&L profit. On-account crate sales (partyType = WHOLESALER_CUSTOMER) are
+     * excluded: they raise a receivable and arrive later as a customer collection.
+     */
+    @Query("""
+        SELECT COALESCE(SUM(l.quantity * l.unitSalePrice), 0)
+        FROM BoxLedger l
+        WHERE l.wholesaler.id = :wholesalerId
+          AND l.movementType = org.example.model.enums.BoxMovementType.SOLD
+          AND l.partyType = org.example.model.enums.BoxLedgerPartyType.WHOLESALER
+          AND l.unitSalePrice IS NOT NULL
+          AND (:from IS NULL OR l.createdAt >= :from)
+          AND (:to   IS NULL OR l.createdAt <  :to)
+        """)
+    java.math.BigDecimal sumWalkInCrateCashSales(
+            @Param("wholesalerId") Long wholesalerId,
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to
+    );
 }

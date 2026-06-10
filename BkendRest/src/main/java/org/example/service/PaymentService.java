@@ -68,7 +68,6 @@ public class PaymentService {
     private final BoxInventoryRepository boxInventoryRepository;
     private final BoxBalanceRepository boxBalanceRepository;
     private final BoxLedgerRepository boxLedgerRepository;
-    private final ExpensePaydownService expensePaydownService;
     private final SupplierDueService supplierDueService;
 
     public PaymentService(
@@ -85,7 +84,6 @@ public class PaymentService {
             BoxInventoryRepository boxInventoryRepository,
             BoxBalanceRepository boxBalanceRepository,
             BoxLedgerRepository boxLedgerRepository,
-            ExpensePaydownService expensePaydownService,
             SupplierDueService supplierDueService
     ) {
         this.wholesalerRepository = wholesalerRepository;
@@ -101,7 +99,6 @@ public class PaymentService {
         this.boxInventoryRepository = boxInventoryRepository;
         this.boxBalanceRepository = boxBalanceRepository;
         this.boxLedgerRepository = boxLedgerRepository;
-        this.expensePaydownService = expensePaydownService;
         this.supplierDueService = supplierDueService;
     }
 
@@ -159,24 +156,6 @@ public class PaymentService {
     @Transactional
     public PaymentOperationResponse paySupplierProduct(Long wholesalerId, SupplierSettlementRequest request) {
         return settleSupplierMoney(wholesalerId, request, SettlementType.PRODUCT_PAYMENT, true, "Supplier product payment");
-    }
-
-    @Transactional
-    public PaymentOperationResponse receiveSupplierCommission(Long wholesalerId, SupplierSettlementRequest request) {
-        return settleSupplierMoney(wholesalerId, request, SettlementType.COMMISSION_RECEIVE, false, "Supplier commission received");
-    }
-
-    @Transactional
-    public PaymentOperationResponse receiveSupplierExpense(Long wholesalerId, SupplierSettlementRequest request) {
-        if (request != null && request.wholesalerSupplierId() != null && request.amount() != null) {
-            BigDecimal outstanding = expensePaydownService.outstandingForSupplier(wholesalerId, request.wholesalerSupplierId());
-            if (request.amount().compareTo(outstanding) > 0) {
-                throw new BadRequestException("Amount exceeds outstanding expense due of ৳" + outstanding.toPlainString() + ".");
-            }
-        }
-        PaymentOperationResponse response = settleSupplierMoney(wholesalerId, request, SettlementType.EXPENSE_RECEIVE, false, "Supplier expense money received");
-        expensePaydownService.payDownForSupplier(wholesalerId, request.wholesalerSupplierId(), request.amount());
-        return response;
     }
 
     @Transactional

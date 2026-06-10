@@ -89,13 +89,10 @@ public class DashboardService {
         );
 
         BigDecimal customerPayments = money(paymentRepository.sumCashAmountInPeriod(wholesalerId, range.from, range.to));
-        BigDecimal commissionReceive = money(supplierSettlementRepository.sumAmountByTypeInPeriod(wholesalerId, SettlementType.COMMISSION_RECEIVE, range.from, range.to));
-        BigDecimal expenseReceive = money(supplierSettlementRepository.sumAmountByTypeInPeriod(wholesalerId, SettlementType.EXPENSE_RECEIVE, range.from, range.to));
         BigDecimal productPay = money(supplierSettlementRepository.sumAmountByTypeInPeriod(wholesalerId, SettlementType.PRODUCT_PAYMENT, range.from, range.to));
         BigDecimal shopExpenses = money(shopExpenseRepository.sumInPeriod(wholesalerId, range.from, range.to));
         DashboardSummaryResponse.MoneyIn moneyIn = new DashboardSummaryResponse.MoneyIn(
-                customerPayments, commissionReceive, expenseReceive,
-                money(customerPayments.add(commissionReceive).add(expenseReceive))
+                customerPayments, customerPayments
         );
         DashboardSummaryResponse.MoneyOut moneyOut = new DashboardSummaryResponse.MoneyOut(
                 productPay, shopExpenses, money(productPay.add(shopExpenses))

@@ -3,6 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import { useData } from '../../data/DataContext';
 import { useAuth } from '../auth/AuthContext';
 import { queryKeys } from '../../services/queryKeys';
+import { TablePager, usePagination } from '../../shared/components';
 
 const toStartOfDay = (dateString) => new Date(`${dateString}T00:00:00`);
 const toEndOfDay = (dateString) => new Date(`${dateString}T23:59:59.999`);
@@ -10,30 +11,6 @@ const formatCurrency = (value) => `৳ ${(Number(value) || 0).toLocaleString()}`
 const METHOD_LABELS = { CASH: 'Cash', BANK: 'Bank', BKASH: 'bKash', NAGAD: 'Nagad', OTHER: 'Other' };
 const getTransactionDate = (transaction) => new Date(transaction.createdAt || transaction.date);
 const normalizePhone = (value) => String(value ?? '').replace(/\D/g, '');
-
-const todayIso = () => new Date().toISOString().split('T')[0];
-const isoDaysAgo = (n) => {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return d.toISOString().split('T')[0];
-};
-const isoStartOfMonth = () => {
-  const d = new Date();
-  d.setDate(1);
-  return d.toISOString().split('T')[0];
-};
-const isoStartOfYear = () => {
-  const d = new Date();
-  d.setMonth(0, 1);
-  return d.toISOString().split('T')[0];
-};
-
-const PERIOD_PRESETS = [
-  { value: 'today', label: 'Today' },
-  { value: 'week',  label: '7 days' },
-  { value: 'month', label: 'Month' },
-  { value: 'year',  label: 'Year' },
-];
 
 const TransactionsList = () => {
   const { admin } = useAuth();
@@ -87,23 +64,6 @@ const TransactionsList = () => {
     paymentMethod: t.paymentMethod || '',
     note: t.description || '',
   })), [transactionsRaw]);
-
-  const applyPreset = (preset) => {
-    const today = todayIso();
-    if (preset === 'today')      { setStartDate(today); setEndDate(today); return; }
-    if (preset === 'week')       { setStartDate(isoDaysAgo(6)); setEndDate(today); return; }
-    if (preset === 'month')      { setStartDate(isoStartOfMonth()); setEndDate(today); return; }
-    if (preset === 'year')       { setStartDate(isoStartOfYear()); setEndDate(today); return; }
-  };
-
-  const isPresetActive = (preset) => {
-    const today = todayIso();
-    if (preset === 'today')  return startDate === today && endDate === today;
-    if (preset === 'week')   return startDate === isoDaysAgo(6) && endDate === today;
-    if (preset === 'month')  return startDate === isoStartOfMonth() && endDate === today;
-    if (preset === 'year')   return startDate === isoStartOfYear() && endDate === today;
-    return false;
-  };
 
   const ledgerTransactions = useMemo(
     () =>
@@ -196,6 +156,10 @@ const TransactionsList = () => {
 
     return result.slice().sort((a, b) => getTransactionDate(b) - getTransactionDate(a));
   }, [ledgerTransactions, typeFilter, startDate, endDate, search, getTransactionPhones]);
+
+  const { pageItems: pagedTransactions, ...pager } = usePagination(
+    filteredTransactions, 15, [typeFilter, startDate, endDate, search],
+  );
 
   const clearFilters = () => {
     setStartDate('');
@@ -398,23 +362,6 @@ const TransactionsList = () => {
           <span className="transaction-filter-count">{filteredTransactions.length} entries</span>
         </div>
 
-        <div className="mb-3 inline-flex flex-wrap items-center gap-1 rounded-full border border-slate-200 bg-slate-50 p-0.5 text-[11px] font-semibold">
-          {PERIOD_PRESETS.map(({ value, label }) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => applyPreset(value)}
-              className={`px-2.5 py-1 rounded-full transition ${
-                isPresetActive(value)
-                  ? 'bg-blue-600 text-white shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
         <div className="transaction-filter-grid">
           <div className="filter-control type">
             <label>Type</label>
@@ -480,7 +427,7 @@ const TransactionsList = () => {
         ) : (
           <>
             <div className="space-y-3 lg:hidden">
-              {filteredTransactions.map((transaction) => {
+              {pagedTransactions.map((transaction) => {
                 const method = getMethod(transaction);
                 return (
                   <div key={transaction.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
@@ -534,7 +481,7 @@ const TransactionsList = () => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredTransactions.map((transaction) => {
+                  {pagedTransactions.map((transaction) => {
                     const method = getMethod(transaction);
                     return (
                       <tr key={transaction.id} className="hover:bg-slate-50 transition">
@@ -568,11 +515,14 @@ const TransactionsList = () => {
           </>
         )}
 
-        <div className="mt-4 flex justify-end">
-          <button onClick={exportPdf} className="btn-primary w-full sm:w-auto">
-            Export
-          </button>
-        </div>
+        <TablePager
+          {...pager}
+          actions={(
+            <button onClick={exportPdf} className="btn-primary inline-flex items-center gap-2">
+              Export
+            </button>
+          )}
+        />
       </div>
     </div>
   );

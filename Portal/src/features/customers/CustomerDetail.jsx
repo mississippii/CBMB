@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react'
-import { Power, RotateCcw } from 'lucide-react'
+import { Power, RotateCcw, Users, ArrowLeft, Phone, MapPin, User } from 'lucide-react'
 import { useData } from '../../data/DataContext'
 import { useToast } from '../../shared/components/Toast'
+import { TablePager, usePagination } from '../../shared/components'
 
 const formatCurrency = (value) => '৳ ' + (Number(value) || 0).toLocaleString()
 const formatAmount = (transaction) => {
@@ -61,24 +62,23 @@ const CustomerDetail = ({ customerId, onBack }) => {
   const fallbackCustomer = customers.find((item) => item.id === customerId)
   const customer = profile?.account || fallbackCustomer
 
-  if (!customer) {
-    return <div className="text-gray-600">Customer not found</div>
-  }
-
-  const initials = customer.name
-    .split(' ')
-    .map((name) => name[0])
-    .join('')
-
-  const fallbackTransactions = transactions
-    .filter((transaction) => (
+  const fallbackTransactions = (customer
+    ? transactions.filter((transaction) => (
       transaction.customerId === customer.id ||
       transaction.customer === customer.name ||
       transaction.customerPhone === customer.phone
     ))
+    : [])
     .slice()
     .sort((a, b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date))
   const customerTransactions = profile?.transactions || fallbackTransactions
+  // Hook must run before any early return — keep it above the not-found guard.
+  const { pageItems: pagedTransactions, ...txnPager } = usePagination(customerTransactions, 12, [customerId])
+
+  if (!customer) {
+    return <div className="text-gray-600">Customer not found</div>
+  }
+
 
   const handleConfirmDisable = async () => {
     setIsTogglingStatus(true)
@@ -110,13 +110,20 @@ const CustomerDetail = ({ customerId, onBack }) => {
 
   return (
     <div className="space-y-5">
-      <div className="supplier-profile-header">
-        <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
-          <div className="flex items-start gap-4">
-            <div className="supplier-avatar">{initials}</div>
+      <div className="supplier-profile-header" style={{ padding: '0.9rem 1.1rem' }}>
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex items-center gap-3 min-w-0">
+            {onBack && (
+              <button type="button" onClick={onBack} className="back-arrow-btn" title="Back to customers">
+                <ArrowLeft size={18} />
+              </button>
+            )}
+            <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-indigo-500 to-violet-600 text-white shadow-md shadow-indigo-500/30">
+              <Users size={20} />
+            </div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-2xl font-extrabold text-slate-950">{customer.name}</h2>
+                <h2 className="text-lg font-extrabold text-slate-900 truncate">{customer.name}</h2>
                 <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-bold text-[#1d63ed]">
                   {customer.type}
                 </span>
@@ -124,28 +131,26 @@ const CustomerDetail = ({ customerId, onBack }) => {
                   <span className="badge badge-rose">Disabled</span>
                 )}
               </div>
-              <p className="mt-1 text-sm font-medium text-slate-600">
-                {customer.owner} • {customer.phone}
-              </p>
-              <p className="mt-1 text-xs font-semibold text-slate-500">
-                {customer.address || 'No address'}
-              </p>
+              <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
+                {customer.owner && (
+                  <span className="inline-flex items-center gap-1"><User size={12} /> {customer.owner}</span>
+                )}
+                <span className="inline-flex items-center gap-1"><Phone size={12} /> {customer.phone}</span>
+                {customer.address && (
+                  <span className="inline-flex items-center gap-1"><MapPin size={12} /> {customer.address}</span>
+                )}
+              </div>
             </div>
           </div>
 
-          <div className="flex flex-wrap gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
             {customer.status === 'DISABLED' ? (
-              <button onClick={handleReactivate} disabled={isTogglingStatus} className="btn-primary flex items-center gap-2">
+              <button onClick={handleReactivate} disabled={isTogglingStatus} className="btn-primary flex items-center gap-1.5">
                 <RotateCcw size={14} /> {isTogglingStatus ? 'Reactivating…' : 'Reactivate'}
               </button>
             ) : (
-              <button onClick={() => { setDisableError(''); setShowDisableConfirm(true); }} className="btn-secondary flex items-center gap-2">
-                <Power size={14} /> Disable
-              </button>
-            )}
-            {onBack && (
-              <button type="button" onClick={onBack} className="btn-secondary">
-                Back to Customers
+              <button onClick={() => { setDisableError(''); setShowDisableConfirm(true); }} className="icon-btn icon-btn-danger" title="Disable customer">
+                <Power size={15} />
               </button>
             )}
           </div>
@@ -207,7 +212,7 @@ const CustomerDetail = ({ customerId, onBack }) => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {customerTransactions.map((transaction) => (
+                {pagedTransactions.map((transaction) => (
                   <tr key={transaction.id} className="transition hover:bg-slate-50">
                     <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-900">{transaction.date}</td>
                     <td className="px-4 py-3">
@@ -223,6 +228,8 @@ const CustomerDetail = ({ customerId, onBack }) => {
             </table>
           )}
         </div>
+
+        <TablePager {...txnPager} />
       </div>
 
       {showDisableConfirm && (

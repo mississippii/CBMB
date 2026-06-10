@@ -1,4 +1,4 @@
-@import url('https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&display=swap');
+@import url('https://fonts.googleapis.com/css2?family=Hind+Siliguri:wght@400;500;600;700&family=Inter:wght@400;500;600;700;800&family=Poppins:wght@600;700;800;900&display=swap');
 @import "tailwindcss";
 
 /* Apply Bangla font when html[lang="bn"] */
@@ -517,6 +517,22 @@ tbody tr:hover {
   animation: fadeIn 0.25s ease-out;
 }
 
+@keyframes overlayIn {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes modalPop {
+  from {
+    opacity: 0;
+    transform: translateY(12px) scale(0.97);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
 .modal-overlay {
   position: fixed;
   inset: 0;
@@ -525,25 +541,26 @@ tbody tr:hover {
   align-items: center;
   justify-content: center;
   padding: 1rem;
-  background: rgba(15, 23, 42, 0.52);
-  backdrop-filter: blur(6px);
+  background: rgba(15, 23, 42, 0.55);
+  backdrop-filter: blur(8px);
+  animation: overlayIn 0.2s ease;
 }
 
 .modal-content {
   width: min(100%, 48rem);
   max-height: calc(100vh - 2rem);
   overflow: hidden;
-  border-radius: 1rem;
-  border: 1px solid rgba(226, 232, 240, 0.96);
+  border-radius: 0.6rem;
+  border: 1px solid rgba(226, 232, 240, 0.9);
   background: #fff;
-  box-shadow: 0 24px 46px rgba(2, 6, 23, 0.3);
-  animation: fadeIn 0.2s ease;
+  box-shadow: 0 30px 60px -12px rgba(2, 6, 23, 0.38);
+  animation: modalPop 0.24s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 .modal-header {
-  background: linear-gradient(135deg, #f8fafc 0%, #e9f4f4 100%);
+  background: #fff;
   border-bottom: 1px solid var(--border);
-  padding: 0.95rem 1.15rem;
+  padding: 1.05rem 1.3rem;
   display: flex;
   align-items: center;
   justify-content: space-between;
@@ -551,35 +568,38 @@ tbody tr:hover {
 
 .modal-header h2 {
   margin: 0;
-  font-size: 1.02rem;
+  font-size: 1.05rem;
   font-weight: 800;
   color: #0f172a;
+  letter-spacing: -0.01em;
 }
 
 .modal-header.danger {
-  background: linear-gradient(135deg, #fee2e2 0%, #fecaca 100%);
-  border-bottom-color: #fecaca;
+  background: #fff;
+  border-bottom-color: var(--border);
 }
 
 .modal-close-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
   width: 2.1rem;
   height: 2.1rem;
   border: 0;
   border-radius: 9999px;
-  background: #e2e8f0;
-  color: #0f172a;
-  font-size: 1rem;
+  background: transparent;
+  color: #94a3b8;
   cursor: pointer;
-  transition: all 0.2s ease;
+  transition: background 0.18s ease, color 0.18s ease;
 }
 
 .modal-close-btn:hover {
-  background: #cbd5e1;
-  transform: rotate(90deg);
+  background: #f1f5f9;
+  color: #0f172a;
 }
 
 .modal-body {
-  padding: 1.1rem;
+  padding: 1.3rem;
 }
 
 .modal-footer {
@@ -587,7 +607,8 @@ tbody tr:hover {
   gap: 0.62rem;
   justify-content: flex-end;
   border-top: 1px solid var(--border);
-  padding: 0.95rem 1.1rem;
+  padding: 1rem 1.3rem;
+  background: #fbfcfe;
 }
 
 .modal-footer button {
@@ -620,6 +641,13 @@ tbody tr:hover {
   gap: 0.7rem;
 }
 
+/* Stylish brand wordmark */
+.brand-wordmark {
+  font-family: 'Poppins', 'Inter', sans-serif;
+  font-weight: 800;
+  letter-spacing: -0.015em;
+}
+
 .brand-home-button {
   border: 0;
   background: transparent;
@@ -635,17 +663,15 @@ tbody tr:hover {
 }
 
 .brand-icon {
-  width: 2.45rem;
-  height: 2.45rem;
+  width: 2.6rem;
+  height: 2.6rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 0.85rem;
-  background: linear-gradient(145deg, #307d7e 0%, #255f60 100%);
+  border-radius: 50%;
+  background: linear-gradient(145deg, #0000ff 0%, #000080 100%);
   color: #fff;
-  font-size: 1.05rem;
-  font-weight: 700;
-  box-shadow: 0 10px 24px rgba(48, 125, 126, 0.34);
+  box-shadow: 0 10px 24px rgba(0, 0, 255, 0.34);
 }
 
 .navbar-actions {
@@ -2659,11 +2685,11 @@ tbody tr:hover {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 2.2rem;
-  height: 2.2rem;
-  border-radius: 0.6rem;
-  background: #f1f5f9;
-  color: #475569;
+  width: 2.4rem;
+  height: 2.4rem;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #64748b, #475569);
+  color: #fff;
 }
 
 .kpi-tile-body { min-width: 0; }
@@ -2688,11 +2714,11 @@ tbody tr:hover {
   line-height: 1.15;
 }
 
-.kpi-tile-emerald .kpi-tile-icon { background: #d1fae5; color: #047857; }
-.kpi-tile-teal    .kpi-tile-icon { background: #dbeafe; color: #1d63ed; }
-.kpi-tile-amber   .kpi-tile-icon { background: #fef3c7; color: #b45309; }
-.kpi-tile-rose    .kpi-tile-icon { background: #ffe4e6; color: #be123c; }
-.kpi-tile-rose    .kpi-tile-value { color: #be123c; }
+.kpi-tile-emerald .kpi-tile-icon { background: #008000; color: #fff; }
+.kpi-tile-teal    .kpi-tile-icon { background: #0000ff; color: #fff; }
+.kpi-tile-amber   .kpi-tile-icon { background: #ffff00; color: #000000; }
+.kpi-tile-rose    .kpi-tile-icon { background: #ff0000; color: #fff; }
+.kpi-tile-rose    .kpi-tile-value { color: #ff0000; }
 
 /* ── Balance pills ─────────────────────────────────────── */
 .balance-pill {
@@ -3494,13 +3520,13 @@ tbody tr:hover {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 0.7rem;
+  border-radius: 50%;
   background: linear-gradient(135deg, #2496ed 0%, #1d63ed 100%);
   color: #fff;
   font-size: 0.92rem;
   font-weight: 800;
   letter-spacing: 0.02em;
-  box-shadow: 0 4px 10px rgba(13, 148, 136, 0.25);
+  box-shadow: 0 4px 10px rgba(15, 23, 42, 0.18);
 }
 
 .wholesaler-actions {
@@ -3563,10 +3589,10 @@ tbody tr:hover {
   justify-content: center;
   width: 3.2rem;
   height: 3.2rem;
-  border-radius: 0.95rem;
-  background: linear-gradient(135deg, #1d63ed 0%, #1755c9 100%);
+  border-radius: 50%;
+  background: linear-gradient(135deg, #2563eb 0%, #4f46e5 100%);
   color: #fff;
-  box-shadow: 0 10px 22px rgba(29, 99, 237, 0.32);
+  box-shadow: 0 10px 22px rgba(37, 99, 235, 0.35);
 }
 
 .crate-hero-title {
@@ -3748,14 +3774,14 @@ tbody tr:hover {
 
 .toolkit-icon {
   flex-shrink: 0;
-  width: 2.2rem;
-  height: 2.2rem;
+  width: 2.4rem;
+  height: 2.4rem;
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 0.6rem;
-  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-  color: #b45309;
+  border-radius: 50%;
+  background: #ffff00;
+  color: #000000;
 }
 
 .toolkit-title {
@@ -3797,9 +3823,9 @@ tbody tr:hover {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 1.7rem;
-  height: 1.7rem;
-  border-radius: 0.45rem;
+  width: 1.95rem;
+  height: 1.95rem;
+  border-radius: 50%;
 }
 
 .quick-action-label {
@@ -4414,14 +4440,28 @@ tbody tr:hover {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border-radius: 0.7rem;
-  background: linear-gradient(135deg, #fef3c7 0%, #fde68a 100%);
-  color: #b45309;
+  border-radius: 50%;
+  background: linear-gradient(135deg, #6366f1 0%, #7c3aed 100%);
+  color: #fff;
+  box-shadow: 0 6px 14px rgba(99, 102, 241, 0.3);
 }
 
 .support-panel-icon-teal {
-  background: linear-gradient(135deg, #dbeafe 0%, #bae6fd 100%);
-  color: #1d63ed;
+  background: linear-gradient(135deg, #14b8a6 0%, #0d9488 100%);
+  color: #fff;
+  box-shadow: 0 6px 14px rgba(20, 184, 166, 0.32);
+}
+
+.support-panel-icon-emerald {
+  background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+  color: #fff;
+  box-shadow: 0 6px 14px rgba(16, 185, 129, 0.32);
+}
+
+.support-panel-icon-amber {
+  background: linear-gradient(135deg, #f59e0b 0%, #d97706 100%);
+  color: #fff;
+  box-shadow: 0 6px 14px rgba(245, 158, 11, 0.32);
 }
 
 .support-panel-title {
@@ -5059,32 +5099,152 @@ tbody tr:hover {
 }
 
 /* =============================================================
-   Print styles — used by the P&L "Print" button so the output
-   is a clean income statement, not the chrome around it.
+   Professional P&L statement / invoice — print-only document.
+   Hidden on screen; the P&L "Print" button (window.print) renders
+   only this sheet, styled like a formal income statement.
+   ============================================================= */
+.pnl-print-sheet { display: none; }
+
+.inv-doc {
+  font-family: 'Inter', 'Segoe UI', system-ui, sans-serif;
+  color: #0f172a;
+  background: #ffffff;
+}
+
+/* Letterhead */
+.inv-head {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  padding-bottom: 18px;
+  border-bottom: 3px solid #1d63ed;
+}
+.inv-brand { display: flex; align-items: center; gap: 12px; }
+.inv-logo {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 52px;
+  height: 52px;
+  border-radius: 12px;
+  background: linear-gradient(135deg, #1d63ed 0%, #0f3dab 100%);
+  color: #fff;
+  font-weight: 800;
+  font-size: 1.35rem;
+  letter-spacing: 0.02em;
+}
+.inv-brand-name { font-size: 1.5rem; font-weight: 800; line-height: 1.1; }
+.inv-brand-sub { font-size: 0.75rem; font-weight: 600; color: #64748b; letter-spacing: 0.06em; text-transform: uppercase; }
+.inv-title-block { text-align: right; }
+.inv-title { font-size: 1.5rem; font-weight: 800; color: #1d63ed; line-height: 1.05; }
+.inv-title-sub { font-size: 0.8rem; font-weight: 700; letter-spacing: 0.32em; text-transform: uppercase; color: #94a3b8; }
+
+/* Meta strip */
+.inv-meta {
+  display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  margin-top: 22px;
+  padding: 16px 18px;
+  border-radius: 10px;
+  background: #f6f9ff;
+  border: 1px solid #dce7fb;
+}
+.inv-meta-right { text-align: right; display: flex; flex-direction: column; gap: 7px; }
+.inv-meta-label {
+  display: block;
+  font-size: 0.62rem;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #1d63ed;
+}
+.inv-meta-value { display: block; font-size: 0.95rem; font-weight: 700; color: #0f172a; }
+.inv-meta-line { display: block; font-size: 0.8rem; color: #475569; }
+
+/* Income / expense tables */
+.inv-table { width: 100%; border-collapse: collapse; margin-top: 22px; }
+.inv-th {
+  text-align: left;
+  font-size: 0.7rem;
+  font-weight: 800;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  color: #fff;
+  background: #0f172a;
+  padding: 8px 14px;
+}
+.inv-th-amount { text-align: right; }
+.inv-cell-label { padding: 9px 14px; font-size: 0.9rem; font-weight: 600; color: #1e293b; border-bottom: 1px solid #eef2f7; }
+.inv-cell-amount { padding: 9px 14px; font-size: 0.9rem; font-weight: 700; text-align: right; color: #0f172a; border-bottom: 1px solid #eef2f7; font-variant-numeric: tabular-nums; }
+.inv-cell-sub { padding-left: 30px; font-weight: 500; color: #64748b; font-size: 0.82rem; }
+.inv-cell-sub + .inv-cell-amount { font-weight: 500; color: #64748b; }
+.inv-row-strong .inv-cell-label,
+.inv-row-strong .inv-cell-amount {
+  font-weight: 800;
+  font-size: 0.95rem;
+  color: #0f172a;
+  background: #f8fafc;
+  border-top: 2px solid #cbd5e1;
+  border-bottom: none;
+}
+
+/* Net profit banner */
+.inv-net {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-top: 26px;
+  padding: 18px 22px;
+  border-radius: 12px;
+  border: 2px solid;
+}
+.inv-net-pos { border-color: #34d399; background: linear-gradient(90deg, #ecfdf5 0%, #ffffff 100%); }
+.inv-net-neg { border-color: #fb7185; background: linear-gradient(90deg, #fff1f2 0%, #ffffff 100%); }
+.inv-net-label { font-size: 0.95rem; font-weight: 800; letter-spacing: 0.1em; text-transform: uppercase; color: #0f172a; }
+.inv-net-value { font-size: 1.75rem; font-weight: 900; font-variant-numeric: tabular-nums; }
+.inv-net-pos .inv-net-value { color: #047857; }
+.inv-net-neg .inv-net-value { color: #be123c; }
+
+/* Footer */
+.inv-foot {
+  margin-top: 34px;
+  padding-top: 14px;
+  border-top: 1px solid #e2e8f0;
+  display: flex;
+  justify-content: space-between;
+  gap: 16px;
+  font-size: 0.72rem;
+  color: #94a3b8;
+}
+
+/* =============================================================
+   Print rules — show ONLY the statement sheet, drop all chrome.
    ============================================================= */
 @media print {
-  .no-print,
-  .left-tree,
-  .topbar,
-  .sidebar,
-  nav,
-  header.app-header,
-  .admin-header,
-  .admin-welcome,
-  button {
-    display: none !important;
+  @page { size: A4; margin: 14mm; }
+
+  /* Neutralise positioned/sticky wrappers so the sheet anchors to the page. */
+  .container-main,
+  .workspace-layout,
+  .workspace-sidebar,
+  .workspace-content { position: static !important; }
+
+  /* Hide everything, then reveal just the statement sheet. */
+  body * { visibility: hidden !important; }
+  .pnl-print-sheet,
+  .pnl-print-sheet * { visibility: visible !important; }
+  .pnl-print-sheet {
+    display: block !important;
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 100%;
   }
-  body {
-    background: #fff !important;
-  }
-  .main-content,
-  .app-shell,
-  .app-content {
-    padding: 0 !important;
-    margin: 0 !important;
-    background: #fff !important;
-  }
-  /* Force everything to color-print (default browser behavior strips backgrounds) */
+
+  body { background: #fff !important; }
+
+  /* Force backgrounds/colors to print (browsers strip them by default). */
   * {
     -webkit-print-color-adjust: exact !important;
     print-color-adjust: exact !important;

@@ -6,6 +6,7 @@ import { useAuth } from '../auth/AuthContext';
 import { queryKeys } from '../../services/queryKeys';
 import { formatMoney, formatDate } from '../../shared/utils/format';
 import { Loader, EmptyRow, ErrorBanner } from '../../shared/components/Loader';
+import { TablePager, usePagination } from '../../shared/components';
 import PaymentForm from './PaymentForm';
 
 /**
@@ -90,6 +91,7 @@ const PaymentsPage = () => {
     [raw],
   );
 
+  const { pageItems: pagedPayments, ...paymentPager } = usePagination(payments, 15);
 
   return (
     <div className="space-y-5">
@@ -129,7 +131,7 @@ const PaymentsPage = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {payments.map((t) => {
+                {pagedPayments.map((t) => {
                   const cls = classify(t);
                   const Icon = cls.icon;
                   const dirColor = cls.dir === 'in' ? 'text-emerald-700' : 'text-rose-700';
@@ -155,6 +157,8 @@ const PaymentsPage = () => {
             </table>
           </div>
         )}
+
+        {!isLoading && payments.length > 0 && <TablePager {...paymentPager} />}
 
         {queryError && <div className="mt-3"><ErrorBanner message={queryError.message || 'Failed to load payments.'} /></div>}
       </div>

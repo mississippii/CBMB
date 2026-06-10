@@ -5,6 +5,7 @@ import { useData } from '../../data/DataContext';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../../shared/components/Toast';
 import { queryKeys } from '../../services/queryKeys';
+import { TablePager, usePagination } from '../../shared/components';
 
 const WRITE_OFF_REASONS = ['Damaged', 'Spoiled / Rotten', 'Shortage', 'Other'];
 
@@ -227,6 +228,8 @@ const StoreInventory = ({ onOpenProfile }) => {
       }));
   }, [products]);
 
+  const { pageItems: pagedGrouped, ...productPager } = usePagination(grouped, 12);
+
   return (
     <div className="store-inventory space-y-4">
 
@@ -273,7 +276,7 @@ const StoreInventory = ({ onOpenProfile }) => {
           </div>
         ) : (
           <div className="mt-2 space-y-3">
-            {grouped.map((p) => {
+            {pagedGrouped.map((p) => {
               const pOpen = expandedProducts.has(p.name);
               const unitU = String(p.unit || '').toUpperCase();
               const showVarietyCol = p.varietyCount > 0;
@@ -480,6 +483,7 @@ const StoreInventory = ({ onOpenProfile }) => {
                 </div>
               );
             })}
+            <TablePager {...productPager} />
           </div>
         )}
       </section>

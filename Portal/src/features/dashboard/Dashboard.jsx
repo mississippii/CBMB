@@ -4,7 +4,6 @@ import {
   LayoutGrid, Package, Truck, Users, UserCheck,
   ArrowLeftRight, CreditCard, ShoppingCart, BarChart3, Wallet, BookOpenCheck,
 } from 'lucide-react';
-import { useAuth } from '../auth/AuthContext';
 import Navbar from '../../shared/components/Navbar';
 import CratesDashboard from '../crates/CratesDashboard';
 import SuppliersList from '../suppliers/SuppliersList';
@@ -20,23 +19,32 @@ import CashBookPage from '../cashbook/CashBookPage';
 import { useData } from '../../data/DataContext';
 
 const tabs = [
-  { id: 'inventory',     label: 'Inventory',     icon: LayoutGrid,     color: '#DC2626' }, // red
-  { id: 'dashboard',     label: 'Crates',        icon: Package,        color: '#16A34A' }, // green
-  { id: 'shipments',     label: 'Shipments',     icon: Truck,          color: '#CA8A04' }, // yellow
-  { id: 'suppliers',     label: 'Suppliers',     icon: UserCheck,      color: '#2563EB' }, // blue
-  { id: 'customers',     label: 'Customers',     icon: Users,          color: '#4F46E5' }, // indigo
-  { id: 'sales',         label: 'Sales',         icon: ShoppingCart,   color: '#DC2626' }, // red
-  { id: 'payment',       label: 'Payments',      icon: CreditCard,     color: '#16A34A' }, // green
-  { id: 'transactions',  label: 'Transactions',  icon: ArrowLeftRight, color: '#CA8A04' }, // yellow
-  { id: 'shopExpenses',  label: 'Shop Expenses', icon: Wallet,         color: '#2563EB' }, // blue
-  { id: 'cashbook',      label: 'Cash Book',     icon: BookOpenCheck,  color: '#4F46E5' }, // indigo
-  { id: 'reports',       label: 'Reports',       icon: BarChart3,      color: '#DC2626' }, // red
+  { id: 'inventory',     label: 'Inventory',     icon: LayoutGrid,     color: '#FF0000' }, // red
+  { id: 'dashboard',     label: 'Crates',        icon: Package,        color: '#008000' }, // green
+  { id: 'shipments',     label: 'Shipments',     icon: Truck,          color: '#FFFF00' }, // yellow
+  { id: 'suppliers',     label: 'Suppliers',     icon: UserCheck,      color: '#0000FF' }, // blue
+  { id: 'customers',     label: 'Customers',     icon: Users,          color: '#800080' }, // purple
+  { id: 'sales',         label: 'Sales',         icon: ShoppingCart,   color: '#FF0000' }, // red
+  { id: 'payment',       label: 'Payments',      icon: CreditCard,     color: '#008000' }, // green
+  { id: 'transactions',  label: 'Transactions',  icon: ArrowLeftRight, color: '#FFFF00' }, // yellow
+  { id: 'shopExpenses',  label: 'Shop Expenses', icon: Wallet,         color: '#0000FF' }, // blue
+  { id: 'cashbook',      label: 'Cash Book',     icon: BookOpenCheck,  color: '#800080' }, // purple
+  { id: 'reports',       label: 'Reports',       icon: BarChart3,      color: '#FF0000' }, // red
 ];
 
 const TAB_IDS = tabs.map((t) => t.id);
 
+// White icon on dark colours, black on bright ones (e.g. yellow) for readability.
+const readableInk = (hex) => {
+  const h = hex.replace('#', '');
+  const r = parseInt(h.slice(0, 2), 16);
+  const g = parseInt(h.slice(2, 4), 16);
+  const b = parseInt(h.slice(4, 6), 16);
+  const lum = (0.299 * r + 0.587 * g + 0.114 * b) / 255;
+  return lum > 0.6 ? '#000000' : '#ffffff';
+};
+
 const Dashboard = () => {
-  const { admin: wholesaler } = useAuth();
   const { isLoading, dataError } = useData();
   const [searchParams, setSearchParams] = useSearchParams();
   const [showLoadFallback, setShowLoadFallback] = useState(false);
@@ -71,26 +79,6 @@ const Dashboard = () => {
       <Navbar onHome={() => setActiveTab('inventory')} />
 
       <div className="container-main">
-        <div className="mb-5 welcome-banner">
-          <div className="flex flex-col items-start gap-2">
-            <div>
-              <h2 className="mb-1 text-2xl font-extrabold text-slate-900 md:text-3xl">
-                Welcome back, {wholesaler?.fullName || 'Wholesaler'}
-              </h2>
-              <p className="text-sm font-medium text-slate-600">
-                {wholesaler?.email}
-                {wholesaler?.wholesalerId ? ` • ID #${wholesaler.wholesalerId}` : ''}
-              </p>
-            </div>
-          </div>
-          <div className="rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700">Status</p>
-            <div className="mt-1 flex items-center gap-2">
-              <span className="h-2.5 w-2.5 animate-pulse rounded-full bg-emerald-500" />
-              <span className="text-sm font-semibold text-emerald-700">Active</span>
-            </div>
-          </div>
-        </div>
 
         <div className="workspace-layout">
           <aside className="workspace-sidebar">
@@ -106,7 +94,7 @@ const Dashboard = () => {
                     className="sidebar-nav-badge"
                     style={{ background: color, boxShadow: `0 4px 10px ${color}59` }}
                   >
-                    <Icon size={13} strokeWidth={2.4} color="#ffffff" />
+                    <Icon size={13} strokeWidth={2.4} color={readableInk(color)} />
                   </span>
                   <span className="sidebar-nav-title">{label}</span>
                 </button>

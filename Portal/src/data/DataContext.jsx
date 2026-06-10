@@ -12,7 +12,8 @@ const toPositiveNumber = (value) => {
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
 };
-const getDateOnly = () => new Date().toISOString().split('T')[0];
+// Local calendar date (yyyy-mm-dd) — toISOString() would report the UTC day.
+const getDateOnly = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
 const getNextId = (items) => {
   if (!items.length) return 1;
@@ -233,9 +234,7 @@ const mapSupplierProfile = (profile) => ({
     todayCommission: roundMoney(Number(profile.todayCommission) || 0),
     totalSales: roundMoney(Number(profile.totalSale ?? profile.account?.totalSales) || 0),
     totalCommissionEarned: roundMoney(Number(profile.totalCommission ?? profile.account?.totalCommissionEarned) || 0),
-    commissionDue: roundMoney(Number(profile.commissionDue) || 0),
     amountDue: roundMoney(Number(profile.supplierDue ?? profile.account?.currentDue) || 0),
-    otherExpense: roundMoney(Number(profile.otherExpense) || 0),
   },
   transactions: asArray(profile.transactions).map(mapTransaction),
 });

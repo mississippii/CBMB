@@ -40,13 +40,18 @@ public class AuthService {
             throw new BadRequestException("Invalid email or password.");
         }
 
+        var wholesaler = wholesalerRepository.findByUser_Id(user.getId()).orElse(null);
+
         return new LoginResponse(
                 user.getId(),
-                wholesalerRepository.findByUser_Id(user.getId()).map(wholesaler -> wholesaler.getId()).orElse(null),
+                wholesaler != null ? wholesaler.getId() : null,
                 user.getEmail(),
                 user.getName(),
                 user.getRole().name(),
-                user.getStatus().name()
+                user.getStatus().name(),
+                wholesaler != null ? wholesaler.getBusinessName() : null,
+                wholesaler != null ? wholesaler.getPhone() : null,
+                wholesaler != null ? wholesaler.getAddress() : null
         );
     }
 

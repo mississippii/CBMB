@@ -129,13 +129,11 @@ PaymentController
   /wholesalers/{id}/payments/customer/settle
   /wholesalers/{id}/payments/customer/crate-borrow
   /wholesalers/{id}/payments/customer/{paymentId}/cancel
-  /wholesalers/{id}/payments/supplier/product-pay
-  /wholesalers/{id}/payments/supplier/commission-receive
-  /wholesalers/{id}/payments/supplier/expense-receive  — pays down supplier_expenses FIFO
+  /wholesalers/{id}/payments/supplier/product-pay      — the only supplier money operation
   /wholesalers/{id}/payments/supplier/crate-give
   /wholesalers/{id}/payments/supplier/crate-return
   /wholesalers/{id}/payments/supplier/{settlementId}/cancel
-                                                       — EXPENSE_RECEIVE + ADJUSTMENT refused (record corrective entry)
+                                                       — only PRODUCT_PAYMENT reversible; ADJUSTMENT refused
 
 CrateController                                        — crate inventory + loss stats
   /wholesalers/{id}/crates/dashboard
@@ -162,7 +160,7 @@ ShopExpenseController                                  — wholesaler-borne over
 **Service classes** contain business rules; **repositories** provide JPA access; **controllers** stay thin. Notable services that don't map 1:1 to a controller:
 
 - `AccountBalanceService` — single get-or-create entry point for `account_balances`, also writes the `OPENING_DUE` ledger row so `sum(ledger) == balance` from row creation.
-- `ExpensePaydownService` — FIFO pay-down of `supplier_expenses.due_amount` + decrement of `other_due_balances`. Called by both `PaymentService.receiveSupplierExpense` and `SupplierDeliveryService.setSettlementStatus`.
+- `ExpensePaydownService` — FIFO pay-down of `supplier_expenses.due_amount` + decrement of `other_due_balances`. Called by `SupplierDeliveryService.setSettlementStatus` (shipment-scoped pay-down when a lot is settled).
 - `BalanceAuditService` — read-only reconciliation, surfaces drift between any balance table and its ledger/source aggregate.
 - `SaleCancellationService` / `PaymentCancellationService` — undo with reversing ledger entries; original rows preserved with `status=CANCELLED`.
 - `DashboardService` — period rollup composing sales aggregate + payment sums + settlement sums + balance totals + shop expenses + net profit.
@@ -311,7 +309,7 @@ Once you see these recurring patterns, the whole schema makes sense:
 | Table | Why it exists | Key fields |
 |---|---|---|
 | `payments` | Customer settlement events (cash, returned crates, jamanot refund). Carries the before/after snapshot so each row is auditable on its own. Partitioned by `created_at` for retention. | `cash_amount`, `boxes_returned`, `jamanot_amount`, `previous_due`, `due_after_payment`, `status` |
-| `supplier_settlements` | Money flow with a supplier. The `settlement_type` enum is the dispatcher: `PRODUCT_PAYMENT` (paying supplier for sold goods), `COMMISSION_RECEIVE` (collecting your commission), `EXPENSE_RECEIVE` (supplier reimbursing fronted expense), `ADVANCE_PAYMENT`, `ADJUSTMENT`. | `wholesaler_supplier_id`, `settlement_type`, `amount`, `previous_due`, `due_after_settlement`, `status` |
+| `supplier_settlements` | Money flow with a supplier. The `settlement_type` enum is the dispatcher: `PRODUCT_PAYMENT` (the wholesaler paying the supplier for sold goods; overpaying creates an advance) and `ADJUSTMENT` (manual correction). The legacy `COMMISSION_RECEIVE` / `EXPENSE_RECEIVE` / `ADVANCE_PAYMENT` types were retired in `V4` — commission and expense are deductions from net due, not cash received. | `wholesaler_supplier_id`, `settlement_type`, `amount`, `previous_due`, `due_after_settlement`, `status` |
 
 ### Expense tracking (4 tables)
 
@@ -320,7 +318,7 @@ Once you see these recurring patterns, the whole schema makes sense:
 | Table | Why it exists | Key fields |
 |---|---|---|
 | `expense_categories` | Per-wholesaler category names (Transport, Labour, Salary, Hospitality…). `kind` enum lets one table serve both expense surfaces — no duplicate "Other" rows. | `name`, `kind` (SUPPLIER / SHOP / BOTH), `status` |
-| `supplier_expenses` | Cost the wholesaler **fronted** for a supplier's shipment (transport, labour). `paid_amount`+`due_amount` track what the supplier still owes. **Recoverable** — supplier reimburses via `EXPENSE_RECEIVE` settlement. | `wholesaler_supplier_id`, `delivery_id`, `category_id`, `amount`, `paid_amount`, `due_amount` |
+| `supplier_expenses` | Cost the wholesaler **fronted** for a supplier's shipment (transport, labour). `paid_amount`+`due_amount` track the still-outstanding amount. A **deduction from the supplier's net due** (settled by paying the supplier that much less) — not separately reimbursed; paid down per-lot when the shipment is settled. | `wholesaler_supplier_id`, `delivery_id`, `category_id`, `amount`, `paid_amount`, `due_amount` |
 | `other_due_balances` | Per `(supplier, category)` rollup of `Σ(supplier_expenses.due_amount)`. **Read-optimized cache** — dashboards / supplier profile pages don't have to aggregate the source rows every time. Mutated alongside `supplier_expenses`. | `wholesaler_supplier_id`, `category_id`, `due_amount` |
 | `shop_expenses` | Pure wholesaler-borne overhead (salary, hospitality, lunch, rent, utilities). **No party, no reimbursement** — reduces cash + net profit only; never touches a balance. | `category_id`, `amount`, `payment_method`, `expense_date`, `status` |
 
@@ -408,12 +406,11 @@ Each flow lists the tables touched, in order. `+` = INSERT, `~` = UPDATE.
 
 **4. Pay supplier / settle shipment** (`PaymentService.paySupplierProduct`, `SupplierDeliveryService.setSettlementStatus`)
 ```
-+ supplier_settlements                   (PRODUCT_PAYMENT / COMMISSION_RECEIVE / EXPENSE_RECEIVE)
-[if PRODUCT_PAYMENT or ADVANCE_PAYMENT — only types that touch balance]
++ supplier_settlements                   (PRODUCT_PAYMENT — the only money flow here)
   ~ account_balances (supplier)          (−amount)
   + account_ledger                       (DEBIT, ref=SUPPLIER_SETTLEMENT)
-[if EXPENSE_RECEIVE, via ExpensePaydownService FIFO]
-  ~ supplier_expenses.due_amount         (decremented oldest-first)
+[settle shipment, via SupplierDeliveryService.setSettlementStatus → ExpensePaydownService FIFO]
+  ~ supplier_expenses.due_amount         (decremented oldest-first, lot-scoped)
   ~ supplier_expenses.paid_amount        (incremented)
   ~ other_due_balances.due_amount        (decremented per category as expenses are paid down)
 + transactions
@@ -986,11 +983,11 @@ CREATE TABLE `sale_items` (
 
 > **Current model (2026‑06):** the only supplier money operation is the wholesaler paying
 > the supplier (`PRODUCT_PAYMENT`); overpaying creates an advance (negative net due).
-> `COMMISSION_RECEIVE` / `EXPENSE_RECEIVE` are no longer used (commission/expense are
-> deductions, not payments), and **settling a shipment writes no settlement and moves no
-> money** — see "Consignment Accounting Model" at the top. The text below documents the
-> table mechanics, several of which (the commission/expense receive flows, settle-creates-
-> payments) reflect the prior design.
+> `COMMISSION_RECEIVE` / `EXPENSE_RECEIVE` / `ADVANCE_PAYMENT` were **removed** from the
+> code and enum in migration `V4` (commission/expense are deductions, not payments), and
+> **settling a shipment writes no settlement and moves no money** — see "Consignment
+> Accounting Model" at the top. Any commission/expense-receive or settle-creates-payments
+> mechanics in the text below reflect the **prior design** and no longer exist in the code.
 
 Customer payment source rows live in `payments`. Supplier money source rows live in `supplier_settlements`. Supplier non‑product money owed to/from the supplier lives in `supplier_expenses` (see next section). Every source row in this section MUST also create:
 
@@ -1017,10 +1014,9 @@ supplier_settlements
   wholesaler_id FK
   wholesaler_supplier_id FK
   settlement_date
-  settlement_type PRODUCT_PAYMENT | COMMISSION_RECEIVE | EXPENSE_RECEIVE
-                | ADVANCE_PAYMENT | ADJUSTMENT
+  settlement_type PRODUCT_PAYMENT | ADJUSTMENT   -- legacy *_RECEIVE / ADVANCE_PAYMENT retired in V4
   amount        -- always > 0
-  previous_due, due_after_settlement   -- only meaningful for PRODUCT_PAYMENT/ADVANCE/ADJUSTMENT
+  previous_due, due_after_settlement   -- only meaningful for PRODUCT_PAYMENT/ADJUSTMENT
   payment_method CASH | BANK | BKASH | NAGAD | OTHER   -- note: NONE NOT permitted here
   note
   created_at, updated_at
@@ -1051,21 +1047,10 @@ Supplier product pay (settlement_type=PRODUCT_PAYMENT):
     reference_id=settlement.id)
   - writes one transactions row (transaction_type=PAYMENT, settlement_id=settlement.id)
 
-Supplier commission receive (settlement_type=COMMISSION_RECEIVE):
-  - records money received from supplier as commission
-  - does NOT reduce product payable
-  - writes one account_ledger row (reference_type=SUPPLIER_COMMISSION,
-    reference_id=settlement.id) so the receipt is auditable
-  - writes one transactions row
-
-Supplier expense receive (settlement_type=EXPENSE_RECEIVE):
-  - records money received from supplier for other costs such as labour/transport
-  - decreases supplier_expenses.due_amount and increases paid_amount for the matched
-    supplier_expenses row (if the settlement targets a specific expense), OR is
-    booked against other_due_balances for the (supplier, expense_category) pair
-  - writes one account_ledger row (reference_type=SUPPLIER_EXPENSE,
-    reference_id=settlement.id)
-  - writes one transactions row
+[REMOVED in V4] Supplier commission receive / expense receive:
+  - the COMMISSION_RECEIVE and EXPENSE_RECEIVE settlement flows no longer exist.
+    Commission and fronted expense are deductions from the supplier's net due, not
+    cash received back; there is nothing to record as a separate settlement.
 
 Supplier crate give/return:
   - writes box_ledger and updates box_inventory/box_balances
@@ -1119,8 +1104,7 @@ CREATE TABLE `supplier_settlements` (
   `wholesaler_id` bigint unsigned NOT NULL,
   `wholesaler_supplier_id` bigint unsigned NOT NULL,
   `settlement_date` datetime NOT NULL DEFAULT CURRENT_TIMESTAMP,
-  `settlement_type` enum('PRODUCT_PAYMENT','COMMISSION_RECEIVE','EXPENSE_RECEIVE',
-                        'ADVANCE_PAYMENT','ADJUSTMENT') NOT NULL,
+  `settlement_type` enum('PRODUCT_PAYMENT','ADJUSTMENT') NOT NULL,  -- V1 created 5 values; V4 retired the legacy *_RECEIVE / ADVANCE_PAYMENT
   `amount` decimal(14,2) NOT NULL DEFAULT '0.00',
   `previous_due` decimal(14,2) NOT NULL DEFAULT '0.00',
   `due_after_settlement` decimal(14,2) NOT NULL DEFAULT '0.00',
@@ -1204,11 +1188,11 @@ Add supplier expense (POST /supplier-expenses/create):
     sale_amount=0, due_amount=amount; settlement_id NULL, sale_id NULL,
     wholesaler_supplier_id set, description references the expense)
 
-Settle supplier expense (via /payments/supplier/expense-receive or its inverse):
-  - flows through supplier_settlements with settlement_type=EXPENSE_RECEIVE
-    (money received from supplier) or PRODUCT_PAYMENT-like flow for paying out
-  - applies amount to one or more supplier_expenses (FIFO by expense_date unless
-    a specific expense id is targeted)
+Settle supplier expense (no dedicated endpoint — removed in V4):
+  - there is no /payments/supplier/expense-receive flow. A fronted expense is a
+    deduction from the supplier's net due and is paid down per-lot when the shipment
+    is settled (SupplierDeliveryService.setSettlementStatus → ExpensePaydownService),
+    applying amount to that lot's supplier_expenses FIFO by expense_date
   - decreases other_due_balances accordingly
 ```
 
@@ -1320,8 +1304,8 @@ Cancel shop expense (POST /shop-expenses/{id}/cancel):
 Net profit per period:
   Σ(sale_item.line_total * delivery.commission_rate / 100)  WHERE sale.status=POSTED
   − Σ(shop_expenses.amount)                                  WHERE status=POSTED
-  Both restricted to [from, to). Commission-receive settlements DO NOT enter this
-  calc — they're just transfers of already-recognised income.
+  Both restricted to [from, to). Commission is recognised income at sale time; there
+  is no separate commission-receive settlement (the type was retired in V4).
 ```
 
 ```sql
@@ -1837,10 +1821,9 @@ Open items at time of writing. (Items 7–11, 14 from earlier versions of this d
     already supports 1:N sale_items; only the request and service loop need it).
 7.  Add settlement_id column to transactions and backfill; until then,
     join supplier_settlements to transactions by (wholesaler_supplier_id, created_at).
-8.  EXPENSE_RECEIVE supplier-settlement cancellation: today it's refused with
-    "record a corrective entry instead" because we don't track which specific
-    SupplierExpense rows the settlement paid down. Either add a junction table
-    or reverse-FIFO from most-recently-paid expenses.
+8.  Unify the two supplier "due" figures: `SupplierDueService.netDue` folds expense
+    into one running due, while the supplier statement still reports a sale-side-only
+    `netPayable` with fronted expense shown separately. Make one the canonical view.
 9.  Automated service tests for sale/payment/crate balance updates and the
     audit-endpoint invariants (sum of ledger == account_balances).
 10. Partition maintenance job for payments and transactions; add pmax-1

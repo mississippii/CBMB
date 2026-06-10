@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import { useData } from '../../data/DataContext';
 import { useToast } from '../../shared/components/Toast';
+import { TablePager, usePagination } from '../../shared/components';
 import SupplierDetail from './SupplierDetail';
 
 const EMPTY_FORM = {
@@ -105,6 +106,10 @@ const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
         default:           return 0;
       }
     });
+
+  const { pageItems: pagedSuppliers, ...supplierPager } = usePagination(
+    filteredSuppliers, 15, [search, sortBy, filterDue, showDisabled],
+  );
 
   if (selectedSupplierId) {
     return <SupplierDetail supplierId={selectedSupplierId} onBack={() => setSelectedSupplierId(null)} />;
@@ -307,7 +312,7 @@ const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
           <>
             {/* Mobile card view */}
             <div className="space-y-3 lg:hidden">
-              {filteredSuppliers.map((supplier) => {
+              {pagedSuppliers.map((supplier) => {
                 const categories = [...new Set(
                   supplierProducts.filter((p) => p.supplierId === supplier.id).map((p) => p.category)
                 )];
@@ -377,7 +382,7 @@ const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredSuppliers.map((supplier) => {
+                  {pagedSuppliers.map((supplier) => {
                     const net = Number(supplier.amountDue || 0);
                     const due = net > 0 ? net : 0;
                     const advance = net < 0 ? -net : 0;
@@ -417,6 +422,8 @@ const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
                 </tbody>
               </table>
             </div>
+
+            <TablePager {...supplierPager} />
           </>
         )}
       </div>

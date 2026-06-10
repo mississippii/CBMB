@@ -43,10 +43,8 @@ import org.springframework.transaction.annotation.Transactional;
  * Cancels a POSTED customer Payment or supplier SupplierSettlement by writing reversing
  * entries — the original rows stay (status flips to CANCELLED).
  *
- * Supported supplier settlement types: PRODUCT_PAYMENT, ADVANCE_PAYMENT, COMMISSION_RECEIVE.
- * EXPENSE_RECEIVE is NOT cancellable here — the wholesaler should add a corrective
- * expense entry instead, because we don't track which specific SupplierExpense rows
- * the original EXPENSE_RECEIVE paid down.
+ * Cancellable supplier settlement type: PRODUCT_PAYMENT (restores the supplier payable).
+ * Manual ADJUSTMENT settlements are not cancellable — post an opposite ADJUSTMENT instead.
  */
 @Service
 public class PaymentCancellationService {
@@ -145,9 +143,6 @@ public class PaymentCancellationService {
             throw new BadRequestException("Settlement is already " + settlement.getStatus().name() + ".");
         }
         SettlementType type = settlement.getSettlementType();
-        if (type == SettlementType.EXPENSE_RECEIVE) {
-            throw new BadRequestException("EXPENSE_RECEIVE cancellation is not supported. Record a corrective supplier-expense entry instead so the expense due is restored explicitly.");
-        }
         if (type == SettlementType.ADJUSTMENT) {
             throw new BadRequestException("Manual ADJUSTMENT settlements cannot be cancelled. Post an opposite ADJUSTMENT entry.");
         }
@@ -157,7 +152,7 @@ public class PaymentCancellationService {
         BigDecimal amount = money(settlement.getAmount());
         BigDecimal supplierBalanceAfter = null;
 
-        boolean reducesPayable = type == SettlementType.PRODUCT_PAYMENT || type == SettlementType.ADVANCE_PAYMENT;
+        boolean reducesPayable = type == SettlementType.PRODUCT_PAYMENT;
         if (reducesPayable) {
             AccountBalance balance = accountBalanceService.getOrCreate(
                     wholesaler, PartyType.WHOLESALER_SUPPLIER, supplier.getId(), supplier.getOpeningDue());
@@ -168,7 +163,6 @@ public class PaymentCancellationService {
                     settlementId, BigDecimal.ZERO, amount, cleanReason + " — reverse " + type.name());
             supplierBalanceAfter = money(balance.getBalance());
         }
-        // COMMISSION_RECEIVE didn't touch balance — nothing to reverse there. Just status flip.
 
         settlement.setStatus(PostStatus.CANCELLED);
         settlement.setNote(joinNote(settlement.getNote(), cleanReason));

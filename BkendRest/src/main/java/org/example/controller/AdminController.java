@@ -59,6 +59,13 @@ public class AdminController {
         return adminWholesalerService.createWholesaler(request);
     }
 
+    @PostMapping("/wholesalers/{wholesalerId}/update")
+    public WholesalerResponse updateWholesaler(
+            @PathVariable Long wholesalerId,
+            @RequestBody org.example.dto.UpdateWholesalerRequest request) {
+        return adminWholesalerService.updateWholesaler(wholesalerId, request);
+    }
+
     @PostMapping("/wholesalers/{wholesalerId}/reset-password")
     @ResponseStatus(HttpStatus.NO_CONTENT)
     public void resetPassword(@PathVariable Long wholesalerId, @RequestBody ResetPasswordRequest request) {

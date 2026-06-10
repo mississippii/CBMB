@@ -6,6 +6,7 @@ import { useAuth } from '../auth/AuthContext';
 import { queryKeys } from '../../services/queryKeys';
 import { formatMoney, formatDate } from '../../shared/utils/format';
 import { Loader, EmptyRow, ErrorBanner } from '../../shared/components/Loader';
+import { TablePager, usePagination } from '../../shared/components';
 import SaleForm from './SaleForm';
 
 const SalesPage = () => {
@@ -29,6 +30,7 @@ const SalesPage = () => {
     [raw],
   );
 
+  const { pageItems: pagedSales, ...salePager } = usePagination(sales, 15);
 
   return (
     <div className="space-y-5">
@@ -70,7 +72,7 @@ const SalesPage = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {sales.map((t) => {
+                {pagedSales.map((t) => {
                   const cancelled = String(t.description || '').toLowerCase().includes('cancellation of sale');
                   const productLabel = [t.productName, t.categoryName].filter(Boolean).join(' / ');
                   return (
@@ -94,6 +96,8 @@ const SalesPage = () => {
             </table>
           </div>
         )}
+
+        {!isLoading && sales.length > 0 && <TablePager {...salePager} />}
 
         {queryError && <div className="mt-3"><ErrorBanner message={queryError.message || 'Failed to load sales.'} /></div>}
       </div>

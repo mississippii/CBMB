@@ -22,7 +22,6 @@ import org.example.model.WholesalerCustomer;
 import org.example.model.WholesalerSupplier;
 import org.example.model.enums.PartyType;
 import org.example.model.enums.RecordStatus;
-import org.example.model.enums.SettlementType;
 import org.example.repository.AccountBalanceRepository;
 import org.example.repository.BoxBalanceRepository;
 import org.example.repository.CustomerRepository;
@@ -310,8 +309,6 @@ public class WholesalerService {
         LocalDateTime tomorrowStart = todayStart.plusDays(1);
         BigDecimal todaySale = saleItemRepository.sumLineTotalBySupplierBetween(wholesalerId, wholesalerSupplierId, todayStart, tomorrowStart);
         BigDecimal todayCommission = saleItemRepository.sumCommissionBySupplierBetween(wholesalerId, wholesalerSupplierId, todayStart, tomorrowStart);
-        BigDecimal commissionReceived = supplierSettlementRepository.sumAmountBySupplierAndType(wholesalerId, wholesalerSupplierId, SettlementType.COMMISSION_RECEIVE);
-        BigDecimal otherExpense = supplierSettlementRepository.sumAmountBySupplierAndType(wholesalerId, wholesalerSupplierId, SettlementType.EXPENSE_RECEIVE);
         BigDecimal totalCommission = zeroIfNull(supplier.totalCommissionEarned());
 
         return new SupplierProfileResponse(
@@ -320,9 +317,7 @@ public class WholesalerService {
                 zeroIfNull(todayCommission),
                 zeroIfNull(supplier.totalSales()),
                 totalCommission,
-                positive(totalCommission.subtract(zeroIfNull(commissionReceived))),
                 zeroIfNull(supplier.currentDue()),
-                zeroIfNull(otherExpense),
                 transactionService.listSupplierTransactions(wholesalerId, wholesalerSupplierId)
         );
     }
@@ -416,10 +411,6 @@ public class WholesalerService {
         return (int) dues.stream().mapToLong(CrateTypeQuantity::quantity).sum();
     }
 
-    private BigDecimal positive(BigDecimal value) {
-        BigDecimal normalized = zeroIfNull(value);
-        return normalized.signum() < 0 ? BigDecimal.ZERO : normalized;
-    }
 
     private BigDecimal zeroIfNull(BigDecimal value) {
         return value == null ? BigDecimal.ZERO : value;

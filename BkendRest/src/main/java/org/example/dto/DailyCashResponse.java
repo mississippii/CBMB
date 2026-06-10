@@ -49,16 +49,14 @@ public record DailyCashResponse(
     /** Cash that came into the drawer. */
     public record Inflow(
             BigDecimal cashSales,
-            BigDecimal customerCollections,
-            BigDecimal commissionReceived,
-            BigDecimal expenseReimbursed
+            BigDecimal crateCashSales,
+            BigDecimal customerCollections
     ) {
     }
 
     /** Cash that left the drawer. */
     public record Outflow(
             BigDecimal supplierPayments,
-            BigDecimal supplierAdvances,
             BigDecimal shipmentExpenses,
             BigDecimal shopExpenses
     ) {

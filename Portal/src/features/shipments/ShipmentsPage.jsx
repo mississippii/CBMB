@@ -6,6 +6,7 @@ import {
 import { useData } from '../../data/DataContext';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../../shared/components/Toast';
+import { TablePager, usePagination } from '../../shared/components';
 import SearchableSelect from '../../shared/components/SearchableSelect';
 import { queryKeys } from '../../services/queryKeys';
 
@@ -96,6 +97,8 @@ const ShipmentsPage = () => {
       .sort((a, b) => new Date(b.deliveryDate || b.date || 0) - new Date(a.deliveryDate || a.date || 0));
   }, [shipments]);
 
+  const { pageItems: pagedShipments, ...shipmentPager } = usePagination(allShipments, 15);
+
   const handleField = (key) => (e) =>
     setFormData((prev) => ({
       ...prev,
@@ -183,9 +186,14 @@ const ShipmentsPage = () => {
     <div className="space-y-5">
       {/* Header */}
       <section className="inventory-hero">
-        <div>
-          <span className="box-eyebrow">Shipments</span>
-          <h3>Supplier shipments</h3>
+        <div className="flex items-start gap-3">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-md shadow-blue-500/30">
+            <Truck size={22} />
+          </div>
+          <div>
+            <span className="box-eyebrow">Shipments</span>
+            <h3>Supplier shipments</h3>
+          </div>
         </div>
         <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={openModal}>
           <Plus size={16} /> Add Shipment
@@ -210,17 +218,17 @@ const ShipmentsPage = () => {
           <div className="overflow-x-auto rounded-xl border border-slate-200">
             <table className="center-table w-full min-w-[720px] text-sm">
               <thead>
-                <tr className="bg-slate-50 border-b border-slate-200">
-                  <th className="px-4 py-3 text-center font-semibold text-slate-700">Shipment Name</th>
-                  <th className="px-4 py-3 text-center font-semibold text-slate-700">Date</th>
-                  <th className="px-4 py-3 text-center font-semibold text-slate-700">Supplier</th>
-                  <th className="px-4 py-3 text-center font-semibold text-slate-700">Total Quantity</th>
-                  <th className="px-4 py-3 text-center font-semibold text-slate-700">Product</th>
-                  <th className="px-4 py-3 text-center font-semibold text-slate-700">Action</th>
+                <tr className="border-b border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50">
+                  <th className="px-4 py-3 text-center font-bold text-blue-900">Shipment Name</th>
+                  <th className="px-4 py-3 text-center font-bold text-blue-900">Date</th>
+                  <th className="px-4 py-3 text-center font-bold text-blue-900">Supplier</th>
+                  <th className="px-4 py-3 text-center font-bold text-blue-900">Total Quantity</th>
+                  <th className="px-4 py-3 text-center font-bold text-blue-900">Product</th>
+                  <th className="px-4 py-3 text-center font-bold text-blue-900">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {allShipments.map((shipment) => {
+                {pagedShipments.map((shipment) => {
                   const supplier = supplierById.get(Number(shipment.supplierId));
                   const products = [...new Set((shipment.items || []).map((it) => it.productName).filter(Boolean))];
                   return (
@@ -235,8 +243,10 @@ const ShipmentsPage = () => {
                       </td>
                       <td className="px-4 py-3 text-center font-semibold text-slate-900 whitespace-nowrap">{shipment.date}</td>
                       <td className="px-4 py-3 text-center font-medium text-slate-800">{supplier?.name || '—'}</td>
-                      <td className="px-4 py-3 text-center font-extrabold text-slate-900">
-                        {shipment.totalQuantity.toLocaleString()}
+                      <td className="px-4 py-3 text-center">
+                        <span className="inline-flex items-center justify-center rounded-lg bg-teal-50 px-2.5 py-1 font-extrabold text-teal-700 tabular-nums">
+                          {shipment.totalQuantity.toLocaleString()}
+                        </span>
                       </td>
                       <td className="px-4 py-3 text-center text-slate-800">{products.length ? products.join(', ') : '—'}</td>
                       <td className="px-4 py-3 text-center relative" onClick={(e) => e.stopPropagation()}>
@@ -264,6 +274,7 @@ const ShipmentsPage = () => {
                 })}
               </tbody>
             </table>
+            <TablePager {...shipmentPager} />
           </div>
         )}
       </div>
@@ -274,7 +285,7 @@ const ShipmentsPage = () => {
           <form onSubmit={handleReview} className="modal-content" style={{ maxWidth: '46rem' }}>
             <div className="modal-header">
               <div className="flex items-center gap-2.5">
-                <div className="modal-icon-circle bg-blue-100 text-blue-700">
+                <div className="modal-icon-circle bg-gradient-to-br from-blue-500 to-indigo-600 text-white">
                   <Truck size={18} />
                 </div>
                 <div>
@@ -479,7 +490,7 @@ const ShipmentsPage = () => {
           <div className="modal-content" style={{ maxWidth: '28rem' }}>
             <div className="modal-header">
               <div className="flex items-center gap-2.5">
-                <div className="modal-icon-circle bg-blue-100 text-blue-700"><Pencil size={18} /></div>
+                <div className="modal-icon-circle bg-gradient-to-br from-blue-500 to-indigo-600 text-white"><Pencil size={18} /></div>
                 <div><h2>Edit Shipment</h2></div>
               </div>
               <button type="button" onClick={() => setEditTarget(null)} className="modal-close-btn">✕</button>
@@ -526,7 +537,7 @@ const ShipmentsPage = () => {
             <div className="modal-content" style={{ maxWidth: '40rem' }}>
               <div className="modal-header">
                 <div className="flex items-center gap-2.5">
-                  <div className="modal-icon-circle bg-blue-100 text-blue-700"><Truck size={18} /></div>
+                  <div className="modal-icon-circle bg-gradient-to-br from-blue-500 to-indigo-600 text-white"><Truck size={18} /></div>
                   <div>
                     <h2 className="flex items-center gap-2">
                       {detailShipment.name || '—'}
@@ -541,20 +552,20 @@ const ShipmentsPage = () => {
               </div>
               <div className="modal-body max-h-[72vh] overflow-y-auto">
                 <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
-                  <div className="balance-pill"><p>Supplier</p><p>{supplier?.name || '—'}</p></div>
+                  <div className="balance-pill balance-pill-emerald"><p>Supplier</p><p>{supplier?.name || '—'}</p></div>
                   <div className="balance-pill"><p>Date</p><p>{detailShipment.date}</p></div>
-                  <div className="balance-pill"><p>Total Quantity</p><p>{detailShipment.totalQuantity.toLocaleString()}</p></div>
+                  <div className="balance-pill balance-pill-amber"><p>Total Quantity</p><p>{detailShipment.totalQuantity.toLocaleString()}</p></div>
                 </div>
 
-                <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200">
+                <div className="mt-4 overflow-x-auto rounded-xl border border-blue-200">
                   <table className="center-table w-full text-sm">
                     <thead>
-                      <tr className="bg-slate-50 border-b border-slate-200">
-                        <th className="px-4 py-2 font-semibold text-slate-700">Variety</th>
-                        <th className="px-4 py-2 font-semibold text-slate-700">Lot</th>
-                        <th className="px-4 py-2 font-semibold text-slate-700">Quantity</th>
-                        <th className="px-4 py-2 font-semibold text-slate-700">Total Sold</th>
-                        <th className="px-4 py-2 font-semibold text-slate-700">Left</th>
+                      <tr className="border-b border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50">
+                        <th className="px-4 py-2 font-bold text-blue-900">Variety</th>
+                        <th className="px-4 py-2 font-bold text-blue-900">Lot</th>
+                        <th className="px-4 py-2 font-bold text-blue-900">Quantity</th>
+                        <th className="px-4 py-2 font-bold text-blue-900">Total Sold</th>
+                        <th className="px-4 py-2 font-bold text-blue-900">Left</th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-slate-100">

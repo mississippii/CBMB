@@ -15,6 +15,7 @@ import org.example.model.CashReconciliation;
 import org.example.model.Wholesaler;
 import org.example.model.enums.CashDayStatus;
 import org.example.model.enums.SettlementType;
+import org.example.repository.BoxLedgerRepository;
 import org.example.repository.CashReconciliationRepository;
 import org.example.repository.PaymentRepository;
 import org.example.repository.SaleRepository;
@@ -47,6 +48,7 @@ public class CashReconciliationService {
     private final SupplierSettlementRepository supplierSettlementRepository;
     private final ShopExpenseRepository shopExpenseRepository;
     private final SupplierExpenseRepository supplierExpenseRepository;
+    private final BoxLedgerRepository boxLedgerRepository;
     private final SalesAggregateService salesAggregateService;
 
     public CashReconciliationService(
@@ -57,6 +59,7 @@ public class CashReconciliationService {
             SupplierSettlementRepository supplierSettlementRepository,
             ShopExpenseRepository shopExpenseRepository,
             SupplierExpenseRepository supplierExpenseRepository,
+            BoxLedgerRepository boxLedgerRepository,
             SalesAggregateService salesAggregateService
     ) {
         this.wholesalerRepository = wholesalerRepository;
@@ -66,6 +69,7 @@ public class CashReconciliationService {
         this.supplierSettlementRepository = supplierSettlementRepository;
         this.shopExpenseRepository = shopExpenseRepository;
         this.supplierExpenseRepository = supplierExpenseRepository;
+        this.boxLedgerRepository = boxLedgerRepository;
         this.salesAggregateService = salesAggregateService;
     }
 
@@ -152,16 +156,12 @@ public class CashReconciliationService {
         );
 
         BigDecimal cashSales = money(saleRepository.sumCashPaidInPeriod(wholesalerId, from, to));
+        // Walk-in crate sales: the gross sale price enters the drawer the same day.
+        BigDecimal crateCashSales = money(boxLedgerRepository.sumWalkInCrateCashSales(wholesalerId, from, to));
         BigDecimal customerCollections = money(paymentRepository.sumCashAmountInPeriod(wholesalerId, from, to));
-        BigDecimal commissionReceived = money(supplierSettlementRepository
-                .sumAmountByTypeInPeriod(wholesalerId, SettlementType.COMMISSION_RECEIVE, from, to));
-        BigDecimal expenseReimbursed = money(supplierSettlementRepository
-                .sumAmountByTypeInPeriod(wholesalerId, SettlementType.EXPENSE_RECEIVE, from, to));
 
         BigDecimal supplierPayments = money(supplierSettlementRepository
                 .sumAmountByTypeInPeriod(wholesalerId, SettlementType.PRODUCT_PAYMENT, from, to));
-        BigDecimal supplierAdvances = money(supplierSettlementRepository
-                .sumAmountByTypeInPeriod(wholesalerId, SettlementType.ADVANCE_PAYMENT, from, to));
         BigDecimal shipmentExpenses = money(supplierExpenseRepository
                 .sumWholesalerFrontedInPeriod(wholesalerId, from, to));
 
@@ -174,8 +174,8 @@ public class CashReconciliationService {
             shopExpenses = shopExpenses.add(amount);
         }
 
-        BigDecimal totalIn = money(cashSales.add(customerCollections).add(commissionReceived).add(expenseReimbursed));
-        BigDecimal totalOut = money(supplierPayments.add(supplierAdvances).add(shipmentExpenses).add(shopExpenses));
+        BigDecimal totalIn = money(cashSales.add(crateCashSales).add(customerCollections));
+        BigDecimal totalOut = money(supplierPayments.add(shipmentExpenses).add(shopExpenses));
         BigDecimal netMovement = money(totalIn.subtract(totalOut));
 
         BigDecimal opening = row != null
@@ -192,8 +192,8 @@ public class CashReconciliationService {
                 status,
                 sales,
                 opening,
-                new DailyCashResponse.Inflow(cashSales, customerCollections, commissionReceived, expenseReimbursed),
-                new DailyCashResponse.Outflow(supplierPayments, supplierAdvances, shipmentExpenses, shopExpenses),
+                new DailyCashResponse.Inflow(cashSales, crateCashSales, customerCollections),
+                new DailyCashResponse.Outflow(supplierPayments, shipmentExpenses, shopExpenses),
                 totalIn,
                 totalOut,
                 netMovement,

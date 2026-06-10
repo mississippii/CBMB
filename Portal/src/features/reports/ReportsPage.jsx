@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
   BarChart3, Filter, Calendar, Download, FileText, Printer, TrendingUp, TrendingDown,
-  ChevronRight,
+  ChevronRight, Wallet, Percent,
 } from 'lucide-react';
 import { useData } from '../../data/DataContext';
 import { useAuth } from '../auth/AuthContext';
@@ -10,16 +10,11 @@ import { queryKeys } from '../../services/queryKeys';
 import { postJson, apiPaths } from '../../services/apiClient';
 import { formatMoney, formatDate } from '../../shared/utils/format';
 import { Loader, EmptyRow, ErrorBanner } from '../../shared/components/Loader';
+import { TablePager, usePagination, DateRangeFilter, todayLocalIso, nextDayLocalIso } from '../../shared/components';
 
 const formatQty = (value) => Number(value || 0).toLocaleString(undefined, { maximumFractionDigits: 3 });
 
-const PNL_PERIODS = [
-  { value: 'today', label: 'Today' },
-  { value: 'week',  label: '7 days' },
-  { value: 'month', label: 'This month' },
-  { value: 'year',  label: 'This year' },
-  { value: 'all',   label: 'All-time' },
-];
+const prettyDay = (iso) => formatDate(`${iso}T00:00:00`);
 
 const SUB_TABS = [
   { value: 'pnl',   label: 'Profit & Loss', icon: FileText },
@@ -29,21 +24,35 @@ const SUB_TABS = [
 const ReportsPage = () => {
   const [tab, setTab] = useState('pnl');
   return (
-    <div className="space-y-4">
-      <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-slate-50 p-0.5 text-xs font-semibold">
-        {SUB_TABS.map(({ value, label, icon: Icon }) => (
-          <button
-            key={value}
-            type="button"
-            onClick={() => setTab(value)}
-            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full transition ${
-              tab === value ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
-            }`}
-          >
-            <Icon size={12} /> {label}
-          </button>
-        ))}
-      </div>
+    <div className="space-y-5">
+      <section className="inventory-hero no-print">
+        <div className="flex items-start gap-3">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-md shadow-blue-500/30">
+            <BarChart3 size={22} />
+          </div>
+          <div>
+            <span className="box-eyebrow">Reports</span>
+            <h3>Business reports</h3>
+          </div>
+        </div>
+
+        <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white p-1 text-xs font-semibold shadow-sm">
+          {SUB_TABS.map(({ value, label, icon: Icon }) => (
+            <button
+              key={value}
+              type="button"
+              onClick={() => setTab(value)}
+              className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 transition ${
+                tab === value
+                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm'
+                  : 'text-slate-600 hover:text-slate-900'
+              }`}
+            >
+              <Icon size={13} /> {label}
+            </button>
+          ))}
+        </div>
+      </section>
 
       {tab === 'pnl' ? <PnLReport /> : <SalesBreakdown />}
     </div>
@@ -61,14 +70,17 @@ const pctDelta = (current, prior) => {
   return ((c - p) / Math.abs(p)) * 100;
 };
 
-const DeltaBadge = ({ current, prior }) => {
+const DeltaBadge = ({ current, prior, light }) => {
   if (prior == null) return null;
   const pct = pctDelta(current, prior);
-  if (pct == null) return <span className="text-[10px] font-semibold text-slate-400">—</span>;
+  if (pct == null) return <span className={`text-[10px] font-semibold ${light ? 'text-white/70' : 'text-slate-400'}`}>—</span>;
   const up = pct >= 0;
   const Icon = up ? TrendingUp : TrendingDown;
+  const tone = light
+    ? 'bg-white/20 text-white'
+    : (up ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700');
   return (
-    <span className={`inline-flex items-center gap-0.5 text-[10px] font-bold ${up ? 'text-emerald-700' : 'text-rose-700'}`}>
+    <span className={`inline-flex items-center gap-0.5 rounded-full px-1.5 py-0.5 text-[10px] font-bold ${tone}`}>
       <Icon size={10} /> {Math.abs(pct).toFixed(1)}%
     </span>
   );
@@ -76,12 +88,18 @@ const DeltaBadge = ({ current, prior }) => {
 
 const PnLReport = () => {
   const { admin } = useAuth();
-  const [period, setPeriod] = useState('month');
+  const [fromDate, setFromDate] = useState(todayLocalIso());
+  const [toDate, setToDate] = useState(todayLocalIso());
   const [compareToPrior, setCompareToPrior] = useState(true);
 
   const { data: pnl, isLoading, error: queryError } = useQuery({
-    queryKey: ['reports', 'pnl', admin?.wholesalerId, period, compareToPrior],
-    queryFn: () => postJson(apiPaths.reportsPnL(admin.wholesalerId), { period, compareToPrior }),
+    queryKey: ['reports', 'pnl', admin?.wholesalerId, fromDate, toDate, compareToPrior],
+    queryFn: () => postJson(apiPaths.reportsPnL(admin.wholesalerId), {
+      period: 'custom',
+      from: `${fromDate}T00:00:00`,
+      to: `${nextDayLocalIso(toDate)}T00:00:00`,   // exclusive end — include the whole `toDate`
+      compareToPrior,
+    }),
     enabled: Boolean(admin?.wholesalerId),
   });
 
@@ -116,14 +134,17 @@ const PnLReport = () => {
     URL.revokeObjectURL(url);
   };
 
+  const prior = compareToPrior ? pnl?.prior : null;
+  const rangeText = fromDate === toDate ? prettyDay(fromDate) : `${prettyDay(fromDate)} – ${prettyDay(toDate)}`;
+
   return (
     <div className="space-y-4">
       {/* Toolbar — hidden in print */}
       <section className="no-print rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="mb-3 flex items-center justify-between gap-3">
           <div className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-100 text-blue-700">
-              <FileText size={14} />
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-sm">
+              <FileText size={15} />
             </span>
             <div>
               <h3 className="text-sm font-extrabold text-slate-900">Profit &amp; Loss Statement</h3>
@@ -159,137 +180,241 @@ const PnLReport = () => {
           </div>
         </div>
 
-        <div className="inline-flex flex-wrap items-center gap-1 rounded-full border border-slate-200 bg-slate-50 p-0.5 text-[11px] font-semibold text-slate-600">
-          <Calendar size={12} className="ml-2 text-slate-400" />
-          {PNL_PERIODS.map(({ value, label }) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setPeriod(value)}
-              className={`px-2.5 py-1 rounded-full transition ${
-                period === value ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+        <DateRangeFilter from={fromDate} to={toDate} setFrom={setFromDate} setTo={setToDate} />
       </section>
 
       {isLoading && <Loader />}
       {queryError && <ErrorBanner message={queryError.message || 'Failed to load report.'} />}
 
       {pnl && (
-        <section className="rounded-2xl border border-slate-200 bg-white p-6 shadow-sm print:shadow-none print:border-0">
-          <PnLHeader pnl={pnl} />
-          <PnLBody pnl={pnl} compareToPrior={compareToPrior} />
-        </section>
-      )}
-    </div>
-  );
-};
-
-const PnLHeader = ({ pnl }) => (
-  <header className="mb-6 border-b border-slate-200 pb-4">
-    <h2 className="text-xl font-extrabold text-slate-900">Profit &amp; Loss Statement</h2>
-    <p className="text-xs text-slate-500 mt-1">
-      Period: <strong className="text-slate-700">{pnl.period}</strong>
-      {pnl.from && pnl.to && (
-        <> &middot; {formatDate(pnl.from)} → {formatDate(pnl.to)}</>
-      )}
-    </p>
-  </header>
-);
-
-const PnLBody = ({ pnl, compareToPrior }) => {
-  const prior = compareToPrior ? pnl.prior : null;
-
-  return (
-    <div className="space-y-6 text-sm">
-      {/* INCOME */}
-      <Section title="Income" tone="emerald">
-        <Line
-          label="Commission earned"
-          amount={pnl.income.commissionEarned}
-          priorAmount={prior?.income?.commissionEarned}
-        />
-        {(pnl.income.bySupplier || []).length > 0 && (
-          <BreakdownList items={pnl.income.bySupplier} />
-        )}
-        {pnl.income.crateSalesNet != null && Number(pnl.income.crateSalesNet) !== 0 && (
-          <Line
-            label="Crate sales (net)"
-            amount={pnl.income.crateSalesNet}
-            priorAmount={prior?.income?.crateSalesNet}
-            hint="Profit on crate sales: sale price minus weighted-average cost basis"
-          />
-        )}
-        <Subtotal label="Total income" amount={pnl.totalIncome} priorAmount={prior?.totalIncome} tone="emerald" />
-      </Section>
-
-      {/* EXPENSES */}
-      <Section title="Expenses" tone="rose">
-        <Line
-          label="Shop expenses"
-          amount={pnl.expenses.shopExpenses}
-          priorAmount={prior?.expenses?.shopExpenses}
-        />
-        {(pnl.expenses.shopByCategory || []).length > 0 && (
-          <BreakdownList items={pnl.expenses.shopByCategory} />
-        )}
-        <Line
-          label="Crate loss (absorbed)"
-          amount={pnl.expenses.crateLossAbsorbed}
-          priorAmount={prior?.expenses?.crateLossAbsorbed}
-          hint="Lost/damaged crates that no party compensated"
-        />
-        <Subtotal label="Total expenses" amount={pnl.totalExpenses} priorAmount={prior?.totalExpenses} tone="rose" />
-      </Section>
-
-      {/* NET PROFIT */}
-      <div className="rounded-xl border-2 border-slate-900 bg-slate-50 px-5 py-4 flex items-center justify-between">
-        <span className="text-base font-extrabold uppercase tracking-wider text-slate-900">Net Profit</span>
-        <div className="text-right">
-          <div className={`text-2xl font-black ${Number(pnl.netProfit) >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
-            {formatMoney(pnl.netProfit)}
+        <div className="no-print space-y-4">
+          <p className="px-1 text-xs font-semibold text-slate-500">{rangeText}</p>
+          <PnLSummary pnl={pnl} prior={prior} />
+          <ProfitBar income={pnl.totalIncome} expenses={pnl.totalExpenses} />
+          <div className="grid gap-4 lg:grid-cols-2">
+            <FlowCard tone="emerald" icon={TrendingUp} title="Income" total={pnl.totalIncome}>
+              <Line label="Commission earned" amount={pnl.income.commissionEarned} priorAmount={prior?.income?.commissionEarned} />
+              {(pnl.income.bySupplier || []).length > 0 && <BreakdownList items={pnl.income.bySupplier} />}
+              {pnl.income.crateSalesNet != null && Number(pnl.income.crateSalesNet) !== 0 && (
+                <Line label="Crate sales (net)" amount={pnl.income.crateSalesNet} priorAmount={prior?.income?.crateSalesNet} hint="Sale price minus weighted-average cost basis" />
+              )}
+            </FlowCard>
+            <FlowCard tone="rose" icon={TrendingDown} title="Expenses" total={pnl.totalExpenses}>
+              <Line label="Shop expenses" amount={pnl.expenses.shopExpenses} priorAmount={prior?.expenses?.shopExpenses} />
+              {(pnl.expenses.shopByCategory || []).length > 0 && <BreakdownList items={pnl.expenses.shopByCategory} />}
+              <Line label="Crate loss (absorbed)" amount={pnl.expenses.crateLossAbsorbed} priorAmount={prior?.expenses?.crateLossAbsorbed} hint="Lost/damaged crates no party compensated" />
+            </FlowCard>
           </div>
-          {prior && (
-            <div className="mt-0.5 flex items-center justify-end gap-2 text-[11px] text-slate-500">
-              <span>prior: {formatMoney(prior.netProfit)}</span>
-              <DeltaBadge current={pnl.netProfit} prior={prior.netProfit} />
-            </div>
-          )}
+          <EquationBar pnl={pnl} prior={prior} />
         </div>
+      )}
+
+      {/* Print-only professional statement — hidden on screen, becomes the PDF */}
+      {pnl && <PnLInvoice pnl={pnl} account={admin} period={rangeText} />}
+    </div>
+  );
+};
+
+// ── Print-only invoice / statement document ──────────────────────────────────
+
+const PnLInvoice = ({ pnl, account, period }) => {
+  const now = new Date();
+  const docNo = `PNL-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
+  const generated = now.toLocaleString(undefined, {
+    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
+  });
+  const positive = Number(pnl.netProfit) >= 0;
+
+  const InvRow = ({ label, amount, strong, sub }) => (
+    <tr className={strong ? 'inv-row-strong' : ''}>
+      <td className={`inv-cell-label${sub ? ' inv-cell-sub' : ''}`}>{label}</td>
+      <td className="inv-cell-amount">{formatMoney(amount)}</td>
+    </tr>
+  );
+
+  return (
+    <div className="pnl-print-sheet">
+      <div className="inv-doc">
+        {/* Letterhead */}
+        <header className="inv-head">
+          <div className="inv-brand">
+            <div className="inv-logo">CB</div>
+            <div>
+              <div className="inv-brand-name">CBTrading</div>
+              <div className="inv-brand-sub">Wholesale Consignment</div>
+            </div>
+          </div>
+          <div className="inv-title-block">
+            <div className="inv-title">Profit &amp; Loss</div>
+            <div className="inv-title-sub">Statement</div>
+          </div>
+        </header>
+
+        {/* Meta strip */}
+        <section className="inv-meta">
+          <div>
+            <span className="inv-meta-label">Account</span>
+            <span className="inv-meta-value">{account?.fullName || 'Wholesaler'}</span>
+            {account?.email && <span className="inv-meta-line">{account.email}</span>}
+            {account?.wholesalerId && <span className="inv-meta-line">Account ID #{account.wholesalerId}</span>}
+          </div>
+          <div className="inv-meta-right">
+            <div><span className="inv-meta-label">Statement No.</span><span className="inv-meta-value">{docNo}</span></div>
+            <div><span className="inv-meta-label">Period</span><span className="inv-meta-value">{period}</span></div>
+            <div><span className="inv-meta-label">Generated</span><span className="inv-meta-line">{generated}</span></div>
+          </div>
+        </section>
+
+        {/* Income */}
+        <table className="inv-table">
+          <thead>
+            <tr><th className="inv-th">Income</th><th className="inv-th inv-th-amount">Amount</th></tr>
+          </thead>
+          <tbody>
+            <InvRow label="Commission earned" amount={pnl.income.commissionEarned} />
+            {(pnl.income.bySupplier || []).map((s) => (
+              <InvRow key={`inc-${s.id ?? s.name}`} label={s.name} amount={s.amount} sub />
+            ))}
+            {pnl.income.crateSalesNet != null && Number(pnl.income.crateSalesNet) !== 0 && (
+              <InvRow label="Crate sales (net)" amount={pnl.income.crateSalesNet} />
+            )}
+            <InvRow label="Total Income" amount={pnl.totalIncome} strong />
+          </tbody>
+        </table>
+
+        {/* Expenses */}
+        <table className="inv-table">
+          <thead>
+            <tr><th className="inv-th">Expenses</th><th className="inv-th inv-th-amount">Amount</th></tr>
+          </thead>
+          <tbody>
+            <InvRow label="Shop expenses" amount={pnl.expenses.shopExpenses} />
+            {(pnl.expenses.shopByCategory || []).map((c) => (
+              <InvRow key={`exp-${c.id ?? c.name}`} label={c.name} amount={c.amount} sub />
+            ))}
+            <InvRow label="Crate loss (absorbed)" amount={pnl.expenses.crateLossAbsorbed} />
+            <InvRow label="Total Expenses" amount={pnl.totalExpenses} strong />
+          </tbody>
+        </table>
+
+        {/* Net profit banner */}
+        <div className={`inv-net ${positive ? 'inv-net-pos' : 'inv-net-neg'}`}>
+          <span className="inv-net-label">Net {positive ? 'Profit' : 'Loss'}</span>
+          <span className="inv-net-value">{formatMoney(Math.abs(Number(pnl.netProfit)))}</span>
+        </div>
+
+        {/* Footer */}
+        <footer className="inv-foot">
+          <span>Generated by CBTrading on {generated}</span>
+          <span>This is a system-generated statement and does not require a signature.</span>
+        </footer>
       </div>
     </div>
   );
 };
 
-const Section = ({ title, tone, children }) => {
-  const dot = tone === 'emerald' ? 'bg-emerald-500' : 'bg-rose-500';
+const TILE_TONES = {
+  emerald: { chip: 'bg-emerald-50 text-emerald-600', value: 'text-emerald-700' },
+  rose:    { chip: 'bg-rose-50 text-rose-600',        value: 'text-rose-700' },
+  indigo:  { chip: 'bg-indigo-50 text-indigo-600',    value: 'text-indigo-700' },
+  slate:   { chip: 'bg-slate-100 text-slate-500',     value: 'text-slate-900' },
+};
+
+const SummaryTile = ({ tone, icon: Icon, label, value, current, prior }) => {
+  const t = TILE_TONES[tone] || TILE_TONES.slate;
   return (
-    <div>
-      <h4 className="mb-2 flex items-center gap-2 text-xs font-extrabold uppercase tracking-wider text-slate-600">
-        <span className={`inline-block h-2 w-2 rounded-full ${dot}`} />
-        {title}
-      </h4>
-      <div className="space-y-1 pl-4 border-l-2 border-slate-100">
-        {children}
+    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3.5 shadow-sm">
+      <div className="flex items-center justify-between">
+        <span className="text-[10px] font-bold uppercase tracking-wider text-slate-400">{label}</span>
+        <span className={`flex h-7 w-7 items-center justify-center rounded-full ${t.chip}`}><Icon size={14} /></span>
       </div>
+      <p className={`mt-2 text-2xl font-black leading-tight tabular-nums ${t.value}`}>{value}</p>
+      {prior != null && (
+        <div className="mt-1 flex items-center gap-1.5 text-[11px] font-medium text-slate-400">
+          <span>was {formatMoney(prior)}</span>
+          <DeltaBadge current={current} prior={prior} />
+        </div>
+      )}
     </div>
+  );
+};
+
+const PnLSummary = ({ pnl, prior }) => {
+  const net = Number(pnl.netProfit);
+  const positive = net >= 0;
+  const inc = Number(pnl.totalIncome);
+  const margin = inc > 0 ? (net / inc) * 100 : null;
+  return (
+    <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+      <SummaryTile tone="emerald" icon={TrendingUp} label="Total Income" value={formatMoney(pnl.totalIncome)} current={pnl.totalIncome} prior={prior?.totalIncome} />
+      <SummaryTile tone="rose" icon={TrendingDown} label="Total Expenses" value={formatMoney(pnl.totalExpenses)} current={pnl.totalExpenses} prior={prior?.totalExpenses} />
+      <SummaryTile tone={positive ? 'emerald' : 'rose'} icon={Wallet} label={positive ? 'Net Profit' : 'Net Loss'} value={formatMoney(Math.abs(net))} current={net} prior={prior?.netProfit} />
+      <SummaryTile tone="indigo" icon={Percent} label="Profit Margin" value={margin == null ? '—' : `${margin.toFixed(1)}%`} />
+    </div>
+  );
+};
+
+const ProfitBar = ({ income, expenses }) => {
+  const inc = Math.max(0, Number(income) || 0);
+  const exp = Math.max(0, Number(expenses) || 0);
+  const denom = Math.max(inc, exp, 1);
+  const profit = inc - exp;
+  const Row = ({ label, value, pct, bar, text }) => (
+    <div className="flex items-center gap-3">
+      <span className={`w-20 shrink-0 text-[11px] font-bold ${text}`}>{label}</span>
+      <div className="h-2.5 flex-1 rounded-full bg-slate-100">
+        <div className={`h-2.5 rounded-full ${bar}`} style={{ width: `${pct}%` }} />
+      </div>
+      <span className="w-28 shrink-0 text-right text-xs font-extrabold tabular-nums text-slate-700">{value}</span>
+    </div>
+  );
+  return (
+    <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
+      <div className="mb-3 flex items-center justify-between">
+        <h4 className="text-xs font-extrabold uppercase tracking-wider text-slate-600">Income vs Expenses</h4>
+        <span className={`rounded-full px-2.5 py-1 text-[11px] font-bold ${profit >= 0 ? 'bg-emerald-50 text-emerald-700' : 'bg-rose-50 text-rose-700'}`}>
+          {profit >= 0 ? 'Profit' : 'Loss'} {formatMoney(Math.abs(profit))}
+        </span>
+      </div>
+      <div className="space-y-2.5">
+        <Row label="Income" value={formatMoney(inc)} pct={(inc / denom) * 100} bar="bg-emerald-500" text="text-emerald-700" />
+        <Row label="Expenses" value={formatMoney(exp)} pct={(exp / denom) * 100} bar="bg-rose-400" text="text-rose-700" />
+      </div>
+    </section>
+  );
+};
+
+const FLOW_TONES = {
+  emerald: { head: 'border-emerald-100 bg-emerald-50/60 text-emerald-700', chip: 'bg-emerald-100 text-emerald-600' },
+  rose:    { head: 'border-rose-100 bg-rose-50/60 text-rose-700',          chip: 'bg-rose-100 text-rose-600' },
+};
+
+const FlowCard = ({ tone, icon: Icon, title, total, children }) => {
+  const t = FLOW_TONES[tone];
+  return (
+    <section className="overflow-hidden rounded-2xl border border-slate-200 bg-white shadow-sm">
+      <div className={`flex items-center justify-between border-b px-4 py-3 ${t.head}`}>
+        <h4 className="flex items-center gap-2 text-sm font-extrabold">
+          <span className={`flex h-6 w-6 items-center justify-center rounded-full ${t.chip}`}><Icon size={13} /></span>
+          {title}
+        </h4>
+        <span className="text-base font-black tabular-nums">{formatMoney(total)}</span>
+      </div>
+      <div className="px-4 py-1.5">{children}</div>
+    </section>
   );
 };
 
 const Line = ({ label, amount, priorAmount, hint }) => (
-  <div className="flex items-baseline justify-between py-1.5">
-    <div className="flex-1 min-w-0">
-      <span className="font-semibold text-slate-800">{label}</span>
-      {hint && <p className="text-[11px] text-slate-500 mt-0.5">{hint}</p>}
+  <div className="flex items-baseline justify-between border-b border-slate-100 py-2.5 last:border-0">
+    <div className="min-w-0 flex-1">
+      <span className="text-sm font-semibold text-slate-800">{label}</span>
+      {hint && <p className="mt-0.5 text-[11px] text-slate-400">{hint}</p>}
     </div>
-    <div className="text-right pl-3">
-      <div className="font-bold text-slate-900 tabular-nums">{formatMoney(amount)}</div>
+    <div className="pl-3 text-right">
+      <div className="text-sm font-bold tabular-nums text-slate-900">{formatMoney(amount)}</div>
       {priorAmount != null && (
-        <div className="text-[10px] text-slate-500 mt-0.5 flex items-center justify-end gap-1.5">
+        <div className="mt-0.5 flex items-center justify-end gap-1.5 text-[10px] text-slate-400">
           <span>was {formatMoney(priorAmount)}</span>
           <DeltaBadge current={amount} prior={priorAmount} />
         </div>
@@ -299,33 +424,45 @@ const Line = ({ label, amount, priorAmount, hint }) => (
 );
 
 const BreakdownList = ({ items }) => (
-  <div className="pl-3 pb-2 space-y-0.5">
+  <div className="space-y-1 border-b border-slate-100 pb-2.5 pl-3">
     {items.map((row) => (
-      <div key={`${row.id ?? row.name}`} className="flex justify-between text-[12px] text-slate-600">
-        <span className="flex items-center gap-1">
-          <ChevronRight size={10} className="text-slate-400" /> {row.name}
-        </span>
+      <div key={`${row.id ?? row.name}`} className="flex items-center justify-between text-[12px] text-slate-500">
+        <span className="flex items-center gap-1"><ChevronRight size={10} className="text-slate-300" /> {row.name}</span>
         <span className="tabular-nums">{formatMoney(row.amount)}</span>
       </div>
     ))}
   </div>
 );
 
-const Subtotal = ({ label, amount, priorAmount, tone }) => {
-  const cls = tone === 'emerald' ? 'text-emerald-700' : 'text-rose-700';
+const EqTerm = ({ label, value, tone }) => (
+  <div>
+    <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{label}</p>
+    <p className={`text-xl font-extrabold tabular-nums ${tone === 'emerald' ? 'text-emerald-700' : 'text-rose-700'}`}>{value}</p>
+  </div>
+);
+
+const EquationBar = ({ pnl, prior }) => {
+  const net = Number(pnl.netProfit);
+  const positive = net >= 0;
   return (
-    <div className="mt-2 pt-2 border-t border-slate-200 flex items-baseline justify-between">
-      <span className="font-bold uppercase text-[11px] tracking-wider text-slate-600">{label}</span>
-      <div className="text-right">
-        <div className={`font-extrabold text-base tabular-nums ${cls}`}>{formatMoney(amount)}</div>
-        {priorAmount != null && (
-          <div className="text-[10px] text-slate-500 mt-0.5 flex items-center justify-end gap-1.5">
-            <span>was {formatMoney(priorAmount)}</span>
-            <DeltaBadge current={amount} prior={priorAmount} />
-          </div>
-        )}
+    <section className="rounded-2xl border border-slate-200 bg-white px-5 py-4 shadow-sm">
+      <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 text-center">
+        <EqTerm label="Income" value={formatMoney(pnl.totalIncome)} tone="emerald" />
+        <span className="text-2xl font-black text-slate-300">−</span>
+        <EqTerm label="Expenses" value={formatMoney(pnl.totalExpenses)} tone="rose" />
+        <span className="text-2xl font-black text-slate-300">=</span>
+        <div>
+          <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Net {positive ? 'Profit' : 'Loss'}</p>
+          <p className={`text-2xl font-black tabular-nums ${positive ? 'text-emerald-700' : 'text-rose-700'}`}>{formatMoney(Math.abs(net))}</p>
+          {prior && (
+            <div className="mt-0.5 flex items-center justify-center gap-1.5 text-[11px] text-slate-500">
+              <span>prior {formatMoney(prior.netProfit)}</span>
+              <DeltaBadge current={net} prior={prior.netProfit} />
+            </div>
+          )}
+        </div>
       </div>
-    </div>
+    </section>
   );
 };
 
@@ -342,31 +479,6 @@ const GROUP_BY = [
   { value: 'shipment',    label: 'By Shipment' },
 ];
 
-const PERIOD_PRESETS = [
-  { value: '',         label: 'All-time' },
-  { value: 'today',    label: 'Today' },
-  { value: 'week',     label: '7 days' },
-  { value: 'month',    label: 'This month' },
-  { value: 'year',     label: 'This year' },
-];
-
-const startOfToday = () => { const d = new Date(); d.setHours(0,0,0,0); return d.toISOString(); };
-const endOfToday   = () => { const d = new Date(); d.setHours(0,0,0,0); d.setDate(d.getDate()+1); return d.toISOString(); };
-const isoNow       = () => new Date().toISOString();
-const isoDaysAgo   = (n) => { const d = new Date(); d.setDate(d.getDate()-n); return d.toISOString(); };
-const isoStartOfMonth = () => { const d = new Date(); d.setDate(1); d.setHours(0,0,0,0); return d.toISOString(); };
-const isoStartOfYear  = () => { const d = new Date(); d.setMonth(0,1); d.setHours(0,0,0,0); return d.toISOString(); };
-
-const presetRange = (preset) => {
-  switch (preset) {
-    case 'today': return { from: startOfToday(), to: endOfToday() };
-    case 'week':  return { from: isoDaysAgo(7), to: isoNow() };
-    case 'month': return { from: isoStartOfMonth(), to: isoNow() };
-    case 'year':  return { from: isoStartOfYear(), to: isoNow() };
-    default:      return { from: null, to: null };
-  }
-};
-
 const SalesBreakdown = () => {
   const { admin } = useAuth();
   const { catalogProducts, subCategories, suppliers, fetchSalesAggregate } = useData();
@@ -376,7 +488,8 @@ const SalesBreakdown = () => {
   const [subCategoryId, setSubCategoryId] = useState('');
   const [supplierAccountId, setSupplierAccountId] = useState('');
   const [groupBy, setGroupBy] = useState('category');
-  const [period, setPeriod] = useState('month');
+  const [fromDate, setFromDate] = useState(todayLocalIso());
+  const [toDate, setToDate] = useState(todayLocalIso());
 
   const selectedProduct = useMemo(
     () => catalogProducts.find((p) => Number(p.id) === Number(productId)),
@@ -386,17 +499,15 @@ const SalesBreakdown = () => {
   const selectedVariety = varieties.find((v) => Number(v.id) === Number(categoryId));
   const lots = selectedVariety?.usesLots ? subCategories : [];
 
-  const filters = useMemo(() => {
-    const { from, to } = presetRange(period);
-    return {
-      from, to,
-      productId: productId ? Number(productId) : null,
-      categoryId: categoryId ? Number(categoryId) : null,
-      subCategoryId: subCategoryId ? Number(subCategoryId) : null,
-      supplierAccountId: supplierAccountId ? Number(supplierAccountId) : null,
-      groupBy: groupBy || null,
-    };
-  }, [period, productId, categoryId, subCategoryId, supplierAccountId, groupBy]);
+  const filters = useMemo(() => ({
+    from: `${fromDate}T00:00:00`,
+    to: `${nextDayLocalIso(toDate)}T00:00:00`,   // exclusive end — include the whole `toDate`
+    productId: productId ? Number(productId) : null,
+    categoryId: categoryId ? Number(categoryId) : null,
+    subCategoryId: subCategoryId ? Number(subCategoryId) : null,
+    supplierAccountId: supplierAccountId ? Number(supplierAccountId) : null,
+    groupBy: groupBy || null,
+  }), [fromDate, toDate, productId, categoryId, subCategoryId, supplierAccountId, groupBy]);
 
   const { data, isLoading: loading, error: queryError } = useQuery({
     queryKey: queryKeys.sales.aggregate(admin?.wholesalerId, filters),
@@ -407,6 +518,10 @@ const SalesBreakdown = () => {
 
   const summary = data?.summary || {};
   const groups = data?.groups || [];
+
+  const { pageItems: pagedGroups, ...groupPager } = usePagination(
+    groups, 15, [groupBy, fromDate, toDate, productId, categoryId, subCategoryId, supplierAccountId],
+  );
 
   const exportCsv = () => {
     if (!groups.length) return;
@@ -427,8 +542,8 @@ const SalesBreakdown = () => {
       <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
         <div className="mb-3 flex items-center justify-between">
           <div className="flex items-center gap-2">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-100 text-blue-700">
-              <BarChart3 size={14} />
+            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-sm">
+              <BarChart3 size={15} />
             </span>
             <div>
               <h3 className="text-sm font-extrabold text-slate-900">Sales Reports</h3>
@@ -445,20 +560,8 @@ const SalesBreakdown = () => {
           </button>
         </div>
 
-        <div className="mb-3 inline-flex flex-wrap items-center gap-1 rounded-full border border-slate-200 bg-slate-50 p-0.5 text-[11px] font-semibold text-slate-600">
-          <Calendar size={12} className="ml-2 text-slate-400" />
-          {PERIOD_PRESETS.map(({ value, label }) => (
-            <button
-              key={value || 'all'}
-              type="button"
-              onClick={() => setPeriod(value)}
-              className={`px-2.5 py-1 rounded-full transition ${
-                period === value ? 'bg-blue-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              {label}
-            </button>
-          ))}
+        <div className="mb-3">
+          <DateRangeFilter from={fromDate} to={toDate} setFrom={setFromDate} setTo={setToDate} />
         </div>
 
         <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 lg:grid-cols-5">
@@ -488,8 +591,8 @@ const SalesBreakdown = () => {
         <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
           <div className="mb-3 flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-blue-100 text-blue-700">
-                <Filter size={14} />
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-sm">
+                <Filter size={15} />
               </span>
               <h3 className="text-sm font-extrabold text-slate-900">
                 {GROUP_BY.find((g) => g.value === groupBy)?.label || 'Breakdown'}
@@ -503,28 +606,29 @@ const SalesBreakdown = () => {
             <EmptyRow label="No sales match these filters." />
           ) : (
             <div className="overflow-x-auto">
-              <table className="w-full min-w-[640px] text-sm">
+              <table className="w-full min-w-[640px] overflow-hidden rounded-xl text-sm">
                 <thead>
-                  <tr className="border-b border-slate-200 text-left text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                    <th className="py-2 pr-3">Name</th>
-                    <th className="py-2 pr-3 text-right">Sold</th>
-                    <th className="py-2 pr-3 text-right">Quantity</th>
-                    <th className="py-2 pr-3 text-right">Commission</th>
-                    <th className="py-2 pr-3 text-right">Sales</th>
+                  <tr className="border-b border-blue-200 bg-gradient-to-r from-blue-50 to-indigo-50 text-left text-[11px] font-bold uppercase tracking-wider text-blue-900">
+                    <th className="px-3 py-2.5">Name</th>
+                    <th className="px-3 py-2.5 text-right">Sold</th>
+                    <th className="px-3 py-2.5 text-right">Quantity</th>
+                    <th className="px-3 py-2.5 text-right">Commission</th>
+                    <th className="px-3 py-2.5 text-right">Sales</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {groups.map((row) => (
-                    <tr key={`${row.id ?? 'none'}-${row.name}`} className="hover:bg-slate-50">
-                      <td className="py-2 pr-3 font-semibold text-slate-800">{row.name}</td>
-                      <td className="py-2 pr-3 text-right font-extrabold text-slate-900">{formatMoney(row.totalSold)}</td>
-                      <td className="py-2 pr-3 text-right text-slate-700">{formatQty(row.totalQuantity)}</td>
-                      <td className="py-2 pr-3 text-right text-slate-700">{formatMoney(row.commissionEarned)}</td>
-                      <td className="py-2 pr-3 text-right text-slate-700">{row.saleCount}</td>
+                  {pagedGroups.map((row) => (
+                    <tr key={`${row.id ?? 'none'}-${row.name}`} className="transition hover:bg-blue-50/50">
+                      <td className="px-3 py-2.5 font-semibold text-slate-800">{row.name}</td>
+                      <td className="px-3 py-2.5 text-right font-extrabold text-slate-900 tabular-nums">{formatMoney(row.totalSold)}</td>
+                      <td className="px-3 py-2.5 text-right text-slate-700 tabular-nums">{formatQty(row.totalQuantity)}</td>
+                      <td className="px-3 py-2.5 text-right text-slate-700 tabular-nums">{formatMoney(row.commissionEarned)}</td>
+                      <td className="px-3 py-2.5 text-right text-slate-700 tabular-nums">{row.saleCount}</td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+              <TablePager {...groupPager} />
             </div>
           )}
         </section>

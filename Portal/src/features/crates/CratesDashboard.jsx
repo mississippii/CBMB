@@ -436,27 +436,27 @@ const BoxDashboard = () => {
           </div>
           <div className="quick-action-list">
             <button onClick={() => setShowCustomerModal(true)} className="quick-action-row">
-              <span className="quick-action-icon" style={{ background: '#eff6ff', color: '#1d63ed' }}><Users size={14} /></span>
+              <span className="quick-action-icon" style={{ background: '#0000FF', color: '#fff' }}><Users size={14} /></span>
               <span className="quick-action-label">Customer Crates</span>
               <ArrowUpRight size={13} className="quick-action-arrow" />
             </button>
             <button onClick={() => setShowSupplierModal(true)} className="quick-action-row">
-              <span className="quick-action-icon" style={{ background: '#fffbeb', color: '#b45309' }}><UserCheck size={14} /></span>
+              <span className="quick-action-icon" style={{ background: '#FFFF00', color: '#000' }}><UserCheck size={14} /></span>
               <span className="quick-action-label">Supplier Crates</span>
               <ArrowUpRight size={13} className="quick-action-arrow" />
             </button>
             <button onClick={openLossModal} className="quick-action-row">
-              <span className="quick-action-icon" style={{ background: '#fff1f2', color: '#be123c' }}><AlertTriangle size={14} /></span>
+              <span className="quick-action-icon" style={{ background: '#FF0000', color: '#fff' }}><AlertTriangle size={14} /></span>
               <span className="quick-action-label">Mark Lost / Damaged</span>
               <ArrowUpRight size={13} className="quick-action-arrow" />
             </button>
             <button onClick={openSellModal} className="quick-action-row">
-              <span className="quick-action-icon" style={{ background: '#ecfdf5', color: '#047857' }}><ShoppingCart size={14} /></span>
+              <span className="quick-action-icon" style={{ background: '#008000', color: '#fff' }}><ShoppingCart size={14} /></span>
               <span className="quick-action-label">Sell Crates</span>
               <ArrowUpRight size={13} className="quick-action-arrow" />
             </button>
             <button onClick={openPurchaseModal} className="quick-action-row quick-action-row-primary">
-              <span className="quick-action-icon" style={{ background: 'rgba(255,255,255,0.2)', color: '#fff' }}><Plus size={14} /></span>
+              <span className="quick-action-icon" style={{ background: '#FF00FF', color: '#fff' }}><Plus size={14} /></span>
               <span className="quick-action-label">Add New Crates</span>
               <ArrowUpRight size={13} className="quick-action-arrow" />
             </button>
@@ -641,7 +641,7 @@ const BoxDashboard = () => {
           <div className="modal-content" style={{ maxWidth: '26rem' }}>
             <div className="modal-header">
               <div className="flex items-center gap-2.5">
-                <div className="modal-icon-circle bg-blue-100 text-blue-700"><Plus size={18} /></div>
+                <div className="modal-icon-circle bg-gradient-to-br from-blue-500 to-indigo-600 text-white"><Plus size={18} /></div>
                 <div><h2>Add New Crates</h2></div>
               </div>
               <button onClick={() => setShowPurchaseModal(false)} className="modal-close-btn">✕</button>
@@ -700,7 +700,7 @@ const BoxDashboard = () => {
           <div className="modal-content" style={{ maxWidth: '26rem' }}>
             <div className="modal-header">
               <div className="flex items-center gap-2.5">
-                <div className="modal-icon-circle bg-rose-100 text-rose-700"><AlertTriangle size={18} /></div>
+                <div className="modal-icon-circle bg-gradient-to-br from-rose-500 to-red-600 text-white"><AlertTriangle size={18} /></div>
                 <div><h2>Mark Lost / Damaged</h2></div>
               </div>
               <button onClick={() => setShowLossModal(false)} className="modal-close-btn">✕</button>
@@ -765,7 +765,7 @@ const BoxDashboard = () => {
           <div className="modal-content" style={{ maxWidth: '34rem' }}>
             <div className="modal-header">
               <div className="flex items-center gap-2.5">
-                <div className="modal-icon-circle bg-blue-100 text-blue-700"><Users size={18} /></div>
+                <div className="modal-icon-circle bg-gradient-to-br from-blue-500 to-indigo-600 text-white"><Users size={18} /></div>
                 <div>
                   <h2>Customer Crate Movement</h2>
                 </div>
@@ -873,7 +873,7 @@ const BoxDashboard = () => {
           <div className="modal-content" style={{ maxWidth: '32rem' }}>
             <div className="modal-header">
               <div className="flex items-center gap-2.5">
-                <div className="modal-icon-circle bg-blue-100 text-blue-700"><ArrowRightLeft size={18} /></div>
+                <div className="modal-icon-circle bg-gradient-to-br from-blue-500 to-indigo-600 text-white"><ArrowRightLeft size={18} /></div>
                 <div>
                   <h2>Supplier Crate Movement</h2>
                 </div>
@@ -981,7 +981,7 @@ const BoxDashboard = () => {
           <div className="modal-content" style={{ maxWidth: '28rem' }}>
             <div className="modal-header">
               <div className="flex items-center gap-2.5">
-                <div className="modal-icon-circle bg-emerald-100 text-emerald-700"><ShoppingCart size={18} /></div>
+                <div className="modal-icon-circle bg-gradient-to-br from-emerald-500 to-green-600 text-white"><ShoppingCart size={18} /></div>
                 <div>
                   <h2>Sell Crates</h2>
                 </div>

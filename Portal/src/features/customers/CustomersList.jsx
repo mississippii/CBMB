@@ -4,6 +4,7 @@ import {
 } from 'lucide-react';
 import { useData } from '../../data/DataContext';
 import { useToast } from '../../shared/components/Toast';
+import { TablePager, usePagination } from '../../shared/components';
 import CustomerDetail from './CustomerDetail';
 
 const EMPTY_FORM = {
@@ -104,6 +105,10 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
         default: return 0;
       }
     });
+
+  const { pageItems: pagedCustomers, ...customerPager } = usePagination(
+    filteredCustomers, 15, [search, sortBy, filterDue, showDisabled],
+  );
 
   if (selectedCustomerId) {
     return <CustomerDetail customerId={selectedCustomerId} onBack={() => setSelectedCustomerId(null)} />;
@@ -285,7 +290,7 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
           <>
             {/* Mobile card view */}
             <div className="space-y-3 lg:hidden">
-              {filteredCustomers.map((c) => (
+              {pagedCustomers.map((c) => (
                 <div
                   key={c.id}
                   onClick={() => setSelectedCustomerId(c.id)}
@@ -333,7 +338,7 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredCustomers.map((c) => (
+                  {pagedCustomers.map((c) => (
                     <tr
                       key={c.id}
                       onClick={() => setSelectedCustomerId(c.id)}
@@ -365,6 +370,8 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
                 </tbody>
               </table>
             </div>
+
+            <TablePager {...customerPager} />
           </>
         )}
       </div>

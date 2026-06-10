@@ -57,24 +57,6 @@ public class PaymentController {
         return paymentService.paySupplierProduct(wholesalerId, request);
     }
 
-    @PostMapping("/supplier/commission-receive")
-    @ResponseStatus(HttpStatus.CREATED)
-    public PaymentOperationResponse receiveSupplierCommission(
-            @PathVariable Long wholesalerId,
-            @RequestBody SupplierSettlementRequest request
-    ) {
-        return paymentService.receiveSupplierCommission(wholesalerId, request);
-    }
-
-    @PostMapping("/supplier/expense-receive")
-    @ResponseStatus(HttpStatus.CREATED)
-    public PaymentOperationResponse receiveSupplierExpense(
-            @PathVariable Long wholesalerId,
-            @RequestBody SupplierSettlementRequest request
-    ) {
-        return paymentService.receiveSupplierExpense(wholesalerId, request);
-    }
-
     @PostMapping("/supplier/crate-give")
     @ResponseStatus(HttpStatus.CREATED)
     public PaymentOperationResponse giveSupplierCrates(

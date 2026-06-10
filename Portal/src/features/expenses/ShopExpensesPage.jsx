@@ -1,10 +1,11 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Ban, Plus, Wallet, Calendar } from 'lucide-react';
+import { Ban, Plus, Wallet } from 'lucide-react';
 import { useData } from '../../data/DataContext';
 import { useAuth } from '../auth/AuthContext';
 import { queryKeys } from '../../services/queryKeys';
 import Modal from '../../shared/components/Modal';
+import { TablePager, usePagination, DateRangeFilter } from '../../shared/components';
 
 const fmt = (value) => '৳ ' + (Number(value) || 0).toLocaleString();
 
@@ -16,19 +17,11 @@ const PAYMENT_METHODS = [
   { value: 'OTHER', label: 'Other' },
 ];
 
-const todayIso = () => new Date().toISOString().split('T')[0];
-const isoDaysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().split('T')[0]; };
-const isoStartOfMonth = () => { const d = new Date(); d.setDate(1); return d.toISOString().split('T')[0]; };
-const isoStartOfYear = () => { const d = new Date(); d.setMonth(0, 1); return d.toISOString().split('T')[0]; };
+// Local calendar date (yyyy-mm-dd) — avoids the UTC day-shift of toISOString().
+const isoLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const todayIso = () => isoLocal(new Date());
 const toStartOfDay = (s) => new Date(`${s}T00:00:00`).toISOString();
 const toEndOfDay = (s) => new Date(`${s}T23:59:59.999`).toISOString();
-
-const PERIOD_PRESETS = [
-  { value: 'today', label: 'Today' },
-  { value: 'week',  label: '7 days' },
-  { value: 'month', label: 'Month' },
-  { value: 'year',  label: 'Year' },
-];
 
 const ShopExpensesPage = () => {
   const { admin } = useAuth();
@@ -92,19 +85,7 @@ const ShopExpensesPage = () => {
     };
   }, [expenses]);
 
-  const applyPreset = (preset) => {
-    if (preset === 'today') { setStartDate(todayIso()); setEndDate(todayIso()); return; }
-    if (preset === 'week')  { setStartDate(isoDaysAgo(6)); setEndDate(todayIso()); return; }
-    if (preset === 'month') { setStartDate(isoStartOfMonth()); setEndDate(todayIso()); return; }
-    if (preset === 'year')  { setStartDate(isoStartOfYear()); setEndDate(todayIso()); return; }
-  };
-  const isPresetActive = (preset) => {
-    if (preset === 'today') return startDate === todayIso() && endDate === todayIso();
-    if (preset === 'week')  return startDate === isoDaysAgo(6) && endDate === todayIso();
-    if (preset === 'month') return startDate === isoStartOfMonth() && endDate === todayIso();
-    if (preset === 'year')  return startDate === isoStartOfYear() && endDate === todayIso();
-    return false;
-  };
+  const { pageItems: pagedExpenses, ...expensePager } = usePagination(expenses, 15, [startDate, endDate]);
 
   const resetForm = () => {
     setFormCategoryId(''); setFormAmount(''); setFormPaymentMethod('CASH');
@@ -165,27 +146,7 @@ const ShopExpensesPage = () => {
 
       {/* Filters + KPIs */}
       <section className="supplier-panel">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white p-0.5 text-xs font-semibold">
-            {PERIOD_PRESETS.map(({ value, label }) => (
-              <button key={value} type="button" onClick={() => applyPreset(value)}
-                className={`rounded-full px-3 py-1.5 transition ${isPresetActive(value) ? 'bg-teal-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>
-                {label}
-              </button>
-            ))}
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5">
-              <Calendar size={13} className="text-slate-400" />
-              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="bg-transparent text-xs font-semibold text-slate-700 outline-none" />
-            </label>
-            <span className="text-slate-300">–</span>
-            <label className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5">
-              <Calendar size={13} className="text-slate-400" />
-              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="bg-transparent text-xs font-semibold text-slate-700 outline-none" />
-            </label>
-          </div>
-        </div>
+        <DateRangeFilter from={startDate} to={endDate} setFrom={setStartDate} setTo={setEndDate} />
 
         <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
           <div className="rounded-2xl border border-rose-200 bg-gradient-to-br from-rose-50 to-white px-3.5 py-3 shadow-sm">
@@ -225,7 +186,7 @@ const ShopExpensesPage = () => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {expenses.map((expense) => {
+                {pagedExpenses.map((expense) => {
                   const cancelled = expense.status === 'CANCELLED';
                   return (
                     <tr key={expense.id} className={`transition ${cancelled ? 'opacity-50 line-through' : 'hover:bg-slate-50'}`}>
@@ -251,6 +212,7 @@ const ShopExpensesPage = () => {
                 })}
               </tbody>
             </table>
+            <TablePager {...expensePager} />
           </div>
         )}
         {error && (<div className="status-error mt-3"><span>!</span><span>{error}</span></div>)}

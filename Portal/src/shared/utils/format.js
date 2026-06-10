@@ -79,8 +79,13 @@ export const formatTime = (value) => {
   return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
 };
 
-/** ISO yyyy-mm-dd string (e.g. for storing in date pickers). */
-export const dateOnly = (value) => {
-  if (!value) return new Date().toISOString().split('T')[0];
-  return new Date(value).toISOString().split('T')[0];
+/** Local calendar date as yyyy-mm-dd. Unlike toISOString(), it never shifts the day
+ *  across the UTC boundary — use this for "today" in date pickers and day filters. */
+export const localDateIso = (value) => {
+  const d = value == null ? new Date() : (value instanceof Date ? value : new Date(value));
+  if (Number.isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
+
+/** ISO yyyy-mm-dd string (e.g. for storing in date pickers). */
+export const dateOnly = (value) => (value ? localDateIso(value) : localDateIso());

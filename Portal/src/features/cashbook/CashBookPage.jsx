@@ -11,23 +11,24 @@ import { queryKeys } from '../../services/queryKeys';
 
 const fmt = (value) => '৳ ' + (Number(value) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
-const todayIso = () => new Date().toISOString().split('T')[0];
+// Local calendar date (yyyy-mm-dd). toISOString() would report the UTC day, which
+// rolls a day early/late for users off UTC (e.g. an early-morning market in UTC+6).
+const isoLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const todayIso = () => isoLocal(new Date());
 const shiftIso = (iso, days) => {
   const d = new Date(`${iso}T00:00:00`);
   d.setDate(d.getDate() + days);
-  return d.toISOString().split('T')[0];
+  return isoLocal(d);
 };
 const prettyDate = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
 
 const INFLOW_ROWS = [
   { key: 'cashSales',           label: 'Cash sales' },
+  { key: 'crateCashSales',      label: 'Crate sales (walk-in)' },
   { key: 'customerCollections', label: 'Customer collections' },
-  { key: 'commissionReceived',  label: 'Commission received' },
-  { key: 'expenseReimbursed',   label: 'Expense reimbursed' },
 ];
 const OUTFLOW_ROWS = [
   { key: 'supplierPayments',  label: 'Supplier payments' },
-  { key: 'supplierAdvances',  label: 'Shipment advances' },
   { key: 'shipmentExpenses',  label: 'Shipment expenses' },
   { key: 'shopExpenses',      label: 'Shop expenses' },
 ];
@@ -128,7 +129,7 @@ const CashBookPage = () => {
       {/* Header */}
       <section className="inventory-hero">
         <div className="flex items-start gap-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-teal-100 text-teal-700">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-teal-500 to-emerald-600 text-white shadow-md shadow-teal-500/30">
             <BookOpenCheck size={22} />
           </div>
           <div>

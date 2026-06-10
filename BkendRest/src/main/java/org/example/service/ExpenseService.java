@@ -200,34 +200,23 @@ public class ExpenseService {
                     : zero(saleItemRepository.sumLineTotalByDelivery(lot.getId()));
             commissionGross = commissionGross.add(soldInPeriod.multiply(rate).divide(BigDecimal.valueOf(100), 2, java.math.RoundingMode.HALF_UP));
         }
-        // Subtract commission already collected (via Payments commission-receive or Settle).
-        BigDecimal commissionReceived = zero(supplierSettlementRepository
-                .sumAmountBySupplierAndType(wholesalerId, account.getId(), SettlementType.COMMISSION_RECEIVE));
-        BigDecimal commission = commissionGross.subtract(commissionReceived);
-        if (commission.signum() < 0) {
-            commission = BigDecimal.ZERO;
-        }
+        // Commission is the full per-lot deduction from the supplier's due.
+        BigDecimal commission = commissionGross;
 
         BigDecimal productPaid = zero(supplierSettlementRepository
                 .sumAmountBySupplierAndType(wholesalerId, account.getId(), SettlementType.PRODUCT_PAYMENT));
 
-        // Net payable is the sale-side balance only. Other expenses are a separate
-        // receivable from the supplier and are NOT deducted here.
+        // Net payable is the sale-side balance only. Fronted expenses are shown
+        // separately as the outstanding expenseDue below.
         BigDecimal netPayable = totalSale.subtract(commission).subtract(productPaid);
 
-        // Other expense: what the wholesaler fronted (expenseTotal) minus what the
-        // supplier has paid back (expenseReceived) leaves the outstanding expenseDue.
+        // Expense the wholesaler fronted on the supplier's behalf, still outstanding.
         BigDecimal expenseTotal = zero(otherDueBalanceRepository.sumDueBySupplier(wholesalerId, account.getId()));
-        BigDecimal expenseReceived = zero(supplierSettlementRepository
-                .sumAmountBySupplierAndType(wholesalerId, account.getId(), SettlementType.EXPENSE_RECEIVE));
-        BigDecimal expenseDue = expenseTotal.subtract(expenseReceived);
-        if (expenseDue.signum() < 0) {
-            expenseDue = BigDecimal.ZERO;
-        }
+        BigDecimal expenseDue = expenseTotal;
 
         return new SupplierStatementResponse(
                 normalized, totalSale, commission, productPaid, netPayable,
-                expenseTotal, expenseReceived, expenseDue
+                expenseTotal, expenseDue
         );
     }
 

@@ -5,4 +5,6 @@ export { default as EmptyState } from './EmptyState';
 export { default as Avatar } from './Avatar';
 export { default as Badge } from './Badge';
 export { default as Pagination } from './Pagination';
+export { default as TablePager, usePagination } from './TablePager';
+export { default as DateRangeFilter, todayLocalIso, nextDayLocalIso } from './DateRangeFilter';
 export { default as Skeleton } from './Skeleton';
