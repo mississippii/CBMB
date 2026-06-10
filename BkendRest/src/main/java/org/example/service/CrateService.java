@@ -164,7 +164,7 @@ public class CrateService {
      */
     @Transactional
     public CrateDashboardResponse setCratePrice(Long wholesalerId, org.example.dto.SetCratePriceRequest request) {
-        findWholesaler(wholesalerId);
+        Wholesaler wholesaler = findWholesaler(wholesalerId);
         if (request == null || request.purchasePrice() == null) {
             throw new BadRequestException("purchasePrice is required.");
         }
@@ -172,8 +172,15 @@ public class CrateService {
             throw new BadRequestException("purchasePrice must be zero or positive.");
         }
         BoxType boxType = findBoxType(wholesalerId, request.crateType());
-        boxType.setPurchasePrice(money(request.purchasePrice()));
+        // Crate cost is always rounded UP to a whole taka.
+        BigDecimal price = money(request.purchasePrice()).setScale(0, java.math.RoundingMode.CEILING);
+        boxType.setPurchasePrice(price);
         boxTypeRepository.save(boxType);
+        // Manual override of the weighted-average cost (seed/correct). Future purchases
+        // recompute the WAC from this basis.
+        BoxInventory inventory = findOrCreateInventory(wholesaler, boxType);
+        inventory.setWeightedAvgCost(price);
+        boxInventoryRepository.save(inventory);
         return getDashboard(wholesalerId);
     }
 
@@ -193,7 +200,9 @@ public class CrateService {
         boxType.setPurchasePrice(batchUnitPrice);
         boxTypeRepository.save(boxType);
 
-        // Recompute weighted-average cost across stock currently on the books.
+        // Recompute weighted-average cost across stock currently on the books (lost/damaged
+        // crates are NOT part of the base). The per-crate cost is always rounded UP to a
+        // whole taka (e.g. 183.33 → 184).
         int existingStock = inventory.getInHand() + inventory.getWithCustomers() + inventory.getWithSuppliers();
         BigDecimal oldWac = inventory.getWeightedAvgCost() == null ? BigDecimal.ZERO : inventory.getWeightedAvgCost();
         BigDecimal oldValue = BigDecimal.valueOf(existingStock).multiply(oldWac);
@@ -201,7 +210,7 @@ public class CrateService {
         int totalStock = existingStock + quantity;
         BigDecimal newWac = totalStock == 0
                 ? BigDecimal.ZERO
-                : oldValue.add(newValue).divide(BigDecimal.valueOf(totalStock), 2, java.math.RoundingMode.HALF_UP);
+                : oldValue.add(newValue).divide(BigDecimal.valueOf(totalStock), 0, java.math.RoundingMode.CEILING);
         inventory.setWeightedAvgCost(newWac);
 
         inventory.setTotalOwned(inventory.getTotalOwned() + quantity);
@@ -404,7 +413,8 @@ public class CrateService {
                 withCustomers,
                 withSuppliers,
                 lostDamaged,
-                boxType.getPurchasePrice() == null ? BigDecimal.ZERO : boxType.getPurchasePrice()
+                boxType.getPurchasePrice() == null ? BigDecimal.ZERO : boxType.getPurchasePrice(),
+                inventory == null || inventory.getWeightedAvgCost() == null ? BigDecimal.ZERO : inventory.getWeightedAvgCost()
         );
     }
 

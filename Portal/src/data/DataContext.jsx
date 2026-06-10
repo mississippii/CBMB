@@ -65,6 +65,7 @@ const mapCrateDashboard = (dashboard) => {
       withCustomers: Number(item.withCustomers) || 0,
       lost: Number(item.lostDamaged) || 0,
       purchasePrice: Number(item.purchasePrice) || 0,
+      weightedAvgCost: Number(item.weightedAvgCost) || 0,
     };
   });
   return {
@@ -166,6 +167,8 @@ const mapShipment = (shipment) => ({
   netPayable: roundMoney(Number(shipment.netPayable) || 0),
   expenseTotal: roundMoney(Number(shipment.expenseTotal) || 0),
   expenseDue: roundMoney(Number(shipment.expenseDue) || 0),
+  totalUnitsSold: roundMoney(Number(shipment.totalUnitsSold) || 0),
+  totalKgSold: roundMoney(Number(shipment.totalKgSold) || 0),
   items: (shipment.items || []).map((item) => ({
     id: item.id,
     inventoryId: item.inventoryId,
@@ -176,6 +179,7 @@ const mapShipment = (shipment) => ({
     subCategoryId: item.subCategoryId || null,
     subCategoryName: item.subCategoryName || '',
     quantity: roundMoney(Number(item.quantity) || 0),
+    remaining: roundMoney(Number(item.inventoryQuantityOnHand) || 0),
     unit: String(item.unit || '').toLowerCase(),
     note: item.note || '',
   })),
@@ -203,6 +207,7 @@ const mapTransaction = (transaction) => ({
   subCategoryName: transaction.subCategoryName || '',
   quantity: Number(transaction.quantity) || 0,
   unit: String(transaction.unit || '').toLowerCase(),
+  saleWeightKg: Number(transaction.saleWeightKg) || 0,
   unitPrice: Number(transaction.unitPrice) || 0,
   totalAmount: Number(transaction.saleAmount) || 0,
   grossAmount: Number(transaction.grossAmount) || 0,
@@ -212,6 +217,7 @@ const mapTransaction = (transaction) => ({
   cratesReturned: Number(transaction.cratesReturned) || 0,
   paymentOperationType: transaction.paymentType || '',
   paymentType: transaction.paymentType || transaction.description || '',
+  paymentMethod: transaction.paymentMethod || '',
   note: transaction.description || '',
 });
 
@@ -260,6 +266,7 @@ export const DataProvider = ({ children }) => {
     },
     // "Money event" = a write that moves money or due. Touches transaction feed,
     // dashboard rollup, and the sales aggregate (commission earned changes).
+    cash:         () => queryClient.invalidateQueries({ queryKey: queryKeys.cash.root(wholesalerId) }),
     moneyEvent: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.transactions.root(wholesalerId) });
       queryClient.invalidateQueries({ queryKey: ['dashboardSummary', wholesalerId] });
@@ -627,6 +634,7 @@ export const DataProvider = ({ children }) => {
       paymentAmount,
       crateType: saleData.crateType || null,
       cratesGiven: Number(saleData.cratesGiven) || 0,
+      paymentMethod: saleData.paymentMethod || null,
     });
 
     setSupplierProducts((prev) =>
@@ -868,12 +876,43 @@ export const DataProvider = ({ children }) => {
     return response;
   };
 
+  const fetchDailyCash = async (date = null) => {
+    if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
+    return postJson(apiPaths.cashDaily(admin.wholesalerId), { date });
+  };
+
+  const closeCashDay = async (payload) => {
+    if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
+    const response = await postJson(apiPaths.cashClose(admin.wholesalerId), payload);
+    invalidate.cash();
+    return response;
+  };
+
+  const reopenCashDay = async (date = null) => {
+    if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
+    const response = await postJson(apiPaths.cashReopen(admin.wholesalerId), { date });
+    invalidate.cash();
+    return response;
+  };
+
   // Read-side fetchers exposed so callers can wrap them in useQuery while still
   // using the same response mapping the eager DataContext fetch uses.
   const fetchShipments = async () => {
     if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
     const data = await postJson(apiPaths.supplierDeliveriesList(admin.wholesalerId));
     return asArray(data).map(mapShipment);
+  };
+
+  // Edit a shipment's label fields (name / note) only.
+  const updateShipment = async (deliveryId, { name, note }) => {
+    if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
+    const data = await postJson(apiPaths.supplierDeliveriesUpdate(admin.wholesalerId), {
+      deliveryId: Number(deliveryId),
+      name,
+      note,
+    });
+    invalidate.shipments();
+    return mapShipment(data);
   };
 
   const fetchInventoryList = async () => {
@@ -940,6 +979,26 @@ export const DataProvider = ({ children }) => {
     invalidate.transactions();
     if (customerAccountId) invalidate.moneyEvent();
     return mapped;
+  };
+
+  // Permanent customer borrows one or more crate types in a single record.
+  // lines: [{ crateType, quantity }]
+  const borrowCustomerCrates = async (customerId, lines, note) => {
+    if (!admin?.wholesalerId) {
+      throw new Error('Wholesaler profile not found for this user.');
+    }
+    const crates = (lines || [])
+      .map((l) => ({ crateType: String(l.crateType || '').toUpperCase(), quantity: Math.max(0, Math.floor(Number(l.quantity) || 0)) }))
+      .filter((l) => l.crateType && l.quantity > 0);
+    if (crates.length === 0) throw new Error('Add at least one crate line.');
+    await postJson(apiPaths.paymentsCustomerCrateBorrow(admin.wholesalerId), {
+      wholesalerCustomerId: Number(customerId),
+      crates,
+      note: note || null,
+    });
+    invalidate.crates();
+    invalidate.transactions();
+    invalidate.moneyEvent();
   };
 
   /** Mark crates lost/damaged. Loss is always absorbed against crate capital at WAC. */
@@ -1014,6 +1073,7 @@ export const DataProvider = ({ children }) => {
         markCratesLost,
         setCratePrice,
         sellCrates,
+        borrowCustomerCrates,
         getCustomerProfile,
         getSupplierProfile,
         fetchDashboardSummary,
@@ -1026,7 +1086,11 @@ export const DataProvider = ({ children }) => {
         fetchShopExpenses,
         createShopExpense,
         cancelShopExpense,
+        fetchDailyCash,
+        closeCashDay,
+        reopenCashDay,
         fetchShipments,
+        updateShipment,
         fetchInventoryList,
       }}
     >

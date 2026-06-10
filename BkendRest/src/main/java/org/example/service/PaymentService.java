@@ -69,6 +69,7 @@ public class PaymentService {
     private final BoxBalanceRepository boxBalanceRepository;
     private final BoxLedgerRepository boxLedgerRepository;
     private final ExpensePaydownService expensePaydownService;
+    private final SupplierDueService supplierDueService;
 
     public PaymentService(
             WholesalerRepository wholesalerRepository,
@@ -84,7 +85,8 @@ public class PaymentService {
             BoxInventoryRepository boxInventoryRepository,
             BoxBalanceRepository boxBalanceRepository,
             BoxLedgerRepository boxLedgerRepository,
-            ExpensePaydownService expensePaydownService
+            ExpensePaydownService expensePaydownService,
+            SupplierDueService supplierDueService
     ) {
         this.wholesalerRepository = wholesalerRepository;
         this.wholesalerCustomerRepository = wholesalerCustomerRepository;
@@ -100,6 +102,7 @@ public class PaymentService {
         this.boxBalanceRepository = boxBalanceRepository;
         this.boxLedgerRepository = boxLedgerRepository;
         this.expensePaydownService = expensePaydownService;
+        this.supplierDueService = supplierDueService;
     }
 
     @Transactional
@@ -214,13 +217,12 @@ public class PaymentService {
         Wholesaler wholesaler = findWholesaler(wholesalerId);
         WholesalerSupplier supplierAccount = findSupplierAccount(wholesalerId, request.wholesalerSupplierId());
         BigDecimal amount = positive(request.amount(), "Amount must be greater than zero.");
-        BigDecimal previousDue = currentBalance(wholesaler, PartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), supplierAccount.getOpeningDue());
+        // Net due (sold − commission − expense − payments). Overpaying is allowed and
+        // pushes the due negative (an advance / credit the supplier holds).
+        BigDecimal previousDue = supplierDueService.netDue(wholesalerId, supplierAccount);
         BigDecimal dueAfter = previousDue;
 
         if (reduceDue) {
-            if (amount.compareTo(previousDue) > 0) {
-                throw new BadRequestException("Supplier payment cannot be greater than supplier payable amount.");
-            }
             dueAfter = money(previousDue.subtract(amount));
             AccountBalance balance = getOrCreateBalance(wholesaler, PartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), supplierAccount.getOpeningDue());
             balance.setBalance(dueAfter);
@@ -265,7 +267,7 @@ public class PaymentService {
             crateLines.add(new CrateTypeQuantity(line.getKey(), line.getValue()));
         }
 
-        BigDecimal currentDue = currentBalance(wholesaler, PartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), supplierAccount.getOpeningDue());
+        BigDecimal currentDue = supplierDueService.netDue(wholesalerId, supplierAccount);
         String operationType = giveToSupplier ? "SUPPLIER_CRATE_GIVE" : "SUPPLIER_CRATE_RETURN";
         String verb = giveToSupplier ? "Crates given to supplier" : "Crates returned from supplier";
         String description = verb + " — " + describeLines(crateLines);

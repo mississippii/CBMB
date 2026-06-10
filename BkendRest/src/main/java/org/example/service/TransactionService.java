@@ -120,6 +120,7 @@ public class TransactionService {
                 item == null || item.getSubCategory() == null ? null : item.getSubCategory().getName(),
                 item == null ? null : item.getQuantity(),
                 item == null ? null : item.getUnit().name(),
+                item == null ? null : item.getSaleWeightKg(),
                 item == null ? null : item.getUnitPrice(),
                 transaction.getSaleAmount(),
                 sale == null ? null : sale.getGrossAmount(),
@@ -128,6 +129,9 @@ public class TransactionService {
                 transaction.getDueAmount(),
                 payment == null ? 0 : payment.getBoxesReturned(),
                 payment == null ? null : payment.getPaymentType().name(),
+                sale != null ? sale.getPaymentMethod().name()
+                        : payment != null ? payment.getPaymentMethod().name()
+                        : null,
                 transaction.getDescription(),
                 transaction.getCreatedAt()
         );

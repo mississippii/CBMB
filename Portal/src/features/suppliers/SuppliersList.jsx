@@ -164,7 +164,6 @@ const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
             <div className="modal-header">
               <div>
                 <h2>Add New Supplier</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Fill in supplier details below</p>
               </div>
               <button onClick={closeForm} className="modal-close-btn">✕</button>
             </div>
@@ -295,7 +294,6 @@ const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
           <div className="empty-state">
             <UserCheck size={36} className="empty-state-icon" />
             <p className="empty-state-title">No suppliers yet</p>
-            <p className="empty-state-sub">Add your first supplier to start receiving shipments.</p>
             <button onClick={() => setShowForm(true)} className="btn-primary mt-3 flex items-center gap-2 mx-auto">
               <Plus size={15} /> Add Supplier
             </button>
@@ -304,7 +302,6 @@ const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
           <div className="empty-state">
             <Search size={32} className="empty-state-icon" />
             <p className="empty-state-title">No results found</p>
-            <p className="empty-state-sub">Try a different name, business or phone.</p>
           </div>
         ) : (
           <>
@@ -314,8 +311,14 @@ const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
                 const categories = [...new Set(
                   supplierProducts.filter((p) => p.supplierId === supplier.id).map((p) => p.category)
                 )];
+                const net = Number(supplier.amountDue || 0);
+                const advance = net < 0 ? -net : 0;
                 return (
-                  <div key={supplier.id} className="supplier-card">
+                  <div
+                    key={supplier.id}
+                    onClick={() => setSelectedSupplierId(supplier.id)}
+                    className="supplier-card cursor-pointer"
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-center gap-3 min-w-0">
                         <div className="supplier-card-avatar">
@@ -329,18 +332,19 @@ const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
                           <p className="text-xs text-slate-500 truncate">{supplier.contact}</p>
                         </div>
                       </div>
-                      <button
-                        onClick={() => setSelectedSupplierId(supplier.id)}
-                        className="btn-secondary !py-1.5 !px-3 text-xs shrink-0"
-                      >
-                        Profile
-                      </button>
                     </div>
                     <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
-                      <div className="rounded-lg bg-red-50 px-2 py-2">
-                        <p className="text-slate-500">Due</p>
-                        <p className="font-bold text-red-600">৳{supplier.amountDue.toLocaleString()}</p>
-                      </div>
+                      {advance > 0 ? (
+                        <div className="rounded-lg bg-emerald-50 px-2 py-2">
+                          <p className="text-slate-500">Advance</p>
+                          <p className="font-bold text-emerald-600">৳{advance.toLocaleString()}</p>
+                        </div>
+                      ) : (
+                        <div className="rounded-lg bg-red-50 px-2 py-2">
+                          <p className="text-slate-500">Due</p>
+                          <p className="font-bold text-red-600">৳{net.toLocaleString()}</p>
+                        </div>
+                      )}
                       <div className="rounded-lg bg-blue-50 px-2 py-2">
                         <p className="text-slate-500">Comm.</p>
                         <p className="font-bold text-blue-700">{supplier.commissionRate}%</p>
@@ -360,57 +364,56 @@ const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
 
             {/* Desktop table view */}
             <div className="hidden lg:block overflow-x-auto rounded-xl border border-slate-200">
-              <table className="w-full text-sm min-w-[860px]">
+              <table className="center-table w-full text-sm min-w-[860px]">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200">
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">Supplier</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">Business</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">Phone</th>
-                    <th className="px-4 py-3 text-right font-semibold text-slate-700">Amount Due</th>
-                    <th className="px-4 py-3 text-center font-semibold text-slate-700">Commission</th>
-                    <th className="px-4 py-3 text-center font-semibold text-slate-700">Crate Due</th>
-                    <th className="px-4 py-3 text-center font-semibold text-slate-700">Action</th>
+                    <th className="px-4 py-3 font-semibold text-slate-700">Supplier</th>
+                    <th className="px-4 py-3 font-semibold text-slate-700">Business Name</th>
+                    <th className="px-4 py-3 font-semibold text-slate-700">Location</th>
+                    <th className="px-4 py-3 font-semibold text-slate-700">Phone</th>
+                    <th className="px-4 py-3 font-semibold text-slate-700">Amount Due</th>
+                    <th className="px-4 py-3 font-semibold text-slate-700">Advance Paid</th>
+                    <th className="px-4 py-3 font-semibold text-slate-700">Crate Due</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {filteredSuppliers.map((supplier) => (
-                    <tr key={supplier.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2.5">
-                          <div className="supplier-card-avatar !w-8 !h-8 !text-xs">
-                            {supplier.name?.charAt(0).toUpperCase() || 'S'}
+                  {filteredSuppliers.map((supplier) => {
+                    const net = Number(supplier.amountDue || 0);
+                    const due = net > 0 ? net : 0;
+                    const advance = net < 0 ? -net : 0;
+                    return (
+                      <tr
+                        key={supplier.id}
+                        onClick={() => setSelectedSupplierId(supplier.id)}
+                        className="cursor-pointer hover:bg-slate-50 transition-colors"
+                      >
+                        <td className="px-4 py-3">
+                          <div className="flex items-center justify-center gap-2">
+                            <span className="font-semibold text-slate-900">{supplier.name}</span>
+                            {supplier.status === 'DISABLED' && (
+                              <span className="badge badge-rose">Disabled</span>
+                            )}
                           </div>
-                          <p className="font-semibold text-slate-900">{supplier.name}</p>
-                          {supplier.status === 'DISABLED' && (
-                            <span className="badge badge-rose">Disabled</span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-slate-700">
-                        {supplier.businessName || <span className="text-slate-400">—</span>}
-                      </td>
-                      <td className="px-4 py-3 text-slate-700">{supplier.contact}</td>
-                      <td className="px-4 py-3 text-right font-bold text-red-600">
-                        ৳{supplier.amountDue.toLocaleString()}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span className="inline-block rounded-full bg-blue-50 px-2 py-0.5 text-xs font-bold text-blue-700">
-                          {supplier.commissionRate}%
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-center font-semibold text-slate-700">
-                        {supplier.totalCratesHolding}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <button
-                          onClick={() => setSelectedSupplierId(supplier.id)}
-                          className="btn-secondary !py-1 !px-3 text-xs"
-                        >
-                          Profile
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="px-4 py-3 text-slate-700">
+                          {supplier.businessName || <span className="text-slate-400">—</span>}
+                        </td>
+                        <td className="px-4 py-3 text-slate-700">
+                          {supplier.location || <span className="text-slate-400">—</span>}
+                        </td>
+                        <td className="px-4 py-3 text-slate-700">{supplier.contact}</td>
+                        <td className={`px-4 py-3 font-bold ${due > 0 ? 'text-red-600' : 'text-slate-400'}`}>
+                          {due > 0 ? `৳${due.toLocaleString()}` : '—'}
+                        </td>
+                        <td className={`px-4 py-3 font-bold ${advance > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
+                          {advance > 0 ? `৳${advance.toLocaleString()}` : '—'}
+                        </td>
+                        <td className="px-4 py-3 font-semibold text-slate-700">
+                          {supplier.totalCratesHolding}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>

@@ -20,6 +20,8 @@ public record CreateSaleRequest(
         /** Crate lent with this sale (one type per sale). Optional — null/blank means no crates. */
         String crateType,
         Integer cratesGiven,
+        /** How the at-sale payment was made (CASH / BANK / BKASH / NAGAD / OTHER). */
+        String paymentMethod,
         String note
 ) {
 }

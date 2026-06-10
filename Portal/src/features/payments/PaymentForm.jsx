@@ -37,22 +37,6 @@ const DIRECTIONS = {
     endpoint: apiPaths.paymentsSupplierProductPay,
     reducesPartyDue: true,
   },
-  SUPPLIER_COMMISSION_RECEIVE: {
-    party: 'supplier',
-    label: 'Receive commission',
-    desc: 'Supplier pays you commission',
-    icon: ArrowDownRight,
-    endpoint: apiPaths.paymentsSupplierCommissionReceive,
-    reducesPartyDue: false,
-  },
-  SUPPLIER_EXPENSE_RECEIVE: {
-    party: 'supplier',
-    label: 'Receive expense',
-    desc: 'Supplier pays back the expense you fronted',
-    icon: ArrowDownRight,
-    endpoint: apiPaths.paymentsSupplierExpenseReceive,
-    reducesPartyDue: false,
-  },
 };
 
 const PaymentForm = ({ onClose }) => {
@@ -94,8 +78,9 @@ const PaymentForm = ({ onClose }) => {
     const amt = Number(amount);
     if (!partyId) { setError(`Choose a ${config.party}.`); return; }
     if (!amt || amt <= 0) { setError('Enter an amount greater than zero.'); return; }
-    if (config.reducesPartyDue && amt > currentDue) {
-      setError(`Amount cannot exceed the current ${config.party} due (${fmt(currentDue)}).`);
+    // Suppliers may be overpaid — the excess becomes an advance. Customers cannot.
+    if (config.party === 'customer' && config.reducesPartyDue && amt > currentDue) {
+      setError(`Amount cannot exceed the current customer due (${fmt(currentDue)}).`);
       return;
     }
 
@@ -139,7 +124,6 @@ const PaymentForm = ({ onClose }) => {
             <div className="modal-icon-circle bg-blue-100 text-blue-700"><CreditCard size={18} /></div>
             <div>
               <h2>Record Payment</h2>
-              <p className="text-xs text-slate-500 mt-0.5">Pay or receive money — the party's due adjusts automatically</p>
             </div>
           </div>
           <button type="button" onClick={() => onClose?.()} className="modal-close-btn">✕</button>
@@ -231,7 +215,11 @@ const PaymentForm = ({ onClose }) => {
               {' · '}This payment <strong className="text-amber-700">{fmt(amount)}</strong>
               {' · '}
               {config.reducesPartyDue ? (
-                <>Due after <strong className="text-rose-700">{fmt(dueAfter)}</strong></>
+                dueAfter < 0 ? (
+                  <>Advance after <strong className="text-amber-700">{fmt(-dueAfter)}</strong></>
+                ) : (
+                  <>Due after <strong className="text-rose-700">{fmt(dueAfter)}</strong></>
+                )
               ) : (
                 <span className="text-slate-500">Income to you — party's product due is unchanged</span>
               )}

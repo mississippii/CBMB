@@ -51,6 +51,7 @@ public class WholesalerService {
     private final SaleRepository saleRepository;
     private final PaymentRepository paymentRepository;
     private final SupplierSettlementRepository supplierSettlementRepository;
+    private final SupplierDueService supplierDueService;
     private final TransactionService transactionService;
 
     public WholesalerService(
@@ -65,6 +66,7 @@ public class WholesalerService {
             SaleRepository saleRepository,
             PaymentRepository paymentRepository,
             SupplierSettlementRepository supplierSettlementRepository,
+            SupplierDueService supplierDueService,
             TransactionService transactionService
     ) {
         this.wholesalerRepository = wholesalerRepository;
@@ -78,7 +80,19 @@ public class WholesalerService {
         this.saleRepository = saleRepository;
         this.paymentRepository = paymentRepository;
         this.supplierSettlementRepository = supplierSettlementRepository;
+        this.supplierDueService = supplierDueService;
         this.transactionService = transactionService;
+    }
+
+    /**
+     * Supplier net due (consignment model):
+     *   opening + total sold − commission − expense − payments to supplier.
+     * Commission is per-lot (sold × rate); expense is a deduction; payments are
+     * PRODUCT_PAYMENT settlements. A negative result means the wholesaler has overpaid
+     * (advance / supplier holds credit). Settle never affects this.
+     */
+    private BigDecimal computeSupplierDue(Long wholesalerId, WholesalerSupplier account) {
+        return supplierDueService.netDue(wholesalerId, account);
     }
 
     @Transactional
@@ -167,7 +181,7 @@ public class WholesalerService {
             throw new BadRequestException("Supplier is already disabled.");
         }
 
-        BigDecimal due = currentBalance(wholesaler.getId(), PartyType.WHOLESALER_SUPPLIER, account.getId(), account.getOpeningDue());
+        BigDecimal due = computeSupplierDue(wholesaler.getId(), account);
         int crateTotal = crateDueTotal(wholesaler.getId(), PartyType.WHOLESALER_SUPPLIER, account.getId());
         if (due.signum() > 0) {
             throw new BadRequestException("Cannot disable — outstanding due ৳" + due.toPlainString() + ". Settle first.");
@@ -324,7 +338,7 @@ public class WholesalerService {
     private SupplierAccountResponse toSupplierResponse(WholesalerSupplier account) {
         Supplier supplier = account.getSupplier();
         Long wholesalerId = account.getWholesaler().getId();
-        BigDecimal currentDue = currentBalance(wholesalerId, PartyType.WHOLESALER_SUPPLIER, account.getId(), account.getOpeningDue());
+        BigDecimal currentDue = computeSupplierDue(wholesalerId, account);
         List<CrateTypeQuantity> crateDues = crateDues(wholesalerId, PartyType.WHOLESALER_SUPPLIER, account.getId());
         return new SupplierAccountResponse(
                 account.getId(),

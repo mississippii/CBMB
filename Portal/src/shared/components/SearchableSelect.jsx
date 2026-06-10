@@ -19,6 +19,7 @@ const SearchableSelect = ({
   placeholder = 'Select…',
   className = 'input-mini',
   disabled = false,
+  block = false,
 }) => {
   const [open, setOpen] = useState(false);
   const [query, setQuery] = useState('');
@@ -30,10 +31,23 @@ const SearchableSelect = ({
     return m ? m.label : '';
   }, [options, value]);
 
+  // Rank matches like a typeahead: prefix matches first, then earliest match
+  // position, then shortest label (so "Lot3" beats "Lot30", "Amra" floats "Amrapali" up).
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
     if (!q) return options;
-    return options.filter((o) => String(o.label).toLowerCase().includes(q));
+    return options
+      .map((o) => {
+        const label = String(o.label).toLowerCase();
+        return { o, idx: label.indexOf(q), starts: label.startsWith(q), len: label.length };
+      })
+      .filter((x) => x.idx !== -1)
+      .sort((a, b) => (
+        (a.starts === b.starts ? 0 : a.starts ? -1 : 1)
+        || a.idx - b.idx
+        || a.len - b.len
+      ))
+      .map((x) => x.o);
   }, [options, query]);
 
   useEffect(() => {
@@ -63,7 +77,7 @@ const SearchableSelect = ({
   };
 
   return (
-    <div ref={wrapRef} className="relative inline-block">
+    <div ref={wrapRef} className={`relative ${block ? 'block' : 'inline-block'}`}>
       <input
         ref={inputRef}
         type="text"
@@ -76,7 +90,7 @@ const SearchableSelect = ({
         disabled={disabled}
       />
       {open && !disabled && (
-        <div className="absolute left-0 right-auto z-20 mt-1 max-h-56 min-w-[10rem] overflow-y-auto rounded-md border border-slate-200 bg-white shadow-lg">
+        <div className={`absolute left-0 z-20 mt-1 max-h-56 min-w-[10rem] overflow-y-auto rounded-md border border-slate-200 bg-white shadow-lg ${block ? 'right-0' : 'right-auto'}`}>
           {filtered.length === 0 ? (
             <div className="px-2 py-1.5 text-xs text-slate-500">No matches</div>
           ) : (

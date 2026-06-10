@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import {
-  Search, Plus, Users, Phone, User, MapPin, Wallet, Boxes, ArrowUpDown,
+  Search, Plus, Users, Phone, User, MapPin, Wallet, ArrowUpDown,
 } from 'lucide-react';
 import { useData } from '../../data/DataContext';
 import { useToast } from '../../shared/components/Toast';
@@ -163,7 +163,6 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
             <div className="modal-header">
               <div>
                 <h2>Add New Customer</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Only permanent customers can borrow crates</p>
               </div>
               <button onClick={closeForm} className="modal-close-btn">✕</button>
             </div>
@@ -273,7 +272,6 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
           <div className="empty-state">
             <Users size={36} className="empty-state-icon" />
             <p className="empty-state-title">No customers yet</p>
-            <p className="empty-state-sub">Add your first customer to start tracking sales and crates.</p>
             <button onClick={() => setShowForm(true)} className="btn-primary mt-3 flex items-center gap-2 mx-auto">
               <Plus size={15} /> Add Customer
             </button>
@@ -282,14 +280,17 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
           <div className="empty-state">
             <Search size={32} className="empty-state-icon" />
             <p className="empty-state-title">No results found</p>
-            <p className="empty-state-sub">Try a different name, owner or phone.</p>
           </div>
         ) : (
           <>
             {/* Mobile card view */}
             <div className="space-y-3 lg:hidden">
               {filteredCustomers.map((c) => (
-                <div key={c.id} className="supplier-card">
+                <div
+                  key={c.id}
+                  onClick={() => setSelectedCustomerId(c.id)}
+                  className="supplier-card cursor-pointer"
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="supplier-card-avatar">
@@ -303,12 +304,6 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
                         <p className="text-xs text-slate-500 truncate">{c.phone}</p>
                       </div>
                     </div>
-                    <button
-                      onClick={() => setSelectedCustomerId(c.id)}
-                      className="btn-secondary !py-1.5 !px-3 text-xs shrink-0"
-                    >
-                      Profile
-                    </button>
                   </div>
                   <div className="mt-3 grid grid-cols-2 gap-2 text-center text-xs">
                     <div className="rounded-lg bg-red-50 px-2 py-2">
@@ -326,26 +321,27 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
 
             {/* Desktop table view */}
             <div className="hidden lg:block overflow-x-auto rounded-xl border border-slate-200">
-              <table className="w-full text-sm min-w-[860px]">
+              <table className="center-table w-full text-sm min-w-[860px]">
                 <thead>
                   <tr className="bg-slate-50 border-b border-slate-200">
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">Customer</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">Owner</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">Phone</th>
-                    <th className="px-4 py-3 text-center font-semibold text-slate-700">Crates Held</th>
-                    <th className="px-4 py-3 text-right font-semibold text-slate-700">Payment Due</th>
-                    <th className="px-4 py-3 text-center font-semibold text-slate-700">Action</th>
+                    <th className="px-4 py-3 font-semibold text-slate-700">Customer</th>
+                    <th className="px-4 py-3 font-semibold text-slate-700">Owner</th>
+                    <th className="px-4 py-3 font-semibold text-slate-700">Location</th>
+                    <th className="px-4 py-3 font-semibold text-slate-700">Phone</th>
+                    <th className="px-4 py-3 font-semibold text-slate-700">Amount Due</th>
+                    <th className="px-4 py-3 font-semibold text-slate-700">Crate Due</th>
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
                   {filteredCustomers.map((c) => (
-                    <tr key={c.id} className="hover:bg-slate-50 transition-colors">
+                    <tr
+                      key={c.id}
+                      onClick={() => setSelectedCustomerId(c.id)}
+                      className="cursor-pointer hover:bg-slate-50 transition-colors"
+                    >
                       <td className="px-4 py-3">
-                        <div className="flex items-center gap-2.5">
-                          <div className="supplier-card-avatar !w-8 !h-8 !text-xs">
-                            {c.name?.charAt(0).toUpperCase() || 'C'}
-                          </div>
-                          <p className="font-semibold text-slate-900">{c.name}</p>
+                        <div className="flex items-center justify-center gap-2">
+                          <span className="font-semibold text-slate-900">{c.name}</span>
                           {c.status === 'DISABLED' && (
                             <span className="badge badge-rose">Disabled</span>
                           )}
@@ -354,20 +350,15 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
                       <td className="px-4 py-3 text-slate-700">
                         {c.ownerName || c.owner || <span className="text-slate-400">—</span>}
                       </td>
-                      <td className="px-4 py-3 text-slate-700">{c.phone}</td>
-                      <td className="px-4 py-3 text-center font-semibold text-slate-700">
-                        {c.totalCratesHolding || 0}
+                      <td className="px-4 py-3 text-slate-700">
+                        {c.address || <span className="text-slate-400">—</span>}
                       </td>
-                      <td className="px-4 py-3 text-right font-bold text-red-600">
+                      <td className="px-4 py-3 text-slate-700">{c.phone}</td>
+                      <td className="px-4 py-3 font-bold text-red-600">
                         ৳{Number(c.amountDue || 0).toLocaleString()}
                       </td>
-                      <td className="px-4 py-3 text-center">
-                        <button
-                          onClick={() => setSelectedCustomerId(c.id)}
-                          className="btn-secondary !py-1 !px-3 text-xs"
-                        >
-                          Profile
-                        </button>
+                      <td className="px-4 py-3 font-semibold text-slate-700">
+                        {c.totalCratesHolding || 0}
                       </td>
                     </tr>
                   ))}

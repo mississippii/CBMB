@@ -15,6 +15,7 @@ import org.example.model.SupplierExpense;
 import org.example.model.Transaction;
 import org.example.model.Wholesaler;
 import org.example.model.WholesalerSupplier;
+import org.example.model.enums.ExpenseCategoryKind;
 import org.example.model.enums.RecordStatus;
 import org.example.model.enums.SettlementType;
 import org.example.model.enums.TransactionType;
@@ -32,7 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class ExpenseService {
 
-    private static final List<String> DEFAULT_CATEGORIES = List.of("Transport", "Labour", "Other");
+    private static final List<String> DEFAULT_CATEGORIES = List.of("Labour", "Transport", "Others");
 
     private final WholesalerRepository wholesalerRepository;
     private final WholesalerSupplierRepository wholesalerSupplierRepository;
@@ -69,17 +70,19 @@ public class ExpenseService {
     @Transactional
     public List<ExpenseCategoryResponse> listCategories(Long wholesalerId) {
         Wholesaler wholesaler = findWholesaler(wholesalerId);
+        // Shipment/supplier expenses only — SHOP-only categories are excluded (BOTH still counts).
         List<ExpenseCategory> existing = expenseCategoryRepository
-                .findByWholesaler_IdAndStatusOrderByNameAsc(wholesalerId, RecordStatus.ACTIVE);
+                .findActiveForKind(wholesalerId, ExpenseCategoryKind.SUPPLIER);
         if (existing.isEmpty()) {
             for (String name : DEFAULT_CATEGORIES) {
                 ExpenseCategory cat = new ExpenseCategory();
                 cat.setWholesaler(wholesaler);
                 cat.setName(name);
+                cat.setKind(ExpenseCategoryKind.SUPPLIER);
                 cat.setStatus(RecordStatus.ACTIVE);
                 expenseCategoryRepository.save(cat);
             }
-            existing = expenseCategoryRepository.findByWholesaler_IdAndStatusOrderByNameAsc(wholesalerId, RecordStatus.ACTIVE);
+            existing = expenseCategoryRepository.findActiveForKind(wholesalerId, ExpenseCategoryKind.SUPPLIER);
         }
         return existing.stream().map(c -> new ExpenseCategoryResponse(c.getId(), c.getName())).toList();
     }

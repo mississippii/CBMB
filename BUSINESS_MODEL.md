@@ -2,421 +2,223 @@
 
 ## Summary
 
-CBTrading supports a commission-based wholesaler business. A wholesaler receives products from suppliers, sells those products to customers, tracks customer due, tracks supplier payable, earns commission from supplier sales, and manages reusable crates.
+CBTrading runs a **commission-based (consignment) wholesale** business. A wholesaler receives
+product shipments from suppliers, sells those products to customers, tracks customer due,
+tracks what it owes each supplier (net payable), earns commission on supplier sales, and
+manages a pool of reusable crates.
 
-The current system is built for the wholesaler's daily operating workflow, not a public marketplace. Admin creates wholesaler accounts. Wholesalers use the portal to operate their own business.
+It is an internal operating tool, not a public marketplace. An **admin** creates wholesaler
+accounts; each **wholesaler** runs its own business through the portal.
+
+> Consignment means the wholesaler sells the supplier's goods on the supplier's behalf,
+> keeps a commission, and pays the supplier the rest.
 
 ## Main Actors
 
 ```text
 Admin
-  Creates wholesaler users and wholesaler business profiles.
+  Creates wholesaler users + business profiles.
+  Maintains the global product catalog and the global crate-type catalog.
 
 Wholesaler
   Owns the shop/business account.
-  Receives product shipments from suppliers.
-  Sells product to customers.
-  Owns crates.
-  Tracks all due, payable, commission, stock, payments, and transaction history.
+  Receives shipments (lots) from suppliers, sells to customers, owns crates.
+  Tracks customer due, supplier net payable / advances, commission, stock, crates, history.
 
 Supplier
-  Provides products to a specific wholesaler.
-  Has a commission rate under that wholesaler.
-  May hold wholesaler crates for shipment.
-  Receives product sale money from the wholesaler.
-  Pays commission/expense money to the wholesaler.
+  Sends shipments (lots) to one wholesaler.
+  Commission rate is negotiated PER SHIPMENT, usually after the goods sell.
+  Receives money FROM the wholesaler. The supplier never pays the wholesaler.
+  May hold wholesaler crates for transporting shipments.
 
 Permanent Customer
   Has a wholesaler customer account.
   Can buy on due, partially pay, or fully pay.
-  Can receive crates with product and later return them.
-  May have Jamanot balance for crates.
+  Can borrow crates and return them later.
 
 One-Time Customer
-  Has no customer account.
-  Must pay full sale amount immediately.
-  Does not receive crate/Jamanot tracking.
-  Sale stores name/phone snapshot only for history.
+  No account. Must pay the full sale amount immediately.
+  No crate tracking. Stored only as a name/phone snapshot on the sale for history.
 ```
 
 ## Business Flow
 
 ```text
-1. Admin creates wholesaler account.
-2. Wholesaler adds suppliers and customers.
-3. Product catalog exists globally, for example Mango or Watermelon.
-4. Product categories belong to product, for example Mango -> Himsagar, Fazli, Lengra.
-5. Supplier sends shipment to wholesaler.
-6. Wholesaler records shipment in Add Products.
-7. Inventory increases for that wholesaler, supplier account, product, and category.
-8. Customer buys product.
-9. Sale decreases inventory.
-10. Sale updates customer due if permanent customer did not fully pay.
-11. Sale adds full sale amount to supplier payable even if customer bought on due.
-12. Sale calculates supplier commission.
-13. Sale creates transaction history.
-14. Later payments/crate returns update balances and also create transaction history.
+1.  Admin creates the wholesaler account and seeds the product + crate-type catalogs.
+2.  Wholesaler adds its suppliers and customers.
+3.  Supplier sends a shipment (a "lot"); the wholesaler records it (Add Shipment).
+4.  Receiving a shipment creates lot-scoped inventory for that supplier + product + variety.
+5.  A customer buys product; the sale is taken from a specific shipment lot.
+6.  The sale decreases that lot's inventory.
+7.  The sale increases the customer's due only for the unpaid part (permanent customers).
+8.  The sale accrues to the supplier's net payable (see Supplier Payable below).
+9.  Commission is applied per lot once the lot's rate is set.
+10. Every sale, payment, and crate movement also writes a transaction-history row.
 ```
 
 ## Product Model
 
-Products are general catalog items and are not owned by a wholesaler.
+Products are a **global catalog** (not owned by any wholesaler). A product has optional
+varieties (categories), and a variety may use Lot1..Lot200 sub-lots.
 
 ```text
-Product examples:
-  Mango
-  Watermelon
-  Pineapple
-
-Category examples:
-  Mango -> Himsagar
-  Mango -> Fazli
-  Mango -> Lengra
+Product:  Mango, Watermelon, Pineapple …
+Variety:  Mango → Himsagar, Fazli, Lengra …
 ```
 
-Rules:
+Price is **not** stored on the product — the market price changes, so the sale price is
+entered at sale time.
+
+## Shipments And Inventory
+
+A shipment is the unit of consignment accounting (one "lot"). One shipment is for **one
+product**, but can contain many varieties/lot lines.
 
 ```text
-Product may have categories or no categories.
-Wholesaler/supplier relation is with inventory, not category.
-Price is not fixed on product because market price changes.
-Sale-time price is entered when sale occurs.
+supplier_deliveries     one row per shipment (header)
+supplier_delivery_items one row per variety/lot line
+inventory               lot-scoped stock (one row per delivery item), keyed by
+                        wholesaler · supplier · product · variety · sub-lot · unit
 ```
 
-## Supplier Shipment And Inventory
+**Auto-naming:** a shipment name is generated as `Product_TotalQtyUnit_MonthDay`
+(e.g. `Mango_215Crate_June6`). The name is a human label, editable later; the lot's true
+identifier is its id. Adding a shipment shows a confirmation ("alarm") modal first because
+it changes stock and is significant.
 
-When a supplier sends product, the wholesaler records it as a supplier delivery.
-
-Example:
-
-```text
-Supplier: Dhakar Bablu
-Product: Mango
-Category: Himsagar
-Quantity: 100
-Unit: BOX
-```
-
-Result:
-
-```text
-supplier_deliveries row is created
-supplier_delivery_items row is created
-inventory is created or increased
-stock_ledger records stock IN
-```
-
-Inventory is tracked by:
-
-```text
-wholesaler
-supplier account
-product
-category if present
-unit
-quantity_on_hand
-```
+Estimated value / advance fields were removed from the Add Shipment form — they are not
+part of the model.
 
 ## Sales Model
 
-A sale is a transaction and also a source business record.
+Selling is **shipment-wise**: the seller picks the supplier, then the shipment, then the
+product/variety line (searchable). Inventory always decrements in pack units (`quantity`).
+A sale may be priced per pack unit (`quantity × unitPrice`) or **per kg** when a sale
+weight is entered (`saleWeightKg × unitPrice`, unitPrice = per-kg rate).
 
-### Permanent Customer Sale
-
-A permanent customer can:
-
+### Permanent customer
 ```text
-pay full amount
-pay partial amount
-pay nothing now and keep full due
+pay full / pay partial / pay nothing (full due)
+→ customer due increases by (net sale − paid now)
+→ the sale accrues to the supplier's net payable
+→ inventory decreases; transaction history row created
 ```
 
-Accounting result:
-
+### One-time customer
 ```text
-customer due increases by net sale amount minus paid amount
-supplier payable increases by full sale amount
-commission is calculated for supplier profile/reporting
-inventory decreases
-transaction history is created
+must pay the full sale amount; no account, no crate tracking
+→ inventory decreases; transaction history row created; no customer due
 ```
 
-### One-Time Customer Sale
+## Supplier Payable, Commission, Expense (consignment)
 
-A one-time customer:
+The wholesaler's balance with a supplier is a **single running net figure**, computed live
+across **all** of that supplier's shipments:
 
 ```text
-must pay full sale amount
-has no customer account
-cannot use crate/Jamanot flow
-is stored only as name/phone snapshot on the sale
+Supplier net due = opening due
+                 + Σ total sold              (sale value of the supplier's goods)
+                 − Σ commission              (per lot: sold × lot commission rate)
+                 − Σ expense                 (per lot: labour / transport / others)
+                 − Σ payments to supplier    (money the wholesaler paid)
 ```
 
-Accounting result:
+- **Commission** is the wholesaler's earning. It is a **deduction** from what the supplier
+  is owed — never a separate payment. The rate is set per shipment, usually after selling.
+- **Expense** (Labour, Transport, Others) is booked against a shipment and is also a
+  **deduction** from the supplier's payable — never a separate payment.
+- **Net Payable per lot** (shown in the shipment table) = `total sold − commission − expense`.
 
+### Payments and advances
 ```text
-inventory decreases
-supplier payable increases by full sale amount
-transaction history is created
-no customer due is created
-```
-
-## Supplier Payable And Commission
-
-Supplier relation is independent from customer payment timing.
-
-Important rule:
-
-```text
-When supplier product is sold, the full sale amount is added to supplier payable, even if customer bought on due.
+The supplier never pays the wholesaler. The wholesaler pays the supplier, ad-hoc — NOT
+tied to any single shipment. Overpaying is allowed: the excess becomes an ADVANCE
+(the net due goes negative) and automatically offsets the next shipment's payable.
 ```
 
 Example:
-
 ```text
-Sale amount: 10,000
-Customer paid now: 2,000
-Customer due: 8,000
-Supplier payable increases: 10,000
-Commission rate: 5%
-Commission earned: 500
+Lot sold 6,440 · commission 644 · expense 200  → net payable 5,596
+Pay 6,000  → net due = −404  → shown as "Advance Paid 404"
+Next lot adds 1,000 payable → net due = 596 (the 404 advance was absorbed)
 ```
 
-This matches the business reality: the wholesaler owes the supplier based on the supplier's sold product, not based on when the customer pays.
+Supplier profile shows two cards: **Supplier Payable** (net due when positive) and
+**Advance Paid** (its magnitude when negative) — one is always zero.
 
-## Customer Due And Jamanot
-
-Customer due is money the permanent customer owes the wholesaler for products.
-
-Jamanot is crate-related money. It is held/settled when crates are given and returned.
-
-Rules:
-
-```text
-Product sale creates customer due only for permanent customer unpaid amount.
-Crate sale can add Jamanot balance.
-Customer payment can reduce due.
-Customer crate return can reduce crate due and settle/refund Jamanot.
-Jamanot can be zero if no money is settled during crate return.
-```
+### Settlement
+"Settle" on a shipment is a **status flag only** (marks a fully-sold lot as closed). It
+does **not** move money or change the supplier balance — the balance already reflects the
+lot via the formula above. Settling requires the lot's commission rate to be set and all
+its stock sold.
 
 ## Crate Business Model
 
-The business calls them crates in the UI. Database tables may use `box` names.
-
-Current crate types:
+Crates are a wholesaler-owned reusable asset (UI says "crate"; some DB tables use `box`).
 
 ```text
-Bangla Crate
-China Crate
+Crate types are a GLOBAL admin catalog (e.g. BANGLA, CHINA, WOODEN, …) — not a fixed
+two-type list. Adding a type propagates to every wholesaler.
+
+Ownership: only the wholesaler owns crates. Suppliers and customers borrow/hold them.
+Crates are a capital asset valued at weighted-average cost; there is NO jamanot/deposit.
+Crate movements are recorded ONE TYPE PER ENTRY (borrow, return, sell separately).
 ```
 
-Ownership rule:
+Locations tracked: in shop · with customers · with suppliers · lost/damaged.
 
 ```text
-Only the wholesaler owns crates.
-Supplier and customer can hold/borrow crates.
-Crates are not sold as products.
-```
-
-Crate locations:
-
-```text
-in shop
-with customers
-with suppliers
-lost/damaged
-```
-
-Crate movement examples:
-
-```text
-Wholesaler buys 100 Bangla crates:
-  total_owned +100
-  in_hand +100
-
-Permanent customer buys 20 BOX unit mango and receives 20 crates:
-  in_hand -20
-  with_customers +20
-  customer crate due +20
-
-Customer returns 12 crates:
-  in_hand +12
-  with_customers -12
-  customer crate due -12
-
-Supplier takes 10 crates for shipment:
-  in_hand -10
-  with_suppliers +10
-  supplier crate due +10
-
-Supplier returns 10 crates:
-  in_hand +10
-  with_suppliers -10
-  supplier crate due -10
+Buy 100 BANGLA:                 in_shop +100
+Customer borrows 20:            in_shop −20,  with_customers +20, customer crate due +20
+Customer returns 12:            in_shop +12,  with_customers −12, customer crate due −12
+Supplier takes 10 for shipment: in_shop −10,  with_suppliers +10, supplier crate due +10
+Lost/damaged write-off:         removes from active inventory, valued at WAC
 ```
 
 ## Payment Model
 
-Payment is also shown in transaction history, but source data is split by operation type.
+Money movements are recorded by operation type; all also appear in transaction history.
 
-### Customer Payments
-
-Customer payment operations use `payments`.
-
-Supported operations:
-
+### Customer payments (`payments`)
 ```text
 customer pays previous due
 customer returns crates
-customer pays due and returns crates together
+customer pays due + returns crates together
+→ cash reduces customer due; returned crates reduce crate due
 ```
 
-Effects:
-
+### Supplier money (`supplier_settlements`)
 ```text
-cash received decreases customer due
-crate returned decreases crate due
-Jamanot amount decreases customer Jamanot balance if refunded/settled
-transaction history row is created
+wholesaler pays the supplier (PRODUCT_PAYMENT) — the ONLY supplier money operation
+→ reduces the supplier net due; may overpay into an advance (negative due)
 ```
+There are **no** "receive commission" or "receive expense" payment operations — commission
+and expense are deductions inside the net payable, not money the supplier hands over.
 
-### Supplier Money Operations
-
-Supplier money operations use `supplier_settlements`.
-
-Supported operations:
-
+### Supplier crate operations (crate ledger/balance tables)
 ```text
-wholesaler pays supplier product money
-supplier pays commission money to wholesaler
-supplier pays other expense money to wholesaler
-```
-
-Effects:
-
-```text
-product payment decreases supplier payable
-commission receive records commission money received
-expense receive records expense money received
-transaction history row is created
-```
-
-### Supplier Crate Operations
-
-Supplier crate operations use crate ledger/balance tables.
-
-Supported operations:
-
-```text
-wholesaler gives crates to supplier
-supplier returns crates to wholesaler
-```
-
-Effects:
-
-```text
-box_inventory updates location counts
-box_balances updates supplier crate due
-box_ledger records movement
-transaction history row is created
+wholesaler gives crates to supplier / supplier returns crates
+→ updates crate location counts, supplier crate due, crate ledger
 ```
 
 ## Transaction History
 
-The transaction page shows sale and payment history for the logged-in wholesaler.
-
-Transaction history includes:
-
-```text
-sales
-customer due payments
-customer crate returns
-supplier product payments
-supplier commission receives
-supplier expense receives
-supplier crate give/return events
-```
-
-`transactions` is a reporting table. Source truth remains in:
-
-```text
-sales
-sale_items
-payments
-supplier_settlements
-box_ledger
-account_ledger
-stock_ledger
-```
-
-## Daily Wholesaler Workflow
-
-```text
-Morning:
-  Check store inventory.
-  Check crate dashboard.
-  Review supplier/customer due if needed.
-
-Supplier shipment:
-  Add product from supplier.
-  Select product/category.
-  Enter quantity.
-  Inventory increases.
-
-Sale:
-  Select supplier stock.
-  Select customer or one-time customer.
-  Enter quantity and sale price.
-  Enter payment status.
-  If crate unit and permanent customer, enter Bangla/China crate count and Jamanot.
-  System updates inventory, customer due, supplier payable, crate state, and transactions.
-
-Payment/crate settlement:
-  Choose customer or supplier.
-  Select operation type.
-  Save payment/crate movement.
-  System updates balances and transactions.
-
-Reporting:
-  Transaction page filters by date and customer/supplier phone.
-  Export generates a transaction report with sale and payment summaries.
-```
-
-## Current UI Interpretation
-
-```text
-Store Inventory
-  Default landing page. Shows available products by supplier/category/quantity.
-
-Crate Dashboard
-  Shows owned crates, crates in shop, with customers, with suppliers, lost/damaged.
-
-Supplier Profile
-  Shows today sales, today commission, total sales, total commission, supplier payable, crate due, stock.
-
-Customer Profile
-  Shows today purchases, today paid, total purchases, total paid, current due, crate Jamanot, crate due.
-
-Payment Page
-  Saves customer and supplier payment/crate operations.
-
-Transaction Page
-  Shows unified sale/payment history and export.
-```
+The transaction page shows the wholesaler's unified sale + payment history. `transactions`
+is a reporting feed; source truth lives in `sales`, `sale_items`, `payments`,
+`supplier_settlements`, `box_ledger`, `account_ledger`, `stock_ledger`.
 
 ## Business Invariants
 
 ```text
-A wholesaler only sees their own rows.
-A product can be sold only if inventory quantity is available.
-One-time customer must pay full sale amount.
-One-time customer cannot use crate/Jamanot flow.
-Permanent customer can pay full, partial, or due.
-Crate quantity given in BOX sale must match sold box quantity.
-Supplier payable increases by full supplier sale amount.
-Customer due and supplier payable are different balances.
-Crates are owned by wholesaler only.
-Jamanot belongs to customer crate process, not supplier product process.
-Every sale/payment/crate movement must create history for audit.
+A wholesaler only sees its own rows.
+A product sells only if the chosen lot has stock.
+One-time customers must pay in full and have no crate tracking.
+Permanent customers may pay full / partial / due.
+Supplier net due = opening + sold − commission − expense − payments (one running figure).
+Commission and expense are deductions, never supplier-paid transactions.
+The wholesaler pays the supplier; overpayment becomes an advance (negative due).
+Settling a shipment changes status only — it never moves money.
+Crate types are a global catalog; crates are wholesaler-owned; no jamanot.
+Cancelled sales (status CANCELLED) are excluded from all sold/commission/due aggregates.
+Every sale / payment / crate movement writes a transaction-history row for audit.
 ```

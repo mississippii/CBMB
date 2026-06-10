@@ -1,7 +1,6 @@
 import { BrowserRouter as Router, Routes, Route, Navigate } from 'react-router-dom';
 import { AuthProvider, useAuth } from './features/auth/AuthContext';
 import { DataProvider } from './data/DataContext';
-import { LanguageProvider } from './shared/contexts/LanguageContext';
 import { ToastProvider } from './shared/components/Toast';
 import Login from './features/auth/Login';
 import Dashboard from './features/dashboard/Dashboard';
@@ -22,7 +21,7 @@ function AppContent() {
 
   return (
     <Routes>
-      <Route path="/login" element={<Login />} />
+      <Route path="/login" element={isAuthenticated ? <Navigate to={getHomePath(admin)} replace /> : <Login />} />
       <Route
         path="/dashboard"
         element={
@@ -47,15 +46,13 @@ function AppContent() {
 function App() {
   return (
     <Router>
-      <LanguageProvider>
-        <AuthProvider>
-          <DataProvider>
-            <ToastProvider>
-              <AppContent />
-            </ToastProvider>
-          </DataProvider>
-        </AuthProvider>
-      </LanguageProvider>
+      <AuthProvider>
+        <DataProvider>
+          <ToastProvider>
+            <AppContent />
+          </ToastProvider>
+        </DataProvider>
+      </AuthProvider>
     </Router>
   );
 }

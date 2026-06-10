@@ -6,7 +6,7 @@ import { useAuth } from '../auth/AuthContext';
 import { queryKeys } from '../../services/queryKeys';
 import Modal from '../../shared/components/Modal';
 
-const formatMoney = (value) => '৳ ' + (Number(value) || 0).toLocaleString();
+const fmt = (value) => '৳ ' + (Number(value) || 0).toLocaleString();
 
 const PAYMENT_METHODS = [
   { value: 'CASH',  label: 'Cash' },
@@ -17,23 +17,11 @@ const PAYMENT_METHODS = [
 ];
 
 const todayIso = () => new Date().toISOString().split('T')[0];
-const isoDaysAgo = (n) => {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return d.toISOString().split('T')[0];
-};
-const isoStartOfMonth = () => {
-  const d = new Date();
-  d.setDate(1);
-  return d.toISOString().split('T')[0];
-};
-const isoStartOfYear = () => {
-  const d = new Date();
-  d.setMonth(0, 1);
-  return d.toISOString().split('T')[0];
-};
-const toStartOfDay = (dateString) => new Date(`${dateString}T00:00:00`).toISOString();
-const toEndOfDay = (dateString) => new Date(`${dateString}T23:59:59.999`).toISOString();
+const isoDaysAgo = (n) => { const d = new Date(); d.setDate(d.getDate() - n); return d.toISOString().split('T')[0]; };
+const isoStartOfMonth = () => { const d = new Date(); d.setDate(1); return d.toISOString().split('T')[0]; };
+const isoStartOfYear = () => { const d = new Date(); d.setMonth(0, 1); return d.toISOString().split('T')[0]; };
+const toStartOfDay = (s) => new Date(`${s}T00:00:00`).toISOString();
+const toEndOfDay = (s) => new Date(`${s}T23:59:59.999`).toISOString();
 
 const PERIOD_PRESETS = [
   { value: 'today', label: 'Today' },
@@ -46,7 +34,7 @@ const ShopExpensesPage = () => {
   const { admin } = useAuth();
   const queryClient = useQueryClient();
   const { fetchShopExpenseCategories, fetchShopExpenses, createShopExpense, cancelShopExpense } = useData();
-  const [startDate, setStartDate] = useState(isoStartOfMonth());
+  const [startDate, setStartDate] = useState(todayIso());
   const [endDate, setEndDate] = useState(todayIso());
 
   const [showForm, setShowForm] = useState(false);
@@ -81,16 +69,11 @@ const ShopExpensesPage = () => {
   const invalidateShopExpenses = () => {
     queryClient.invalidateQueries({ queryKey: queryKeys.shopExpenses.root(admin?.wholesalerId) });
     queryClient.invalidateQueries({ queryKey: ['dashboardSummary', admin?.wholesalerId] });
+    queryClient.invalidateQueries({ queryKey: ['cash', admin?.wholesalerId] });
   };
 
-  const createMutation = useMutation({
-    mutationFn: (payload) => createShopExpense(payload),
-    onSuccess: invalidateShopExpenses,
-  });
-  const cancelMutation = useMutation({
-    mutationFn: ({ id, reason }) => cancelShopExpense(id, reason),
-    onSuccess: invalidateShopExpenses,
-  });
+  const createMutation = useMutation({ mutationFn: (p) => createShopExpense(p), onSuccess: invalidateShopExpenses });
+  const cancelMutation = useMutation({ mutationFn: ({ id, reason }) => cancelShopExpense(id, reason), onSuccess: invalidateShopExpenses });
   const formBusy = createMutation.isPending;
   const cancelBusy = cancelMutation.isPending;
 
@@ -105,9 +88,7 @@ const ShopExpensesPage = () => {
     return {
       total,
       count: active.length,
-      topCategories: Array.from(byCategory.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3),
+      topCategories: Array.from(byCategory.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3),
     };
   }, [expenses]);
 
@@ -126,12 +107,8 @@ const ShopExpensesPage = () => {
   };
 
   const resetForm = () => {
-    setFormCategoryId('');
-    setFormAmount('');
-    setFormPaymentMethod('CASH');
-    setFormDate(todayIso());
-    setFormNote('');
-    setFormError('');
+    setFormCategoryId(''); setFormAmount(''); setFormPaymentMethod('CASH');
+    setFormDate(todayIso()); setFormNote(''); setFormError('');
   };
 
   const handleSubmit = async (e) => {
@@ -168,117 +145,103 @@ const ShopExpensesPage = () => {
   };
 
   return (
-    <div className="space-y-4">
-      {/* Summary header */}
-      <section className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-white to-slate-50 p-3 shadow-sm">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-stretch">
-          <div className="shrink-0 lg:w-56 flex flex-col justify-between gap-2">
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-rose-100 text-rose-700">
-                <Wallet size={18} />
-              </div>
-              <div className="min-w-0">
-                <h3 className="text-[15px] font-extrabold leading-tight text-slate-900">Shop Expenses</h3>
-                <p className="text-[11px] text-slate-500 leading-tight">Wholesaler-borne overhead — no reimbursement</p>
-              </div>
-            </div>
-            <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white p-0.5 text-[11px] font-semibold">
-              {PERIOD_PRESETS.map(({ value, label }) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => applyPreset(value)}
-                  className={`px-2.5 py-1 rounded-full transition ${
-                    isPresetActive(value)
-                      ? 'bg-rose-600 text-white shadow-sm'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={() => { resetForm(); setShowForm(true); }}
-              className="inline-flex w-fit items-center gap-1.5 rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-rose-700"
-            >
-              <Plus size={12} /> Add Expense
-            </button>
+    <div className="space-y-5">
+      {/* Header */}
+      <section className="inventory-hero">
+        <div className="flex items-start gap-3">
+          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-2xl bg-rose-100 text-rose-600">
+            <Wallet size={22} />
           </div>
+          <div>
+            <span className="box-eyebrow">Shop Expenses</span>
+            <h3>Shop overhead</h3>
+            <p>Rent, salary, utility, lunch, tax</p>
+          </div>
+        </div>
+        <button type="button" onClick={() => { resetForm(); setShowForm(true); }} className="btn-primary inline-flex items-center gap-2">
+          <Plus size={16} /> New Expense
+        </button>
+      </section>
 
-          <div className="flex-1 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-            <div className="rounded-xl border border-rose-200 bg-gradient-to-br from-rose-50 to-white px-3 py-2.5">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-rose-700">Period Total</p>
-              <p className="mt-0.5 text-lg font-extrabold leading-tight text-rose-700">{formatMoney(totals.total)}</p>
-              <p className="text-[10px] text-slate-500">{totals.count} entries</p>
-            </div>
-            {totals.topCategories.map(([name, amount]) => (
-              <div key={name} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{name}</p>
-                <p className="mt-0.5 text-lg font-extrabold leading-tight text-slate-900">{formatMoney(amount)}</p>
-              </div>
+      {/* Filters + KPIs */}
+      <section className="supplier-panel">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white p-0.5 text-xs font-semibold">
+            {PERIOD_PRESETS.map(({ value, label }) => (
+              <button key={value} type="button" onClick={() => applyPreset(value)}
+                className={`rounded-full px-3 py-1.5 transition ${isPresetActive(value) ? 'bg-teal-600 text-white shadow-sm' : 'text-slate-600 hover:text-slate-900'}`}>
+                {label}
+              </button>
             ))}
-            <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 flex flex-col gap-1.5">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1">
-                <Calendar size={10} /> From
-              </label>
-              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="input-field text-xs" />
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 flex flex-col gap-1.5">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1">
-                <Calendar size={10} /> To
-              </label>
-              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="input-field text-xs" />
-            </div>
           </div>
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5">
+              <Calendar size={13} className="text-slate-400" />
+              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="bg-transparent text-xs font-semibold text-slate-700 outline-none" />
+            </label>
+            <span className="text-slate-300">–</span>
+            <label className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5">
+              <Calendar size={13} className="text-slate-400" />
+              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="bg-transparent text-xs font-semibold text-slate-700 outline-none" />
+            </label>
+          </div>
+        </div>
+
+        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+          <div className="rounded-2xl border border-rose-200 bg-gradient-to-br from-rose-50 to-white px-3.5 py-3 shadow-sm">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-rose-600">Period Total</p>
+            <p className="mt-1 text-xl font-extrabold leading-tight text-rose-600 tabular-nums">{fmt(totals.total)}</p>
+            <p className="text-[11px] text-slate-400">{totals.count} entries</p>
+          </div>
+          {totals.topCategories.map(([name, amount]) => (
+            <div key={name} className="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 shadow-sm">
+              <p className="truncate text-[10px] font-bold uppercase tracking-wider text-slate-500">{name}</p>
+              <p className="mt-1 text-xl font-extrabold leading-tight text-slate-900 tabular-nums">{fmt(amount)}</p>
+            </div>
+          ))}
         </div>
       </section>
 
-      {/* List */}
-      <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-extrabold text-slate-900">Entries</h3>
-          <span className="rounded-full bg-rose-50 px-2.5 py-1 text-[11px] font-bold text-rose-700">
-            {expenses.length} rows
-          </span>
+      {/* Entries */}
+      <section className="supplier-panel">
+        <div className="flex items-center justify-between">
+          <h3>Entries</h3>
+          <span className="badge badge-rose">{expenses.length} rows</span>
         </div>
+
         {expenses.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm font-semibold text-slate-500">
-            {loading ? 'Loading…' : 'No expenses in this period.'}
-          </div>
+          <div className="empty-state mt-4">{loading ? 'Loading…' : 'No expenses in this period.'}</div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-sm">
+          <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200">
+            <table className="center-table w-full min-w-[720px] text-sm">
               <thead>
-                <tr className="border-b border-slate-200 text-left text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                  <th className="py-2 pr-3">Date</th>
-                  <th className="py-2 pr-3">Category</th>
-                  <th className="py-2 pr-3 text-right">Amount</th>
-                  <th className="py-2 pr-3">Method</th>
-                  <th className="py-2 pr-3">Note</th>
-                  <th className="py-2 pr-3 text-right">Action</th>
+                <tr className="border-b border-slate-200 bg-slate-50">
+                  <th className="px-4 py-3 font-semibold text-slate-700">Date</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Category</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Amount</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Method</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Note</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {expenses.map((expense) => {
                   const cancelled = expense.status === 'CANCELLED';
                   return (
-                    <tr key={expense.id} className={cancelled ? 'opacity-50 line-through' : 'hover:bg-slate-50'}>
-                      <td className="py-2 pr-3 font-semibold text-slate-800">
+                    <tr key={expense.id} className={`transition ${cancelled ? 'opacity-50 line-through' : 'hover:bg-slate-50'}`}>
+                      <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">
                         {expense.expenseDate ? new Date(expense.expenseDate).toLocaleDateString() : '—'}
                       </td>
-                      <td className="py-2 pr-3 text-slate-700">{expense.categoryName}</td>
-                      <td className="py-2 pr-3 text-right font-extrabold text-slate-900">{formatMoney(expense.amount)}</td>
-                      <td className="py-2 pr-3 text-slate-600 text-xs">{expense.paymentMethod}</td>
-                      <td className="py-2 pr-3 text-slate-600 text-xs">{expense.note || '—'}</td>
-                      <td className="py-2 pr-3 text-right">
+                      <td className="px-4 py-3 text-slate-700">{expense.categoryName}</td>
+                      <td className="px-4 py-3 font-extrabold text-slate-900 tabular-nums">{fmt(expense.amount)}</td>
+                      <td className="px-4 py-3">
+                        <span className="badge badge-teal">{expense.paymentMethod}</span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-500">{expense.note || '—'}</td>
+                      <td className="px-4 py-3">
                         {!cancelled && (
-                          <button
-                            type="button"
-                            onClick={() => { setCancelTargetId(expense.id); setCancelReason(''); setCancelError(''); }}
-                            className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-100"
-                          >
+                          <button type="button" onClick={() => { setCancelTargetId(expense.id); setCancelReason(''); setCancelError(''); }}
+                            className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-100">
                             <Ban size={11} /> Cancel
                           </button>
                         )}
@@ -290,11 +253,7 @@ const ShopExpensesPage = () => {
             </table>
           </div>
         )}
-        {error && (
-          <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
-            {error}
-          </div>
-        )}
+        {error && (<div className="status-error mt-3"><span>!</span><span>{error}</span></div>)}
       </section>
 
       {/* Add modal */}
@@ -302,16 +261,13 @@ const ShopExpensesPage = () => {
         open={showForm}
         onClose={() => { if (!formBusy) setShowForm(false); }}
         title="Add shop expense"
-        subtitle="Pure overhead — wholesaler bears, reduces profit"
         icon={Wallet}
-        iconClass="bg-rose-100 text-rose-700"
+        iconClass="bg-rose-100 text-rose-600"
         maxWidth="32rem"
         footer={(
           <div className="flex w-full justify-end gap-2">
             <button type="button" onClick={() => setShowForm(false)} disabled={formBusy} className="btn-secondary">Cancel</button>
-            <button type="submit" form="shop-expense-form" disabled={formBusy} className="rounded-lg bg-rose-600 px-3 py-1.5 text-sm font-bold text-white hover:bg-rose-700 disabled:opacity-50">
-              {formBusy ? 'Saving…' : 'Save'}
-            </button>
+            <button type="submit" form="shop-expense-form" disabled={formBusy} className="btn-primary">{formBusy ? 'Saving…' : 'Save'}</button>
           </div>
         )}
       >
@@ -341,13 +297,9 @@ const ShopExpensesPage = () => {
           </div>
           <div>
             <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Note (optional)</label>
-            <input type="text" value={formNote} onChange={(e) => setFormNote(e.target.value)} className="input-field mt-1 w-full" placeholder="e.g. May salary for shop assistant" />
+            <input type="text" value={formNote} onChange={(e) => setFormNote(e.target.value)} className="input-field mt-1 w-full" placeholder="e.g. May salary" />
           </div>
-          {formError && (
-            <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
-              {formError}
-            </div>
-          )}
+          {formError && (<div className="status-error"><span>!</span><span>{formError}</span></div>)}
         </form>
       </Modal>
 
@@ -356,16 +308,13 @@ const ShopExpensesPage = () => {
         open={cancelTargetId != null}
         onClose={() => { if (!cancelBusy) setCancelTargetId(null); }}
         title="Cancel this expense?"
-        subtitle="Marks as CANCELLED — won't count in totals or dashboards."
         icon={Ban}
-        iconClass="bg-rose-100 text-rose-700"
+        iconClass="bg-rose-100 text-rose-600"
         maxWidth="28rem"
         footer={(
           <div className="flex w-full justify-end gap-2">
             <button type="button" onClick={() => setCancelTargetId(null)} disabled={cancelBusy} className="btn-secondary">Keep</button>
-            <button type="button" onClick={handleCancel} disabled={cancelBusy} className="rounded-lg bg-rose-600 px-3 py-1.5 text-sm font-bold text-white hover:bg-rose-700 disabled:opacity-50">
-              {cancelBusy ? 'Cancelling…' : 'Confirm Cancel'}
-            </button>
+            <button type="button" onClick={handleCancel} disabled={cancelBusy} className="btn-danger">{cancelBusy ? 'Cancelling…' : 'Confirm Cancel'}</button>
           </div>
         )}
       >
@@ -374,11 +323,7 @@ const ShopExpensesPage = () => {
             <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Reason (optional)</label>
             <input type="text" value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} className="input-field mt-1 w-full" placeholder="e.g. duplicate entry" />
           </div>
-          {cancelError && (
-            <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
-              {cancelError}
-            </div>
-          )}
+          {cancelError && (<div className="status-error"><span>!</span><span>{cancelError}</span></div>)}
         </div>
       </Modal>
     </div>

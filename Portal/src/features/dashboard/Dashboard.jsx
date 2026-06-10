@@ -1,7 +1,8 @@
 import { useEffect, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
   LayoutGrid, Package, Truck, Users, UserCheck,
-  ArrowLeftRight, CreditCard, ShoppingCart, BarChart3, Wallet,
+  ArrowLeftRight, CreditCard, ShoppingCart, BarChart3, Wallet, BookOpenCheck,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import Navbar from '../../shared/components/Navbar';
@@ -15,26 +16,36 @@ import PaymentsPage from '../payments/PaymentsPage';
 import StoreInventory from '../inventory/StoreInventory';
 import ReportsPage from '../reports/ReportsPage';
 import ShopExpensesPage from '../expenses/ShopExpensesPage';
+import CashBookPage from '../cashbook/CashBookPage';
 import { useData } from '../../data/DataContext';
 
 const tabs = [
-  { id: 'inventory',     label: 'Inventory',     icon: LayoutGrid },
-  { id: 'dashboard',     label: 'Crates',        icon: Package },
-  { id: 'shipments',     label: 'Shipments',     icon: Truck },
-  { id: 'suppliers',     label: 'Suppliers',     icon: UserCheck },
-  { id: 'customers',     label: 'Customers',     icon: Users },
-  { id: 'sales',         label: 'Sales',         icon: ShoppingCart },
-  { id: 'payment',       label: 'Payments',      icon: CreditCard },
-  { id: 'transactions',  label: 'Transactions',  icon: ArrowLeftRight },
-  { id: 'shopExpenses',  label: 'Shop Expenses', icon: Wallet },
-  { id: 'reports',       label: 'Reports',       icon: BarChart3 },
+  { id: 'inventory',     label: 'Inventory',     icon: LayoutGrid,     color: '#DC2626' }, // red
+  { id: 'dashboard',     label: 'Crates',        icon: Package,        color: '#16A34A' }, // green
+  { id: 'shipments',     label: 'Shipments',     icon: Truck,          color: '#CA8A04' }, // yellow
+  { id: 'suppliers',     label: 'Suppliers',     icon: UserCheck,      color: '#2563EB' }, // blue
+  { id: 'customers',     label: 'Customers',     icon: Users,          color: '#4F46E5' }, // indigo
+  { id: 'sales',         label: 'Sales',         icon: ShoppingCart,   color: '#DC2626' }, // red
+  { id: 'payment',       label: 'Payments',      icon: CreditCard,     color: '#16A34A' }, // green
+  { id: 'transactions',  label: 'Transactions',  icon: ArrowLeftRight, color: '#CA8A04' }, // yellow
+  { id: 'shopExpenses',  label: 'Shop Expenses', icon: Wallet,         color: '#2563EB' }, // blue
+  { id: 'cashbook',      label: 'Cash Book',     icon: BookOpenCheck,  color: '#4F46E5' }, // indigo
+  { id: 'reports',       label: 'Reports',       icon: BarChart3,      color: '#DC2626' }, // red
 ];
+
+const TAB_IDS = tabs.map((t) => t.id);
 
 const Dashboard = () => {
   const { admin: wholesaler } = useAuth();
   const { isLoading, dataError } = useData();
-  const [activeTab, setActiveTab] = useState('inventory');
+  const [searchParams, setSearchParams] = useSearchParams();
   const [showLoadFallback, setShowLoadFallback] = useState(false);
+
+  // The active section lives in the URL (?tab=…) so the browser back/forward
+  // buttons move between sections instead of dropping out to login.
+  const tabParam = searchParams.get('tab');
+  const activeTab = TAB_IDS.includes(tabParam) ? tabParam : 'inventory';
+  const setActiveTab = (id) => setSearchParams(id === 'inventory' ? {} : { tab: id });
 
   // Cross-tab profile opening: Overview's money strips set this; the destination list
   // reads it on render to auto-open the profile drawer, then clears it via onProfileOpened.
@@ -84,14 +95,19 @@ const Dashboard = () => {
         <div className="workspace-layout">
           <aside className="workspace-sidebar">
             <nav className="sidebar-nav">
-              {tabs.map(({ id, label, icon: Icon }) => (
+              {tabs.map(({ id, label, icon: Icon, color }) => (
                 <button
                   key={id}
                   type="button"
                   onClick={() => setActiveTab(id)}
                   className={`sidebar-nav-item ${activeTab === id ? 'active' : ''}`}
                 >
-                  <Icon size={16} className="sidebar-nav-icon" />
+                  <span
+                    className="sidebar-nav-badge"
+                    style={{ background: color, boxShadow: `0 4px 10px ${color}59` }}
+                  >
+                    <Icon size={13} strokeWidth={2.4} color="#ffffff" />
+                  </span>
                   <span className="sidebar-nav-title">{label}</span>
                 </button>
               ))}
@@ -105,13 +121,11 @@ const Dashboard = () => {
                   <>
                     <div className="windows-loader" aria-label="Loading data" />
                     <h3>Loading data</h3>
-                    <p>Connecting to the server and preparing your records.</p>
                   </>
                 ) : (
                   <>
                     <div className="data-not-found-icon">!</div>
                     <h3>Taking longer than expected</h3>
-                    <p>The server may be slow or no records exist yet for this account.</p>
                   </>
                 )}
               </div>
@@ -142,6 +156,7 @@ const Dashboard = () => {
                 {activeTab === 'transactions' && <TransactionsList />}
                 {activeTab === 'payment'      && <PaymentsPage />}
                 {activeTab === 'shopExpenses' && <ShopExpensesPage />}
+                {activeTab === 'cashbook'     && <CashBookPage />}
                 {activeTab === 'reports'      && <ReportsPage />}
               </div>
             )}

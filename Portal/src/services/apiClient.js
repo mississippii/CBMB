@@ -61,6 +61,7 @@ export const apiPaths = {
   wholesalerCustomersCreate: (wholesalerId) => '/wholesalers/' + wholesalerId + '/customers/create',
   wholesalerCustomersProfile: (wholesalerId) => '/wholesalers/' + wholesalerId + '/customers/profile',
   supplierDeliveriesCreate: (wholesalerId) => '/wholesalers/' + wholesalerId + '/supplier-deliveries/create',
+  supplierDeliveriesUpdate: (wholesalerId) => '/wholesalers/' + wholesalerId + '/supplier-deliveries/update',
   supplierDeliveriesList: (wholesalerId) => '/wholesalers/' + wholesalerId + '/supplier-deliveries/list',
   shipmentsBySupplier: (wholesalerId) => '/wholesalers/' + wholesalerId + '/shipments/by-supplier',
   shipmentSetCommission: (wholesalerId) => '/wholesalers/' + wholesalerId + '/shipments/set-commission',
@@ -93,4 +94,7 @@ export const apiPaths = {
   shopExpenseCreate: (wholesalerId) => '/wholesalers/' + wholesalerId + '/shop-expenses/create',
   shopExpenseList: (wholesalerId) => '/wholesalers/' + wholesalerId + '/shop-expenses/list',
   shopExpenseCancel: (wholesalerId, expenseId) => '/wholesalers/' + wholesalerId + '/shop-expenses/' + expenseId + '/cancel',
+  cashDaily: (wholesalerId) => '/wholesalers/' + wholesalerId + '/cash/daily',
+  cashClose: (wholesalerId) => '/wholesalers/' + wholesalerId + '/cash/close',
+  cashReopen: (wholesalerId) => '/wholesalers/' + wholesalerId + '/cash/reopen',
 };

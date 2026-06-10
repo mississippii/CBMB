@@ -10,6 +10,9 @@ public interface InventoryRepository extends JpaRepository<Inventory, Long> {
 
     List<Inventory> findByWholesaler_IdOrderByUpdatedAtDesc(Long wholesalerId);
 
+    /** All inventory rows belonging to one delivery (used to report on-hand per shipment line). */
+    List<Inventory> findByDelivery_Id(Long deliveryId);
+
     /** Lot-scoped lookup keyed by (delivery, product, category, sub_category, unit). */
     Optional<Inventory> findByWholesaler_IdAndDelivery_IdAndProduct_IdAndCategory_IdAndSubCategory_IdAndUnit(
             Long wholesalerId,

@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   Boxes, Plus, AlertTriangle, ArrowRightLeft, Store, Users, UserCheck, Package,
   TrendingDown, Hash, ArrowUpRight, ArrowDownLeft, FileText, Wallet, BarChart3, Zap,
-  ShoppingCart,
+  ShoppingCart, ChevronDown, ChevronUp,
 } from 'lucide-react';
 import { useData } from '../../data/DataContext';
 import { useToast } from '../../shared/components/Toast';
@@ -14,7 +14,7 @@ import { queryKeys } from '../../services/queryKeys';
 // Crate types are an admin-managed global catalog. The dashboard mirrors the active
 // catalog into the wholesaler's box_types on every load, so `d.crateTypes` is the
 // full list of selectable types (with their live inventory) — no hard-coding.
-const EMPTY_TYPE = { name: '', label: '', total: 0, inShop: 0, withSuppliers: 0, withCustomers: 0, lost: 0, purchasePrice: 0 };
+const EMPTY_TYPE = { name: '', label: '', total: 0, inShop: 0, withSuppliers: 0, withCustomers: 0, lost: 0, purchasePrice: 0, weightedAvgCost: 0 };
 
 const titleCase = (s) => {
   const str = String(s || '').trim();
@@ -33,6 +33,7 @@ const mapDashboard = (d) => {
       withCustomers: Number(t.withCustomers) || 0,
       lost: Number(t.lostDamaged) || 0,
       purchasePrice: Number(t.purchasePrice) || 0,
+      weightedAvgCost: Number(t.weightedAvgCost) || 0,
     };
   });
   const byType = {};
@@ -51,7 +52,6 @@ const mapDashboard = (d) => {
 const EMPTY_PURCHASE = { crateType: '', quantity: '', unitPrice: '' };
 const EMPTY_SELL = { crateType: '', quantity: '', unitSalePrice: '', buyerKind: 'customer', customerId: '', note: '' };
 const EMPTY_LOSS = { crateType: '', quantity: '', reason: 'lost' };
-const EMPTY_PRICE = { crateType: '', purchasePrice: '' };
 // One crate type per transaction — borrow/return/give/receive are each recorded separately.
 const EMPTY_SUPPLIER = { supplierId: '', direction: 'give', crateType: '', quantity: '', note: '' };
 const EMPTY_CUSTOMER = { customerId: '', direction: 'borrow', crateType: '', quantity: '', note: '' };
@@ -101,7 +101,7 @@ const KPI = ({ icon: Icon, label, value, tone = 'default' }) => (
 );
 
 const BoxDashboard = () => {
-  const { suppliers, customers, addCrates, markCratesLost, setCratePrice, sellCrates, refreshTransactions } = useData();
+  const { suppliers, customers, addCrates, markCratesLost, sellCrates, refreshTransactions } = useData();
   const { admin } = useAuth();
   const showToast = useToast();
 
@@ -123,12 +123,7 @@ const BoxDashboard = () => {
   const [showLossModal, setShowLossModal] = useState(false);
   const [showSupplierModal, setShowSupplierModal] = useState(false);
   const [showCustomerModal, setShowCustomerModal] = useState(false);
-  const [showPriceModal, setShowPriceModal] = useState(false);
   const [showSellModal, setShowSellModal] = useState(false);
-
-  const [priceForm, setPriceForm] = useState(EMPTY_PRICE);
-  const [priceError, setPriceError] = useState('');
-  const [isSavingPrice, setIsSavingPrice] = useState(false);
 
   const [purchaseForm, setPurchaseForm] = useState(EMPTY_PURCHASE);
   const [lossForm, setLossForm] = useState(EMPTY_LOSS);
@@ -160,10 +155,10 @@ const BoxDashboard = () => {
   const inShopPct = Math.round((inShop / safe) * 100);
   const customerPct = Math.round((withCustomers / safe) * 100);
   const supplierPct = Math.round((withSuppliers / safe) * 100);
-  const lostPct = Math.round((lost / Math.max(totalOwned, 1)) * 100);
 
   // Loss stats
   const [lossRange, setLossRange] = useState(3);
+  const [showLossTrend, setShowLossTrend] = useState(false);
   const { data: lossStats, isLoading: lossLoading } = useQuery({
     queryKey: queryKeys.crates.lossStats(admin?.wholesalerId, lossRange),
     queryFn: () => postJson(apiPaths.cratesLossStats(admin.wholesalerId), { months: lossRange }),
@@ -293,31 +288,6 @@ const BoxDashboard = () => {
     }
   };
 
-  const handlePriceSave = async () => {
-    const price = Number(priceForm.purchasePrice);
-    if (!Number.isFinite(price) || price < 0) {
-      setPriceError('Enter a valid price (0 or greater).');
-      return;
-    }
-    setIsSavingPrice(true); setPriceError('');
-    try {
-      await setCratePrice(priceForm.crateType, price);
-      showToast(`${priceForm.crateType} crate price set to ৳ ${price}`, 'success');
-      setShowPriceModal(false);
-    } catch (err) {
-      setPriceError(err.message || 'Failed to set price.');
-    } finally {
-      setIsSavingPrice(false);
-    }
-  };
-
-  const openPriceModal = (crateType) => {
-    const existing = statOf(crateType);
-    setPriceForm({ crateType, purchasePrice: existing.purchasePrice || '' });
-    setPriceError('');
-    setShowPriceModal(true);
-  };
-
   const handleCustomerCrate = async () => {
     const qty = Number(customerForm.quantity) || 0;
     if (!customerForm.customerId) { setCustomerError('Please select a customer.'); return; }
@@ -392,9 +362,6 @@ const BoxDashboard = () => {
           <div className="crate-hero-icon"><Boxes size={22} /></div>
           <div className="min-w-0">
             <h2 className="crate-hero-title">Crate Operations</h2>
-            <p className="crate-hero-sub">
-              Track every crate — in shop, with customers, with suppliers, or lost
-            </p>
           </div>
         </div>
         <div className="crate-hero-stat-row">
@@ -417,17 +384,16 @@ const BoxDashboard = () => {
 
       {/* KPI ROW */}
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-        <KPI icon={Store} label="In Shop" value={`${inShop.toLocaleString()} (${inShopPct}%)`} tone="emerald" />
-        <KPI icon={Users} label="With Customers" value={`${withCustomers.toLocaleString()} (${customerPct}%)`} tone="teal" />
-        <KPI icon={UserCheck} label="With Suppliers" value={`${withSuppliers.toLocaleString()} (${supplierPct}%)`} tone="amber" />
-        <KPI icon={TrendingDown} label="Lost Forever" value={`${lost.toLocaleString()} (${lostPct}%)`} tone="rose" />
+        <KPI icon={Store} label="In Shop" value={inShop.toLocaleString()} tone="emerald" />
+        <KPI icon={Users} label="With Customers" value={withCustomers.toLocaleString()} tone="teal" />
+        <KPI icon={UserCheck} label="With Suppliers" value={withSuppliers.toLocaleString()} tone="amber" />
+        <KPI icon={TrendingDown} label="Lost Forever" value={lost.toLocaleString()} tone="rose" />
       </div>
 
       {/* ALLOCATION BAR + TYPE BREAKDOWN */}
       <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_22rem] gap-4">
         <div className="supplier-panel">
           <h3 className="flex items-center gap-2"><Package size={18} className="text-blue-600" /> Allocation</h3>
-          <p>Where your crates are right now</p>
 
           <div className="allocation-bar mt-4">
             <div className="allocation-seg allocation-seg-shop" style={{ width: `${inShopPct}%` }} title={`In Shop: ${inShop}`} />
@@ -453,16 +419,8 @@ const BoxDashboard = () => {
                   <div><span>Customers</span><strong>{(type.data.withCustomers || 0).toLocaleString()}</strong></div>
                   <div><span>Suppliers</span><strong>{(type.data.withSuppliers || 0).toLocaleString()}</strong></div>
                   <div><span>Lost</span><strong className="text-rose-600">{(type.data.lost || 0).toLocaleString()}</strong></div>
+                  <div><span>Avg Price</span><strong>৳ {Math.ceil(Number(type.data.weightedAvgCost) || 0).toLocaleString()}</strong></div>
                 </div>
-                <button
-                  type="button"
-                  onClick={() => openPriceModal(type.key)}
-                  className="mt-2 w-full text-xs font-semibold text-slate-600 hover:text-blue-700 hover:bg-blue-50 rounded px-2 py-1 flex items-center justify-between gap-2 border border-slate-200"
-                  title="Used to value lost/damaged crates in P&L"
-                >
-                  <span>Cost per crate</span>
-                  <span className="font-bold">৳ {(type.data.purchasePrice || 0).toLocaleString()} <span className="text-slate-400 font-normal">edit</span></span>
-                </button>
               </div>
             ))}
           </div>
@@ -474,7 +432,6 @@ const BoxDashboard = () => {
             <div className="toolkit-icon"><Zap size={16} /></div>
             <div>
               <h3 className="toolkit-title">Crate Toolkit</h3>
-              <p className="toolkit-sub">All crate actions, one tap away</p>
             </div>
           </div>
           <div className="quick-action-list">
@@ -509,24 +466,31 @@ const BoxDashboard = () => {
 
       {/* LOSS TREND CHART */}
       <div className="supplier-panel">
-        <div className="flex flex-wrap items-start justify-between gap-3 mb-4">
-          <div>
-            <h3 className="flex items-center gap-2"><BarChart3 size={18} className="text-blue-600" /> Lost Crate Trend</h3>
-            <p>How many crates were marked lost or damaged over time</p>
-          </div>
-          <div className="unit-pills">
-            {[1, 3, 6, 12].map((m) => (
-              <button
-                key={m}
-                type="button"
-                onClick={() => setLossRange(m)}
-                className={`unit-pill ${lossRange === m ? 'active' : ''}`}
-              >
-                {m === 1 ? 'Last month' : `${m} months`}
-              </button>
-            ))}
-          </div>
-        </div>
+        <button
+          type="button"
+          onClick={() => setShowLossTrend((v) => !v)}
+          className="flex w-full items-center justify-between gap-3 text-left"
+        >
+          <h3 className="flex items-center gap-2"><BarChart3 size={18} className="text-blue-600" /> Lost Crate Trend</h3>
+          {showLossTrend ? <ChevronUp size={18} className="text-slate-400" /> : <ChevronDown size={18} className="text-slate-400" />}
+        </button>
+
+        {showLossTrend && (
+          <div className="mt-4">
+            <div className="mb-4 flex justify-end">
+              <div className="unit-pills">
+                {[1, 3, 6, 12].map((m) => (
+                  <button
+                    key={m}
+                    type="button"
+                    onClick={() => setLossRange(m)}
+                    className={`unit-pill ${lossRange === m ? 'active' : ''}`}
+                  >
+                    {m === 1 ? 'Last month' : `${m} months`}
+                  </button>
+                ))}
+              </div>
+            </div>
 
         {lossLoading ? (
           <div className="flex gap-2 h-32 items-end">
@@ -667,6 +631,8 @@ const BoxDashboard = () => {
             </div>
           </>
         )}
+          </div>
+        )}
       </div>
 
       {/* ADD CRATES MODAL */}
@@ -676,7 +642,7 @@ const BoxDashboard = () => {
             <div className="modal-header">
               <div className="flex items-center gap-2.5">
                 <div className="modal-icon-circle bg-blue-100 text-blue-700"><Plus size={18} /></div>
-                <div><h2>Add New Crates</h2><p className="text-xs text-slate-500 mt-0.5">Record a crate purchase</p></div>
+                <div><h2>Add New Crates</h2></div>
               </div>
               <button onClick={() => setShowPurchaseModal(false)} className="modal-close-btn">✕</button>
             </div>
@@ -735,7 +701,7 @@ const BoxDashboard = () => {
             <div className="modal-header">
               <div className="flex items-center gap-2.5">
                 <div className="modal-icon-circle bg-rose-100 text-rose-700"><AlertTriangle size={18} /></div>
-                <div><h2>Mark Lost / Damaged</h2><p className="text-xs text-slate-500 mt-0.5">Removes from active inventory</p></div>
+                <div><h2>Mark Lost / Damaged</h2></div>
               </div>
               <button onClick={() => setShowLossModal(false)} className="modal-close-btn">✕</button>
             </div>
@@ -802,7 +768,6 @@ const BoxDashboard = () => {
                 <div className="modal-icon-circle bg-blue-100 text-blue-700"><Users size={18} /></div>
                 <div>
                   <h2>Customer Crate Movement</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">Lend crates to a customer, or accept their return</p>
                 </div>
               </div>
               <button onClick={() => setShowCustomerModal(false)} className="modal-close-btn">✕</button>
@@ -911,7 +876,6 @@ const BoxDashboard = () => {
                 <div className="modal-icon-circle bg-blue-100 text-blue-700"><ArrowRightLeft size={18} /></div>
                 <div>
                   <h2>Supplier Crate Movement</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">Give crates to or receive from a supplier</p>
                 </div>
               </div>
               <button onClick={() => setShowSupplierModal(false)} className="modal-close-btn">✕</button>
@@ -1020,7 +984,6 @@ const BoxDashboard = () => {
                 <div className="modal-icon-circle bg-emerald-100 text-emerald-700"><ShoppingCart size={18} /></div>
                 <div>
                   <h2>Sell Crates</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">Customer is charged · only profit hits P&amp;L</p>
                 </div>
               </div>
               <button onClick={() => setShowSellModal(false)} className="modal-close-btn">✕</button>
@@ -1102,7 +1065,7 @@ const BoxDashboard = () => {
                 {Number(sellForm.quantity) > 0 && Number(sellForm.unitSalePrice) >= 0 && (() => {
                   const qty = Number(sellForm.quantity) || 0;
                   const unit = Number(sellForm.unitSalePrice) || 0;
-                  const costBasis = Number(statOf(sellForm.crateType).purchasePrice) || 0;
+                  const costBasis = Number(statOf(sellForm.crateType).weightedAvgCost) || 0;
                   const gross = qty * unit;
                   const cost = qty * costBasis;
                   const profit = gross - cost;
@@ -1142,48 +1105,6 @@ const BoxDashboard = () => {
         </div>
       )}
 
-      {/* SET CRATE PRICE MODAL */}
-      {showPriceModal && (
-        <div className="modal-overlay">
-          <div className="modal-content" style={{ maxWidth: '24rem' }}>
-            <div className="modal-header">
-              <div className="flex items-center gap-2.5">
-                <div className="modal-icon-circle bg-blue-100 text-blue-700"><Wallet size={18} /></div>
-                <div>
-                  <h2>Crate Cost</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">{priceForm.crateType} — used to value losses in P&amp;L</p>
-                </div>
-              </div>
-              <button onClick={() => setShowPriceModal(false)} className="modal-close-btn">✕</button>
-            </div>
-            <div className="modal-body">
-              <div className="form-field">
-                <label className="form-label"><Hash size={13} /> Purchase price per crate (৳)</label>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={priceForm.purchasePrice}
-                  onChange={(e) => setPriceForm((p) => ({ ...p, purchasePrice: e.target.value }))}
-                  className="input-field"
-                  placeholder="e.g. 250"
-                  autoFocus
-                />
-                <p className="text-xs text-slate-500 mt-1">
-                  Already-recorded losses keep their original cost snapshot; only new losses use this price.
-                </p>
-              </div>
-              {priceError && <div className="status-error"><span>!</span><span>{priceError}</span></div>}
-            </div>
-            <div className="modal-footer">
-              <button onClick={() => setShowPriceModal(false)} className="btn-secondary" disabled={isSavingPrice}>Cancel</button>
-              <button onClick={handlePriceSave} className="btn-primary flex items-center gap-2" disabled={isSavingPrice}>
-                {isSavingPrice ? 'Saving…' : 'Save price'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

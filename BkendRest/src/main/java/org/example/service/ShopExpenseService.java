@@ -33,7 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class ShopExpenseService {
 
     private static final List<String> DEFAULT_SHOP_CATEGORIES = List.of(
-            "Shop Rent", "Employee Cost", "Lunch Bill", "Snacks Bill", "Other"
+            "Lunch Bill", "Snacks", "Utility Bill", "Shop Rent", "Employee Salary", "Tax", "Other"
     );
 
     private final WholesalerRepository wholesalerRepository;

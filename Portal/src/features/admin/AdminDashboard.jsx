@@ -1,14 +1,14 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Users, Plus, Search, KeyRound,
   Building2, User, Mail, Phone, MapPin, Lock, Database,
   ChevronLeft, ChevronRight, ChevronDown, Pencil, FolderPlus, Tag, MoreVertical, X, LifeBuoy, Boxes,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
-import { useLang } from '../../shared/contexts/LanguageContext';
 import { useToast } from '../../shared/components/Toast';
 import Navbar from '../../shared/components/Navbar';
 import { apiPaths, postJson } from '../../services/apiClient';
+import { formatNumber, formatDate } from '../../shared/utils/format';
 
 const emptyForm = {
   name: '', email: '', password: '', businessName: '', phone: '', address: '',
@@ -33,7 +33,6 @@ const Field = ({ icon: Icon, label, required, children, hint }) => (
 
 const AdminDashboard = () => {
   const { admin } = useAuth();
-  const { t, formatNumber, formatDate } = useLang();
   const showToast = useToast();
 
   // Pagination state
@@ -66,12 +65,6 @@ const AdminDashboard = () => {
   // Tabs
   const [activeTab, setActiveTab] = useState('list');
 
-  // Admin Support — quick reset lookup
-  const [supportPhone, setSupportPhone] = useState('');
-  const [supportFound, setSupportFound] = useState(null);
-  const [supportSearched, setSupportSearched] = useState(false);
-  const [supportLoading, setSupportLoading] = useState(false);
-
   // Product catalog
   const [showProductModal, setShowProductModal] = useState(false);
   const [productForm, setProductForm] = useState({ name: '', categories: [{ name: '' }] });
@@ -79,6 +72,9 @@ const AdminDashboard = () => {
   const [productSaving, setProductSaving] = useState(false);
   const [catalog, setCatalog] = useState([]);
   const [catalogLoading, setCatalogLoading] = useState(false);
+  // Catalog search + client-side pagination (scales to thousands of products).
+  const [catalogSearch, setCatalogSearch] = useState('');
+  const [catalogPage, setCatalogPage] = useState(0);
   // Per-product UI state — expanded ids, in-flight category form state.
   const [expanded, setExpanded] = useState({});
   const [catEditor, setCatEditor] = useState(null); // { mode:'add'|'rename', productId, parentId?, categoryId?, value }
@@ -120,6 +116,24 @@ const AdminDashboard = () => {
     if (activeTab === 'support') { loadCatalog(); loadCrateTypes(); }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [activeTab]);
+
+  // Catalog: filter by product or variety name, then page client-side.
+  const CATALOG_PAGE_SIZE = 12;
+  const filteredCatalog = useMemo(() => {
+    const q = catalogSearch.trim().toLowerCase();
+    if (!q) return catalog;
+    return catalog.filter((p) =>
+      (p.name || '').toLowerCase().includes(q)
+      || (p.categories || []).some((c) => (c.name || '').toLowerCase().includes(q)),
+    );
+  }, [catalog, catalogSearch]);
+  const totalCatalogPages = Math.max(1, Math.ceil(filteredCatalog.length / CATALOG_PAGE_SIZE));
+  const safeCatalogPage = Math.min(catalogPage, totalCatalogPages - 1);
+  const pagedCatalog = useMemo(
+    () => filteredCatalog.slice(safeCatalogPage * CATALOG_PAGE_SIZE, safeCatalogPage * CATALOG_PAGE_SIZE + CATALOG_PAGE_SIZE),
+    [filteredCatalog, safeCatalogPage],
+  );
+
 
   const openProductModal = () => {
     setProductForm({ name: '', categories: [{ name: '' }] });
@@ -252,7 +266,7 @@ const AdminDashboard = () => {
     setFormError(''); setIsSaving(true);
     try {
       await postJson(apiPaths.adminWholesalersCreate, formData);
-      showToast(t('form.create.success'), 'success');
+      showToast('Wholesaler created successfully', 'success');
       closeForm();
       await fetchPage(0, pageSize, phoneSearch);
     } catch (err) {
@@ -275,7 +289,7 @@ const AdminDashboard = () => {
     setIsResetting(true); setResetError('');
     try {
       await postJson(apiPaths.adminWholesalerResetPassword(resetTarget.id), { newPassword: resetPwd });
-      showToast(t('admin.resetPwd.success').replace('{name}', resetTarget.businessName), 'success');
+      showToast('Password updated for {name}'.replace('{name}', resetTarget.businessName), 'success');
       closeReset();
     } catch (err) {
       setResetError(err.message || 'Failed to reset password.');
@@ -290,27 +304,10 @@ const AdminDashboard = () => {
   const showingFrom = total === 0 ? 0 : page * pageSize + 1;
   const showingTo = Math.min(total, (page + 1) * pageSize);
 
-  const handleSupportFind = async (e) => {
-    e?.preventDefault?.();
-    if (!supportPhone.trim()) return;
-    setSupportLoading(true); setSupportSearched(false);
-    try {
-      const data = await postJson(apiPaths.adminWholesalersSearch, { page: 0, size: 5, phone: supportPhone });
-      const exact = (data.items || []).find((w) => (w.phone || '').replace(/\D/g, '') === supportPhone.replace(/\D/g, ''))
-        || (data.items || [])[0]
-        || null;
-      setSupportFound(exact);
-    } catch {
-      setSupportFound(null);
-    } finally {
-      setSupportLoading(false);
-      setSupportSearched(true);
-    }
-  };
 
   return (
     <div className="min-h-screen admin-page-bg">
-      <Navbar subtitle={t('admin.console')} />
+      <Navbar subtitle={'Admin Console'} />
 
       <main className="container-main space-y-4">
         {/* Compact header bar */}
@@ -323,7 +320,7 @@ const AdminDashboard = () => {
             </div>
           </div>
           <button onClick={openForm} className="btn-primary flex items-center gap-2 shrink-0">
-            <Plus size={16} /> {t('admin.add')}
+            <Plus size={16} /> {'Add Wholesaler'}
           </button>
         </header>
 
@@ -350,148 +347,34 @@ const AdminDashboard = () => {
         {/* Admin Support Tab */}
         {activeTab === 'support' && (
           <div className="space-y-4">
-            <div className="support-panel">
-              <div className="support-panel-header">
-                <div className="support-panel-icon"><KeyRound size={20} /></div>
-                <div className="min-w-0 flex-1">
-                  <h3 className="support-panel-title">{t('support.reset.title')}</h3>
-                  <p className="support-panel-sub">{t('support.reset.sub')}</p>
-                </div>
-                <form onSubmit={handleSupportFind} className="support-inline-search shrink-0">
-                  <div className="relative">
-                    <Phone size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                    <input
-                      type="tel"
-                      value={supportPhone}
-                      onChange={(e) => { setSupportPhone(e.target.value); setSupportSearched(false); setSupportFound(null); }}
-                      placeholder={t('support.reset.findPlaceholder')}
-                      className="input-field !pl-8 !py-2 text-sm"
-                    />
-                  </div>
-                  <button
-                    type="submit"
-                    className="btn-primary flex items-center gap-1.5 !py-2 !px-3 text-sm"
-                    disabled={supportLoading || !supportPhone.trim()}
-                  >
-                    <Search size={13} /> {supportLoading ? '…' : t('support.reset.findBtn')}
-                  </button>
-                </form>
-              </div>
-
-              {supportSearched && (
-                supportFound ? (
-                  <button
-                    type="button"
-                    onClick={() => openReset(supportFound)}
-                    className="support-found-card support-found-card-clickable"
-                    title={t('admin.resetPwd')}
-                  >
-                    <div className="flex items-center gap-3 min-w-0 flex-1">
-                      <div className="wholesaler-avatar !w-10 !h-10 !text-xs">
-                        {(supportFound.businessName || supportFound.name || 'W').split(' ').map((n) => n[0]).join('').slice(0, 2).toUpperCase()}
-                      </div>
-                      <div className="min-w-0 text-left">
-                        <div className="flex items-center gap-2 flex-wrap">
-                          <p className="font-bold text-slate-900 truncate">{supportFound.businessName}</p>
-                          <span className={`badge ${supportFound.status === 'ACTIVE' ? 'badge-emerald' : 'badge-rose'}`}>
-                            {supportFound.status === 'ACTIVE' ? t('common.active') : t('common.disabled')}
-                          </span>
-                        </div>
-                        <p className="text-xs text-slate-500 mt-0.5 truncate">
-                          {supportFound.name} • {supportFound.phone} • {supportFound.email}
-                        </p>
-                      </div>
-                    </div>
-                    <span className="support-found-cta">
-                      <KeyRound size={14} /> {t('admin.resetPwd')}
-                    </span>
-                  </button>
-                ) : (
-                  <div className="support-empty">
-                    <X size={18} className="text-rose-500" />
-                    <p>{t('support.reset.notFound')}</p>
-                  </div>
-                )
-              )}
-            </div>
-
-            <div className="support-panel">
-              <div className="support-panel-header">
-                <div className="support-panel-icon support-panel-icon-teal"><Database size={20} /></div>
-                <div className="min-w-0 flex-1">
-                  <h3 className="support-panel-title">{t('product.list.title')}</h3>
-                  <p className="support-panel-sub">{t('product.list.sub')}</p>
-                </div>
-                <button onClick={openProductModal} className="btn-primary flex items-center gap-2 shrink-0">
-                  <Plus size={15} /> {t('product.add')}
-                </button>
-              </div>
-
-              {catalogLoading ? (
-                <p className="mt-3 text-sm text-slate-500">Loading catalog…</p>
-              ) : catalog.length === 0 ? (
-                <p className="mt-3 text-sm text-slate-500">No products yet. Click "Add Product" to start.</p>
-              ) : (
-                <div className="mt-3 space-y-2">
-                  {catalog.map((product) => {
-                    const isOpen = !!expanded[product.id];
-                    const varieties = product.categories || [];
-                    return (
-                      <div key={product.id} className="rounded-xl border border-slate-200 bg-white">
-                        <div className="flex items-center justify-between gap-2 p-3">
-                          <button
-                            type="button"
-                            onClick={() => setExpanded((e) => ({ ...e, [product.id]: !e[product.id] }))}
-                            className="flex flex-1 items-center gap-2 text-left min-w-0"
-                          >
-                            {isOpen ? <ChevronDown size={14} className="text-slate-500" /> : <ChevronRight size={14} className="text-slate-500" />}
-                            <span className="font-bold text-slate-900 truncate">{product.name}</span>
-                            <span className="badge badge-teal">{varieties.length} variet{varieties.length === 1 ? 'y' : 'ies'}</span>
-                          </button>
-                          <button
-                            type="button"
-                            onClick={() => setCatEditor({ mode: 'add', productId: product.id, value: '', usesLots: false })}
-                            className="btn-compact"
-                            title="Add variety"
-                          >
-                            <FolderPlus size={12} /> Add variety
-                          </button>
-                        </div>
-                        {isOpen && varieties.length > 0 && (
-                          <div className="border-t border-slate-100 p-3 pt-2">
-                            <ul className="space-y-1">
-                              {varieties.map((v) => (
-                                <li key={v.id} className="group flex items-center gap-2 py-0.5">
-                                  <Tag size={11} className="text-slate-400 shrink-0" />
-                                  <span className="text-sm text-slate-800 truncate">{v.name}</span>
-                                  {v.usesLots && <span className="badge badge-amber">uses Lot1..200</span>}
-                                  <button
-                                    type="button"
-                                    onClick={() => setCatEditor({ mode: 'rename', productId: product.id, categoryId: v.id, value: v.name, usesLots: v.usesLots })}
-                                    className="icon-btn !w-7 !h-7 ml-auto opacity-0 transition group-hover:opacity-100"
-                                    title="Rename / toggle lots"
-                                  >
-                                    <Pencil size={12} />
-                                  </button>
-                                </li>
-                              ))}
-                            </ul>
-                          </div>
-                        )}
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-
-            {/* Crates Service — global crate-type catalog */}
+            {/* Crate Types — only a handful; chips sit inline on the header row */}
             <div className="support-panel">
               <div className="support-panel-header">
                 <div className="support-panel-icon support-panel-icon-teal"><Boxes size={20} /></div>
-                <div className="min-w-0 flex-1">
-                  <h3 className="support-panel-title">Crates Service</h3>
-                  <p className="support-panel-sub">Crate types available to all wholesalers</p>
+                <h3 className="support-panel-title shrink-0">Crate Types</h3>
+                <div className="flex flex-1 flex-wrap items-center gap-2">
+                  {crateTypesLoading ? (
+                    <span className="text-sm text-slate-500">Loading…</span>
+                  ) : crateTypes.length === 0 ? (
+                    <span className="text-sm text-slate-500">No crate types yet.</span>
+                  ) : (
+                    crateTypes.map((ct) => (
+                      <div key={ct.id} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5">
+                        <span className="font-semibold text-slate-800">{ct.name}</span>
+                        <span className={`badge ${ct.status === 'ACTIVE' ? 'badge-emerald' : 'badge-rose'}`}>
+                          {ct.status === 'ACTIVE' ? 'Active' : 'Disabled'}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => toggleCrateTypeStatus(ct)}
+                          className="btn-compact"
+                          title={ct.status === 'ACTIVE' ? 'Disable' : 'Enable'}
+                        >
+                          {ct.status === 'ACTIVE' ? 'Disable' : 'Enable'}
+                        </button>
+                      </div>
+                    ))
+                  )}
                 </div>
                 <button
                   onClick={() => { setCrateTypeForm({ name: '' }); setCrateTypeError(''); setShowCrateTypeModal(true); }}
@@ -500,31 +383,124 @@ const AdminDashboard = () => {
                   <Plus size={15} /> Add Crate Type
                 </button>
               </div>
+            </div>
 
-              {crateTypesLoading ? (
-                <p className="mt-3 text-sm text-slate-500">Loading crate types…</p>
-              ) : crateTypes.length === 0 ? (
-                <p className="mt-3 text-sm text-slate-500">No crate types yet. Click "Add Crate Type" to start.</p>
-              ) : (
-                <div className="mt-3 flex flex-wrap gap-2">
-                  {crateTypes.map((ct) => (
-                    <div key={ct.id} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-2">
-                      <Boxes size={13} className="text-slate-400" />
-                      <span className="font-semibold text-slate-800">{ct.name}</span>
-                      <span className={`badge ${ct.status === 'ACTIVE' ? 'badge-emerald' : 'badge-rose'}`}>
-                        {ct.status === 'ACTIVE' ? 'Active' : 'Disabled'}
-                      </span>
-                      <button
-                        type="button"
-                        onClick={() => toggleCrateTypeStatus(ct)}
-                        className="btn-compact"
-                        title={ct.status === 'ACTIVE' ? 'Disable' : 'Enable'}
-                      >
-                        {ct.status === 'ACTIVE' ? 'Disable' : 'Enable'}
-                      </button>
-                    </div>
-                  ))}
+            {/* Product Catalog — search sits inline in the header */}
+            <div className="support-panel">
+              <div className="support-panel-header">
+                <div className="support-panel-icon support-panel-icon-teal"><Database size={20} /></div>
+                <div className="min-w-0 flex-1">
+                  <h3 className="support-panel-title">{'Product Catalog'}</h3>
                 </div>
+                {!catalogLoading && catalog.length > 0 && (
+                  <div className="support-inline-search shrink-0">
+                    <div className="relative">
+                      <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                      <input
+                        type="text"
+                        value={catalogSearch}
+                        onChange={(e) => { setCatalogSearch(e.target.value); setCatalogPage(0); }}
+                        placeholder="Search products or varieties…"
+                        className="input-field !pl-8 !py-2 text-sm"
+                      />
+                    </div>
+                  </div>
+                )}
+                <button onClick={openProductModal} className="btn-primary flex items-center gap-2 shrink-0">
+                  <Plus size={15} /> {'Add Product'}
+                </button>
+              </div>
+
+              {catalogLoading ? (
+                <p className="mt-3 text-sm text-slate-500">Loading catalog…</p>
+              ) : catalog.length === 0 ? (
+                <p className="mt-3 text-sm text-slate-500">No products yet.</p>
+              ) : filteredCatalog.length === 0 ? (
+                <p className="mt-3 text-sm text-slate-500">No products match &ldquo;{catalogSearch.trim()}&rdquo;.</p>
+              ) : (
+                <>
+                  <div className="mt-3 space-y-2">
+                    {pagedCatalog.map((product) => {
+                      const isOpen = !!expanded[product.id];
+                      const varieties = product.categories || [];
+                      return (
+                        <div key={product.id} className="rounded-xl border border-slate-200 bg-white">
+                          <div className="flex items-center justify-between gap-2 p-3">
+                            <button
+                              type="button"
+                              onClick={() => setExpanded((e) => ({ ...e, [product.id]: !e[product.id] }))}
+                              className="flex flex-1 items-center gap-2 text-left min-w-0"
+                            >
+                              {isOpen ? <ChevronDown size={14} className="text-slate-500" /> : <ChevronRight size={14} className="text-slate-500" />}
+                              <span className="font-bold text-slate-900 truncate">{product.name}</span>
+                              <span className="badge badge-teal">{varieties.length} variet{varieties.length === 1 ? 'y' : 'ies'}</span>
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setCatEditor({ mode: 'add', productId: product.id, value: '', usesLots: false })}
+                              className="btn-compact"
+                              title="Add variety"
+                            >
+                              <FolderPlus size={12} /> Add variety
+                            </button>
+                          </div>
+                          {isOpen && varieties.length > 0 && (
+                            <div className="border-t border-slate-100 p-3 pt-2">
+                              <ul className="space-y-1">
+                                {varieties.map((v) => (
+                                  <li key={v.id} className="group flex items-center gap-2 py-0.5">
+                                    <Tag size={11} className="text-slate-400 shrink-0" />
+                                    <span className="text-sm text-slate-800 truncate">{v.name}</span>
+                                    {v.usesLots && <span className="badge badge-amber">uses Lot1..200</span>}
+                                    <button
+                                      type="button"
+                                      onClick={() => setCatEditor({ mode: 'rename', productId: product.id, categoryId: v.id, value: v.name, usesLots: v.usesLots })}
+                                      className="icon-btn !w-7 !h-7 ml-auto opacity-0 transition group-hover:opacity-100"
+                                      title="Rename / toggle lots"
+                                    >
+                                      <Pencil size={12} />
+                                    </button>
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
+                        </div>
+                      );
+                    })}
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-between">
+                    <span className="text-xs font-medium text-slate-500">
+                      {filteredCatalog.length} of {catalog.length}
+                    </span>
+                    {totalCatalogPages > 1 && (
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setCatalogPage(Math.max(0, safeCatalogPage - 1))}
+                          disabled={safeCatalogPage === 0}
+                          className="page-btn"
+                          aria-label="Previous page"
+                        >
+                          <ChevronLeft size={14} />
+                        </button>
+                        <span className="px-2 text-xs font-semibold text-slate-700">
+                          {formatNumber(safeCatalogPage + 1)} / {formatNumber(totalCatalogPages)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setCatalogPage(Math.min(totalCatalogPages - 1, safeCatalogPage + 1))}
+                          disabled={safeCatalogPage >= totalCatalogPages - 1}
+                          className="page-btn"
+                          aria-label="Next page"
+                        >
+                          <ChevronRight size={14} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </>
               )}
             </div>
 
@@ -589,7 +565,7 @@ const AdminDashboard = () => {
           <div className="data-card-header">
             <div className="flex items-center gap-2">
               <Users size={16} className="text-blue-600" />
-              <h3 className="data-card-title">{t('admin.wholesalers')}</h3>
+              <h3 className="data-card-title">{'Wholesalers'}</h3>
               <span className="badge badge-teal">{formatNumber(total)}</span>
             </div>
             <div className="relative w-full sm:w-[300px]">
@@ -599,7 +575,7 @@ const AdminDashboard = () => {
                 value={phoneSearch}
                 onChange={(e) => setPhoneSearch(e.target.value)}
                 className="input-field !pl-9 !pr-8 !py-2 text-sm"
-                placeholder={t('admin.phoneSearch.placeholder')}
+                placeholder={'Search by phone number…'}
               />
               {phoneSearch && (
                 <button
@@ -618,13 +594,13 @@ const AdminDashboard = () => {
             <table className="data-table">
               <thead>
                 <tr>
-                  <th className="w-[28%]">{t('admin.col.business')}</th>
-                  <th className="w-[18%]">{t('admin.col.owner')}</th>
-                  <th className="w-[14%]">{t('admin.col.phone')}</th>
-                  <th className="w-[18%]">{t('admin.col.email')}</th>
-                  <th className="w-[8%]">{t('admin.col.status')}</th>
-                  <th className="w-[10%]">{t('admin.col.created')}</th>
-                  <th className="w-[4%] text-right pr-3">·</th>
+                  <th className="w-[28%]">{'Business'}</th>
+                  <th className="w-[18%]">{'Owner'}</th>
+                  <th className="w-[14%]">{'Phone'}</th>
+                  <th className="w-[18%]">{'Email'}</th>
+                  <th className="w-[8%]">{'Status'}</th>
+                  <th className="w-[10%]">{'Created'}</th>
+                  <th className="w-[4%] text-right pr-3">{'Action'}</th>
                 </tr>
               </thead>
               <tbody>
@@ -639,10 +615,10 @@ const AdminDashboard = () => {
                     <td colSpan={7} className="text-center py-10">
                       <Users size={28} className="mx-auto mb-2 text-slate-300" />
                       <p className="font-semibold text-slate-600">
-                        {phoneSearch ? t('admin.notFound.title') : t('admin.empty.title')}
+                        {phoneSearch ? 'No matches found' : 'No wholesalers yet'}
                       </p>
                       <p className="text-xs text-slate-400 mt-1">
-                        {phoneSearch ? t('admin.notFound.sub') : t('admin.empty.sub')}
+                        {phoneSearch ? 'Try a different search term.' : 'Create your first wholesaler account to get started.'}
                       </p>
                     </td>
                   </tr>
@@ -664,7 +640,7 @@ const AdminDashboard = () => {
                         <td className="text-slate-600 truncate" title={w.email}>{w.email}</td>
                         <td>
                           <span className={`badge ${w.status === 'ACTIVE' ? 'badge-emerald' : 'badge-rose'}`}>
-                            {w.status === 'ACTIVE' ? t('common.active') : t('common.disabled')}
+                            {w.status === 'ACTIVE' ? 'Active' : 'Disabled'}
                           </span>
                         </td>
                         <td className="text-xs text-slate-500 whitespace-nowrap">{formatDate(w.createdAt)}</td>
@@ -681,7 +657,7 @@ const AdminDashboard = () => {
                               <div className="row-menu-backdrop" onClick={() => setOpenMenuId(null)} />
                               <div className="row-menu">
                                 <button onClick={() => openReset(w)} className="row-menu-item">
-                                  <KeyRound size={13} /> {t('admin.resetPwd')}
+                                  <KeyRound size={13} /> {'Reset Password'}
                                 </button>
                               </div>
                             </>
@@ -698,7 +674,7 @@ const AdminDashboard = () => {
           {/* Pagination footer */}
           <div className="data-card-footer">
             <div className="text-xs text-slate-500">
-              {t('page.showing')
+              {'Showing {from}–{to} of {total}'
                 .replace('{from}', formatNumber(showingFrom))
                 .replace('{to}', formatNumber(showingTo))
                 .replace('{total}', formatNumber(total))}
@@ -715,14 +691,14 @@ const AdminDashboard = () => {
                   <option value={50}>50</option>
                   <option value={100}>100</option>
                 </select>
-                <span>{t('page.perPage')}</span>
+                <span>{'per page'}</span>
               </div>
               <div className="flex items-center gap-1">
                 <button
                   onClick={() => fetchPage(Math.max(0, page - 1), pageSize, phoneSearch)}
                   disabled={page === 0 || isLoading}
                   className="page-btn"
-                  aria-label={t('page.prev')}
+                  aria-label={'Previous'}
                 >
                   <ChevronLeft size={14} />
                 </button>
@@ -733,7 +709,7 @@ const AdminDashboard = () => {
                   onClick={() => fetchPage(Math.min(totalPages - 1, page + 1), pageSize, phoneSearch)}
                   disabled={page >= totalPages - 1 || isLoading}
                   className="page-btn"
-                  aria-label={t('page.next')}
+                  aria-label={'Next'}
                 >
                   <ChevronRight size={14} />
                 </button>
@@ -752,54 +728,54 @@ const AdminDashboard = () => {
           <div className="modal-content" style={{ maxWidth: '40rem' }}>
             <div className="modal-header">
               <div>
-                <h2>{t('admin.add')}</h2>
-                <p className="text-xs text-slate-500 mt-0.5">{t('admin.support.title')}</p>
+                <h2>{'Add Wholesaler'}</h2>
+                <p className="text-xs text-slate-500 mt-0.5">{'Support your wholesalers'}</p>
               </div>
               <button onClick={closeForm} className="modal-close-btn">✕</button>
             </div>
             <form onSubmit={handleSubmit}>
               <div className="modal-body">
                 <div className="form-grid">
-                  <Field icon={User} label={t('form.name')} required>
+                  <Field icon={User} label={'Owner Name'} required>
                     <input
                       className="input-field" value={formData.name}
                       onChange={(e) => handleChange('name', e.target.value)}
-                      placeholder={t('form.name.placeholder')} autoFocus
+                      placeholder={'e.g. Rahim Hossain'} autoFocus
                     />
                   </Field>
-                  <Field icon={Building2} label={t('form.business')} required>
+                  <Field icon={Building2} label={'Business Name'} required>
                     <input
                       className="input-field" value={formData.businessName}
                       onChange={(e) => handleChange('businessName', e.target.value)}
-                      placeholder={t('form.business.placeholder')}
+                      placeholder={'e.g. Rahim Trading'}
                     />
                   </Field>
-                  <Field icon={Mail} label={t('form.email')} required>
+                  <Field icon={Mail} label={'Email'} required>
                     <input
                       className="input-field" type="email" value={formData.email}
                       onChange={(e) => handleChange('email', e.target.value)}
-                      placeholder={t('form.email.placeholder')}
+                      placeholder={'owner@example.com'}
                     />
                   </Field>
-                  <Field icon={Phone} label={t('form.phone')} required>
+                  <Field icon={Phone} label={'Phone'} required>
                     <input
                       className="input-field" type="tel" value={formData.phone}
                       onChange={(e) => handleChange('phone', e.target.value)}
-                      placeholder={t('form.phone.placeholder')}
+                      placeholder={'01700000000'}
                     />
                   </Field>
-                  <Field icon={Lock} label={t('form.password')} required>
+                  <Field icon={Lock} label={'Password'} required>
                     <input
                       className="input-field" type="password" value={formData.password}
                       onChange={(e) => handleChange('password', e.target.value)}
-                      placeholder={t('form.password.placeholder')} minLength={8}
+                      placeholder={'Set login password (8+ chars)'} minLength={8}
                     />
                   </Field>
-                  <Field icon={MapPin} label={t('form.address')}>
+                  <Field icon={MapPin} label={'Address'}>
                     <input
                       className="input-field" value={formData.address}
                       onChange={(e) => handleChange('address', e.target.value)}
-                      placeholder={t('form.address.placeholder')}
+                      placeholder={'Business address (optional)'}
                     />
                   </Field>
                 </div>
@@ -811,10 +787,10 @@ const AdminDashboard = () => {
               </div>
               <div className="modal-footer">
                 <button type="button" onClick={closeForm} className="btn-secondary" disabled={isSaving}>
-                  {t('common.cancel')}
+                  {'Cancel'}
                 </button>
                 <button type="submit" className="btn-primary flex items-center gap-2" disabled={isSaving}>
-                  {isSaving ? t('common.saving') : (<><Plus size={15} /> {t('admin.add')}</>)}
+                  {isSaving ? 'Saving…' : (<><Plus size={15} /> {'Add Wholesaler'}</>)}
                 </button>
               </div>
             </form>
@@ -832,7 +808,7 @@ const AdminDashboard = () => {
                   <KeyRound size={18} />
                 </div>
                 <div>
-                  <h2>{t('admin.resetPwd')}</h2>
+                  <h2>{'Reset Password'}</h2>
                   <p className="text-xs text-slate-500 mt-0.5">{resetTarget.businessName}</p>
                 </div>
               </div>
@@ -840,11 +816,11 @@ const AdminDashboard = () => {
             </div>
             <form onSubmit={handleResetPassword}>
               <div className="modal-body">
-                <Field icon={Lock} label={t('admin.resetPwd.label')} required>
+                <Field icon={Lock} label={'New Password'} required>
                   <input
                     type="password" className="input-field"
                     value={resetPwd} onChange={(e) => setResetPwd(e.target.value)}
-                    placeholder={t('admin.resetPwd.placeholder')} minLength={8} autoFocus
+                    placeholder={'Minimum 8 characters'} minLength={8} autoFocus
                   />
                 </Field>
                 {resetError && (
@@ -855,10 +831,10 @@ const AdminDashboard = () => {
               </div>
               <div className="modal-footer">
                 <button type="button" onClick={closeReset} className="btn-secondary" disabled={isResetting}>
-                  {t('common.cancel')}
+                  {'Cancel'}
                 </button>
                 <button type="submit" className="btn-primary flex items-center gap-2" disabled={isResetting}>
-                  {isResetting ? t('common.saving') : (<><KeyRound size={14} /> {t('admin.resetPwd')}</>)}
+                  {isResetting ? 'Saving…' : (<><KeyRound size={14} /> {'Reset Password'}</>)}
                 </button>
               </div>
             </form>
@@ -876,8 +852,8 @@ const AdminDashboard = () => {
                   <Database size={18} />
                 </div>
                 <div>
-                  <h2>{t('product.add.title')}</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">{t('product.add.sub')}</p>
+                  <h2>{'Add New Product'}</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">{'Global catalog — all wholesalers will see this product'}</p>
                 </div>
               </div>
               <button onClick={closeProductModal} className="modal-close-btn">✕</button>
@@ -886,12 +862,12 @@ const AdminDashboard = () => {
               <div className="modal-body">
                 <div className="space-y-4">
                   {/* Product name */}
-                  <Field icon={Database} label={t('product.name')} required>
+                  <Field icon={Database} label={'Product Name'} required>
                     <input
                       className="input-field"
                       value={productForm.name}
                       onChange={(e) => setProductForm((p) => ({ ...p, name: e.target.value }))}
-                      placeholder={t('product.name.placeholder')}
+                      placeholder={'e.g. Apple'}
                       autoFocus
                     />
                   </Field>
@@ -938,10 +914,10 @@ const AdminDashboard = () => {
               </div>
               <div className="modal-footer">
                 <button type="button" onClick={closeProductModal} className="btn-secondary" disabled={productSaving}>
-                  {t('common.cancel')}
+                  {'Cancel'}
                 </button>
                 <button type="submit" className="btn-primary flex items-center gap-2" disabled={productSaving}>
-                  {productSaving ? t('common.saving') : (<><Plus size={14} /> {t('product.add')}</>)}
+                  {productSaving ? 'Saving…' : (<><Plus size={14} /> {'Add Product'}</>)}
                 </button>
               </div>
             </form>
@@ -958,7 +934,6 @@ const AdminDashboard = () => {
                 <div className="modal-icon-circle bg-blue-100 text-blue-700"><Boxes size={18} /></div>
                 <div>
                   <h2>Add Crate Type</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">Available to all wholesalers</p>
                 </div>
               </div>
               <button onClick={() => setShowCrateTypeModal(false)} className="modal-close-btn">✕</button>

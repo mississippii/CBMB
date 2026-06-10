@@ -167,6 +167,7 @@ public class SaleService {
         sale.setDiscountAmount(discountAmount);
         sale.setNetAmount(netAmount);
         sale.setPaidAmount(paidAmount);
+        sale.setPaymentMethod(paidAmount.signum() > 0 ? parsePaymentMethod(request.paymentMethod()) : org.example.model.enums.PaymentMethod.NONE);
         sale.setDueAmount(dueAmount);
         sale.setBoxesGiven(cratesGiven);
         sale.setNote(clean(request.note()));
@@ -470,5 +471,17 @@ public class SaleService {
 
     private String clean(String value) {
         return value == null ? null : value.trim();
+    }
+
+    /** Parse the at-sale payment method; defaults to CASH when missing/unknown. */
+    private org.example.model.enums.PaymentMethod parsePaymentMethod(String value) {
+        if (value == null || value.isBlank()) {
+            return org.example.model.enums.PaymentMethod.CASH;
+        }
+        try {
+            return org.example.model.enums.PaymentMethod.valueOf(value.trim().toUpperCase(java.util.Locale.ROOT));
+        } catch (IllegalArgumentException ex) {
+            return org.example.model.enums.PaymentMethod.CASH;
+        }
     }
 }

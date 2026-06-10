@@ -8,6 +8,47 @@ CBTrading is a wholesaler operating system for commission‑based trading. The c
 
 The system is intentionally wholesaler‑scoped. Supplier and customer identities may be reused globally by phone, but all business data belongs to a specific wholesaler account.
 
+## Consignment Accounting Model (authoritative, current — 2026‑06)
+
+This supersedes any older descriptions further down that still mention advance payments,
+"recoverable" supplier expenses, commission/expense *receive* payments, or jamanot.
+
+```text
+Supplier net due (one running figure, computed live across ALL the supplier's lots):
+
+  net due = opening
+          + Σ total sold                 (sale value of the supplier's goods, POSTED sales only)
+          − Σ commission                 (per lot: sold × lot commission rate)
+          − Σ expense                    (per lot: labour / transport / others)
+          − Σ payments to supplier       (PRODUCT_PAYMENT settlements)
+
+  Positive net due  = "Supplier Payable" (the wholesaler owes the supplier)
+  Negative net due  = "Advance Paid"     (the wholesaler overpaid; offsets the next lot)
+```
+
+Rules now enforced:
+- **Commission and expense are deductions** baked into net payable — they are NOT money the
+  supplier pays. The `COMMISSION_RECEIVE` / `EXPENSE_RECEIVE` settlement types and their
+  payment-form options were removed.
+- **Only the wholesaler pays the supplier** (`PRODUCT_PAYMENT`), ad-hoc, not per shipment.
+  **Overpaying is allowed** → negative due (advance). The old "payment ≤ payable" guard is gone.
+- **Settle is status-only.** `SupplierDeliveryService.setSettlementStatus` flips the lot to
+  SETTLED (guards: commission set, no unsold stock). It writes **no** settlements and does
+  **not** change any balance.
+- **Supplier due is computed, not ledger-driven.** `SupplierDueService.netDue(...)` is the
+  single source, used by `WholesalerService` (list + profile) and `PaymentService`
+  (payment previous/after due). The supplier `AccountBalance` row is now vestigial for
+  display; customers still use the ledger.
+- **Cancelled sales are excluded** from every supplier/lot aggregate (the `sumLineTotal* /
+  sumQuantityByDelivery / sumSaleWeightByDelivery` queries filter `sale.status = POSTED`).
+- **Shipments**: one product per lot, many variety/lot lines; auto-named
+  `Product_TotalQtyUnit_MonthDay` (editable); estimated-value/advance fields removed; an
+  add-confirmation modal guards creation. Per-lot table shows Total Sold / Commission /
+  Expense / Net Payable and Unit Sold / Kg (`inventoryQuantityOnHand` for remaining).
+- **Crates**: types are a **global admin catalog** (not a fixed Bangla/China pair);
+  capital asset at weighted-average cost; **no jamanot/deposit**; movements recorded one
+  type per entry.
+
 ## Current Applications
 
 ```text
@@ -283,7 +324,7 @@ Once you see these recurring patterns, the whole schema makes sense:
 | `other_due_balances` | Per `(supplier, category)` rollup of `Σ(supplier_expenses.due_amount)`. **Read-optimized cache** — dashboards / supplier profile pages don't have to aggregate the source rows every time. Mutated alongside `supplier_expenses`. | `wholesaler_supplier_id`, `category_id`, `due_amount` |
 | `shop_expenses` | Pure wholesaler-borne overhead (salary, hospitality, lunch, rent, utilities). **No party, no reimbursement** — reduces cash + net profit only; never touches a balance. | `category_id`, `amount`, `payment_method`, `expense_date`, `status` |
 
-### Crate (jamanot) tracking (4 tables)
+### Crate tracking (4 tables)  <!-- crate types are a global admin catalog; no jamanot/deposit -->
 
 > Crates are physical wooden/plastic boxes lent to customers and borrowed from suppliers. Same **snapshot + ledger** model as money — because crates are a second kind of "balance" between you and a party.
 
@@ -943,6 +984,14 @@ CREATE TABLE `sale_items` (
 
 ### Payment And Settlement
 
+> **Current model (2026‑06):** the only supplier money operation is the wholesaler paying
+> the supplier (`PRODUCT_PAYMENT`); overpaying creates an advance (negative net due).
+> `COMMISSION_RECEIVE` / `EXPENSE_RECEIVE` are no longer used (commission/expense are
+> deductions, not payments), and **settling a shipment writes no settlement and moves no
+> money** — see "Consignment Accounting Model" at the top. The text below documents the
+> table mechanics, several of which (the commission/expense receive flows, settle-creates-
+> payments) reflect the prior design.
+
 Customer payment source rows live in `payments`. Supplier money source rows live in `supplier_settlements`. Supplier non‑product money owed to/from the supplier lives in `supplier_expenses` (see next section). Every source row in this section MUST also create:
 
 - one or more `account_ledger` rows with `reference_id` set to the source row's id,
@@ -1099,9 +1148,16 @@ CREATE TABLE `supplier_settlements` (
 > single `PaymentMethod` enum for convenience but the service layer MUST reject
 > `NONE` before writing a `supplier_settlements` row.
 
-### Supplier Expenses (non‑product money, **recoverable** from supplier)
+### Supplier Expenses (per‑shipment deduction from net payable)
 
-Captures money the wholesaler **fronted** for a supplier's shipment (labour, transport) — the supplier is expected to reimburse. `expense_categories` is the shared per-wholesaler catalog (now also used by shop overhead — see next section); `supplier_expenses` are the source rows (linked to a shipment via `delivery_id`); `other_due_balances` is the rollup used by Supplier Profile reads.
+> **Current model (2026‑06):** a supplier expense (Labour / Transport / Others) is a
+> **deduction** from what the wholesaler owes the supplier — it reduces net payable, it is
+> NOT separately reimbursed by the supplier. There is no `EXPENSE_RECEIVE` operation. The
+> supplier expense categories are filtered to `kind = SUPPLIER` (shop categories are
+> `kind = SHOP`). The text below describes the original "recoverable" design and is kept
+> for historical context only.
+
+Captures money the wholesaler **fronted** for a supplier's shipment (labour, transport). `expense_categories` is the shared per-wholesaler catalog (also used by shop overhead — see next section); `supplier_expenses` are the source rows (linked to a shipment via `delivery_id`); `other_due_balances` is a rollup.
 
 ```text
 expense_categories

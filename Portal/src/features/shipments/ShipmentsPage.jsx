@@ -1,8 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
-  Truck, UserCheck, Package, Tag, FileText, Save, Plus, X,
-  DollarSign, Wallet, Percent,
+  Truck, UserCheck, Package, Tag, FileText, Save, Plus, X, MoreVertical, Pencil,
 } from 'lucide-react';
 import { useData } from '../../data/DataContext';
 import { useAuth } from '../auth/AuthContext';
@@ -12,6 +11,12 @@ import { queryKeys } from '../../services/queryKeys';
 
 const UNITS = ['KG', 'PCS', 'CRATE', 'DOZEN', 'BAG', 'MOUND'];
 
+const MONTHS = ['January', 'February', 'March', 'April', 'May', 'June',
+  'July', 'August', 'September', 'October', 'November', 'December'];
+
+// Title-case a unit for the shipment name: "CRATE" → "Crate".
+const titleCase = (s) => (s ? s.charAt(0).toUpperCase() + s.slice(1).toLowerCase() : '');
+
 const newLine = () => ({ categoryId: '', subCategoryId: '', quantity: '' });
 
 const initialForm = {
@@ -20,18 +25,12 @@ const initialForm = {
   productId: '',
   unit: '',
   lines: [newLine()],   // each line: { categoryPath: [..], quantity: '..' }
-  estimatedValue: '',
-  advancePaid: '',
-  commissionRate: '',
   note: '',
 };
 
 
-const formatQuantity = (value, unit) =>
-  `${(Number(value) || 0).toLocaleString()} ${String(unit || '').toUpperCase()}`.trim();
-
 const ShipmentsPage = () => {
-  const { suppliers, catalogProducts, subCategories, addSupplierProduct, fetchShipments } = useData();
+  const { suppliers, catalogProducts, subCategories, addSupplierProduct, fetchShipments, updateShipment } = useData();
   const { admin } = useAuth();
   const { data: shipments = [] } = useQuery({
     queryKey: queryKeys.shipments.list(admin?.wholesalerId),
@@ -43,6 +42,13 @@ const ShipmentsPage = () => {
   const [isSaving, setIsSaving] = useState(false);
   const [formError, setFormError] = useState('');
   const [showModal, setShowModal] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
+  const [detailShipment, setDetailShipment] = useState(null);
+  const [openMenuId, setOpenMenuId] = useState(null);
+  const [editTarget, setEditTarget] = useState(null);
+  const [editForm, setEditForm] = useState({ name: '', note: '' });
+  const [editError, setEditError] = useState('');
+  const [isEditing, setIsEditing] = useState(false);
 
   const supplierById = useMemo(
     () => new Map(suppliers.map((s) => [Number(s.id), s])),
@@ -97,13 +103,14 @@ const ShipmentsPage = () => {
       ...(key === 'productId' ? { lines: [newLine()] } : {}),
     }));
 
-  // Pattern: <Product><TotalQty>Lot  →  e.g. "Mango300Lot"
+  // Pattern: <Product>_<TotalQty><Unit>_<Month><Day>  →  e.g. "Mango_215Crate_June6"
   const suggestedName = useMemo(() => {
     const productLabel = selectedProduct?.name || '';
     const cleanBase = productLabel.replace(/\s+/g, '').slice(0, 30);
     if (!cleanBase || !totalQuantity) return '';
-    return `${cleanBase}${totalQuantity}Lot`;
-  }, [selectedProduct, totalQuantity]);
+    const now = new Date();
+    return `${cleanBase}_${totalQuantity}${titleCase(formData.unit)}_${MONTHS[now.getMonth()]}${now.getDate()}`;
+  }, [selectedProduct, totalQuantity, formData.unit]);
 
   // Always keep the name in sync with the auto-generated pattern.
   useEffect(() => {
@@ -114,25 +121,58 @@ const ShipmentsPage = () => {
   const openModal = () => {
     setFormData(initialForm);
     setFormError('');
+    setShowConfirm(false);
     setShowModal(true);
   };
 
-  const handleSubmit = async (event) => {
+  // Submitting the form opens a confirmation first — a shipment is significant.
+  const handleReview = (event) => {
     event.preventDefault();
     setFormError('');
-    // Each line must have a quantity > 0; category path may be empty.
-    const validLines = formData.lines.filter((l) => Number(l.quantity) > 0);
-    if (validLines.length === 0) {
+    if (!formData.supplierId) { setFormError('Select a supplier.'); return; }
+    if (!formData.productId) { setFormError('Select a product.'); return; }
+    if (!formData.unit) { setFormError('Select a unit.'); return; }
+    if (formData.lines.filter((l) => Number(l.quantity) > 0).length === 0) {
       setFormError('Add at least one line with a quantity.');
       return;
     }
+    setShowConfirm(true);
+  };
+
+  const openEdit = (shipment) => {
+    setOpenMenuId(null);
+    setEditTarget(shipment);
+    setEditForm({ name: shipment.name || '', note: shipment.note || '' });
+    setEditError('');
+  };
+
+  const handleEditSave = async () => {
+    if (!editForm.name.trim()) { setEditError('Shipment name is required.'); return; }
+    setIsEditing(true);
+    setEditError('');
+    try {
+      await updateShipment(editTarget.id, { name: editForm.name.trim(), note: editForm.note.trim() });
+      showToast('Shipment updated', 'success');
+      setEditTarget(null);
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : 'Failed to update shipment.');
+    } finally {
+      setIsEditing(false);
+    }
+  };
+
+  const handleConfirmCreate = async () => {
+    setFormError('');
     setIsSaving(true);
     try {
+      const validLines = formData.lines.filter((l) => Number(l.quantity) > 0);
       await addSupplierProduct({ ...formData, lines: validLines });
       const productLabel = selectedProduct?.name || 'Shipment';
       showToast(`${productLabel} ${totalQuantity} ${formData.unit} received from ${selectedSupplier?.name || 'supplier'} (${validLines.length} line${validLines.length === 1 ? '' : 's'})`, 'success');
+      setShowConfirm(false);
       setShowModal(false);
     } catch (error) {
+      setShowConfirm(false);
       setFormError(error instanceof Error ? error.message : 'Failed to add shipment.');
     } finally {
       setIsSaving(false);
@@ -146,7 +186,6 @@ const ShipmentsPage = () => {
         <div>
           <span className="box-eyebrow">Shipments</span>
           <h3>Supplier shipments</h3>
-          <p>Every lot received from suppliers. Each is tracked and settled separately.</p>
         </div>
         <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={openModal}>
           <Plus size={16} /> Add Shipment
@@ -158,7 +197,6 @@ const ShipmentsPage = () => {
         <div className="mb-4 flex items-center justify-between">
           <div>
             <h3 className="flex items-center gap-2"><Truck size={18} className="text-blue-600" /> All Shipments</h3>
-            <p>Sorted by most recent</p>
           </div>
           <span className="badge badge-teal">{shipments.length} total</span>
         </div>
@@ -167,78 +205,59 @@ const ShipmentsPage = () => {
           <div className="empty-state">
             <Truck size={32} className="empty-state-icon" />
             <p className="empty-state-title">No shipments yet</p>
-            <p className="empty-state-sub">Click “Add Shipment” to record your first supplier delivery.</p>
           </div>
         ) : (
           <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="w-full min-w-[820px] text-sm">
+            <table className="center-table w-full min-w-[720px] text-sm">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200">
-                  <th className="px-4 py-3 text-left font-semibold text-slate-700">Lot</th>
-                  <th className="px-4 py-3 text-left font-semibold text-slate-700">Date</th>
-                  <th className="px-4 py-3 text-left font-semibold text-slate-700">Supplier</th>
-                  <th className="px-4 py-3 text-left font-semibold text-slate-700">Items</th>
-                  <th className="px-4 py-3 text-right font-semibold text-slate-700">Total Qty</th>
-                  <th className="px-4 py-3 text-right font-semibold text-slate-700">Est. Value</th>
-                  <th className="px-4 py-3 text-right font-semibold text-slate-700">Advance</th>
-                  <th className="px-4 py-3 text-center font-semibold text-slate-700">Comm.</th>
+                  <th className="px-4 py-3 text-center font-semibold text-slate-700">Shipment Name</th>
+                  <th className="px-4 py-3 text-center font-semibold text-slate-700">Date</th>
+                  <th className="px-4 py-3 text-center font-semibold text-slate-700">Supplier</th>
+                  <th className="px-4 py-3 text-center font-semibold text-slate-700">Total Quantity</th>
+                  <th className="px-4 py-3 text-center font-semibold text-slate-700">Product</th>
+                  <th className="px-4 py-3 text-center font-semibold text-slate-700">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
                 {allShipments.map((shipment) => {
                   const supplier = supplierById.get(Number(shipment.supplierId));
+                  const products = [...new Set((shipment.items || []).map((it) => it.productName).filter(Boolean))];
                   return (
-                    <tr key={shipment.id} className="hover:bg-slate-50 transition">
-                      <td className="px-4 py-3 whitespace-nowrap">
-                        <div className="font-bold text-blue-700">{shipment.name || `Lot #${shipment.id}`}</div>
-                        {shipment.name && <div className="text-xs text-slate-400">#{shipment.id}</div>}
+                    <tr
+                      key={shipment.id}
+                      onClick={() => setDetailShipment(shipment)}
+                      className="cursor-pointer hover:bg-slate-50 transition text-center"
+                      title="Click to view shipment details"
+                    >
+                      <td className="px-4 py-3 text-center whitespace-nowrap font-bold text-blue-700">
+                        {shipment.name || '—'}
                       </td>
-                      <td className="px-4 py-3 font-semibold text-slate-900 whitespace-nowrap">{shipment.date}</td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2.5">
-                          <div className="supplier-card-avatar !w-8 !h-8 !text-xs">
-                            {supplier?.name?.charAt(0).toUpperCase() || 'S'}
-                          </div>
-                          <span className="font-medium text-slate-800">{supplier?.name || '—'}</span>
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-slate-700">
-                        {(() => {
-                          // Group items by variety so a shipment with many lots reads compactly.
-                          const groups = new Map();
-                          for (const it of (shipment.items || [])) {
-                            const key = it.categoryName || '(no variety)';
-                            const g = groups.get(key) || { name: key, qty: 0, unit: it.unit, lots: [], productName: it.productName };
-                            g.qty += Number(it.quantity) || 0;
-                            if (it.subCategoryName) g.lots.push({ name: it.subCategoryName, qty: Number(it.quantity) || 0 });
-                            groups.set(key, g);
-                          }
-                          return Array.from(groups.values()).map((g, idx) => (
-                            <div key={idx} className="font-medium">
-                              <span className="text-slate-900">{g.name}</span>
-                              <span className="ml-2 text-xs text-slate-500">{formatQuantity(g.qty, g.unit)}</span>
-                              {g.lots.length > 0 && (
-                                <span className="ml-2 text-xs text-slate-500">
-                                  · {g.lots.map((l) => `${l.name} ${Math.round(l.qty)}`).join(' · ')}
-                                </span>
-                              )}
-                            </div>
-                          ));
-                        })()}
-                      </td>
-                      <td className="px-4 py-3 text-right font-extrabold text-slate-900">
+                      <td className="px-4 py-3 text-center font-semibold text-slate-900 whitespace-nowrap">{shipment.date}</td>
+                      <td className="px-4 py-3 text-center font-medium text-slate-800">{supplier?.name || '—'}</td>
+                      <td className="px-4 py-3 text-center font-extrabold text-slate-900">
                         {shipment.totalQuantity.toLocaleString()}
                       </td>
-                      <td className="px-4 py-3 text-right text-slate-700">
-                        {shipment.estimatedValue ? `৳ ${shipment.estimatedValue.toLocaleString()}` : '—'}
-                      </td>
-                      <td className="px-4 py-3 text-right text-slate-700">
-                        {shipment.advancePaid ? `৳ ${shipment.advancePaid.toLocaleString()}` : '—'}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        {shipment.commissionRate == null
-                          ? <span className="badge badge-amber">Pending</span>
-                          : <span className="font-semibold text-slate-800">{shipment.commissionRate}%</span>}
+                      <td className="px-4 py-3 text-center text-slate-800">{products.length ? products.join(', ') : '—'}</td>
+                      <td className="px-4 py-3 text-center relative" onClick={(e) => e.stopPropagation()}>
+                        <button
+                          type="button"
+                          onClick={() => setOpenMenuId(openMenuId === shipment.id ? null : shipment.id)}
+                          className="row-menu-btn"
+                          aria-label="Actions"
+                        >
+                          <MoreVertical size={15} />
+                        </button>
+                        {openMenuId === shipment.id && (
+                          <>
+                            <div className="row-menu-backdrop" onClick={() => setOpenMenuId(null)} />
+                            <div className="row-menu">
+                              <button type="button" onClick={() => openEdit(shipment)} className="row-menu-item">
+                                <Pencil size={13} /> Edit
+                              </button>
+                            </div>
+                          </>
+                        )}
                       </td>
                     </tr>
                   );
@@ -252,7 +271,7 @@ const ShipmentsPage = () => {
       {/* Add Shipment modal */}
       {showModal && (
         <div className="modal-overlay">
-          <form onSubmit={handleSubmit} className="modal-content" style={{ maxWidth: '46rem' }}>
+          <form onSubmit={handleReview} className="modal-content" style={{ maxWidth: '46rem' }}>
             <div className="modal-header">
               <div className="flex items-center gap-2.5">
                 <div className="modal-icon-circle bg-blue-100 text-blue-700">
@@ -260,7 +279,6 @@ const ShipmentsPage = () => {
                 </div>
                 <div>
                   <h2>Add Shipment</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">Record an incoming lot from a supplier</p>
                 </div>
               </div>
               <button type="button" onClick={() => setShowModal(false)} className="modal-close-btn">✕</button>
@@ -374,39 +392,6 @@ const ShipmentsPage = () => {
                   </div>
                 </div>
 
-                <div className="form-field">
-                  <label className="form-label">
-                    <DollarSign size={13} /> Estimated Value
-                    <span className="form-label-hint">of this shipment</span>
-                  </label>
-                  <div className="input-with-suffix">
-                    <input type="number" min="0" step="1" value={formData.estimatedValue} onChange={handleField('estimatedValue')} className="input-field" placeholder="0" />
-                    <span className="input-suffix">৳</span>
-                  </div>
-                </div>
-
-                <div className="form-field">
-                  <label className="form-label">
-                    <Wallet size={13} /> Advance Paid
-                    <span className="form-label-hint">to supplier now</span>
-                  </label>
-                  <div className="input-with-suffix">
-                    <input type="number" min="0" step="1" value={formData.advancePaid} onChange={handleField('advancePaid')} className="input-field" placeholder="0" />
-                    <span className="input-suffix">৳</span>
-                  </div>
-                </div>
-
-                <div className="form-field">
-                  <label className="form-label">
-                    <Percent size={13} /> Commission Rate
-                    <span className="form-label-hint">set later if unsure</span>
-                  </label>
-                  <div className="input-with-suffix">
-                    <input type="number" min="0" max="100" step="0.5" value={formData.commissionRate} onChange={handleField('commissionRate')} className="input-field" placeholder="negotiate after sell" />
-                    <span className="input-suffix">%</span>
-                  </div>
-                </div>
-
                 <div className="form-field form-field-full">
                   <label className="form-label">
                     <FileText size={13} /> Note
@@ -433,13 +418,6 @@ const ShipmentsPage = () => {
                       {totalQuantity ? ` — ${totalQuantity} ${formData.unit || ''}` : ''}
                       {' · '}{formData.lines.filter((l) => Number(l.quantity) > 0).length} line(s)
                     </p>
-                    <p className="shipment-summary-text mt-1 text-slate-500">
-                      Est. value ৳{(Number(formData.estimatedValue) || 0).toLocaleString()}
-                      {' · '}Advance ৳{(Number(formData.advancePaid) || 0).toLocaleString()}
-                      {' · '}Commission {formData.commissionRate === '' || formData.commissionRate == null
-                        ? 'to negotiate'
-                        : `${formData.commissionRate}%`}
-                    </p>
                   </div>
                 </div>
               )}
@@ -455,12 +433,161 @@ const ShipmentsPage = () => {
             <div className="modal-footer">
               <button type="button" onClick={() => setShowModal(false)} className="btn-secondary" disabled={isSaving}>Cancel</button>
               <button type="submit" className="btn-primary flex items-center gap-2" disabled={isSaving}>
-                <Save size={15} /> {isSaving ? 'Saving…' : 'Save Shipment'}
+                <Save size={15} /> Save Shipment
               </button>
             </div>
           </form>
         </div>
       )}
+
+      {/* Confirm before creating a shipment */}
+      {showConfirm && (
+        <div className="modal-overlay">
+          <div className="modal-content" style={{ maxWidth: '28rem' }}>
+            <div className="modal-header">
+              <div className="flex items-center gap-2.5">
+                <div className="modal-icon-circle bg-amber-100 text-amber-700"><Truck size={18} /></div>
+                <div><h2>Add this shipment?</h2></div>
+              </div>
+              <button type="button" onClick={() => setShowConfirm(false)} className="modal-close-btn">✕</button>
+            </div>
+            <div className="modal-body">
+              <p className="text-sm text-slate-600">
+                Please review — adding a shipment updates stock and can only be reversed by settling or adjusting it.
+              </p>
+              <div className="mt-3 grid grid-cols-2 gap-3">
+                <div className="balance-pill"><p>Supplier</p><p>{selectedSupplier?.name || '—'}</p></div>
+                <div className="balance-pill"><p>Product</p><p>{selectedProduct?.name || '—'}</p></div>
+                <div className="balance-pill"><p>Total Quantity</p><p>{totalQuantity} {formData.unit}</p></div>
+                <div className="balance-pill"><p>Lines</p><p>{formData.lines.filter((l) => Number(l.quantity) > 0).length}</p></div>
+              </div>
+              <p className="mt-3 text-xs text-slate-500">Name: <span className="font-semibold text-slate-700">{formData.name || '—'}</span></p>
+            </div>
+            <div className="modal-footer">
+              <button type="button" onClick={() => setShowConfirm(false)} className="btn-secondary" disabled={isSaving}>Back</button>
+              <button type="button" onClick={handleConfirmCreate} className="btn-primary flex items-center gap-2" disabled={isSaving}>
+                <Save size={15} /> {isSaving ? 'Saving…' : 'Confirm & Add'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Edit shipment (name / note only) */}
+      {editTarget && (
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setEditTarget(null)}>
+          <div className="modal-content" style={{ maxWidth: '28rem' }}>
+            <div className="modal-header">
+              <div className="flex items-center gap-2.5">
+                <div className="modal-icon-circle bg-blue-100 text-blue-700"><Pencil size={18} /></div>
+                <div><h2>Edit Shipment</h2></div>
+              </div>
+              <button type="button" onClick={() => setEditTarget(null)} className="modal-close-btn">✕</button>
+            </div>
+            <div className="modal-body">
+              <div className="form-field">
+                <label className="form-label"><Truck size={13} /> Shipment name <span className="text-red-500">*</span></label>
+                <input
+                  type="text"
+                  value={editForm.name}
+                  onChange={(e) => setEditForm((p) => ({ ...p, name: e.target.value }))}
+                  className="input-field"
+                  autoFocus
+                />
+              </div>
+              <div className="form-field mt-3">
+                <label className="form-label"><FileText size={13} /> Note <span className="form-label-hint">optional</span></label>
+                <input
+                  type="text"
+                  value={editForm.note}
+                  onChange={(e) => setEditForm((p) => ({ ...p, note: e.target.value }))}
+                  className="input-field"
+                />
+              </div>
+              <p className="mt-3 text-xs text-slate-500">Quantities and items can&apos;t be changed after a shipment is created.</p>
+              {editError && <div className="status-error mt-3"><span>!</span><span>{editError}</span></div>}
+            </div>
+            <div className="modal-footer">
+              <button type="button" onClick={() => setEditTarget(null)} className="btn-secondary" disabled={isEditing}>Cancel</button>
+              <button type="button" onClick={handleEditSave} className="btn-primary flex items-center gap-2" disabled={isEditing}>
+                <Save size={15} /> {isEditing ? 'Saving…' : 'Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Shipment detail modal */}
+      {detailShipment && (() => {
+        const supplier = supplierById.get(Number(detailShipment.supplierId));
+        const items = detailShipment.items || [];
+        return (
+          <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setDetailShipment(null)}>
+            <div className="modal-content" style={{ maxWidth: '40rem' }}>
+              <div className="modal-header">
+                <div className="flex items-center gap-2.5">
+                  <div className="modal-icon-circle bg-blue-100 text-blue-700"><Truck size={18} /></div>
+                  <div>
+                    <h2 className="flex items-center gap-2">
+                      {detailShipment.name || '—'}
+                      {detailShipment.commissionRate != null && (
+                        <span className="badge badge-teal">{detailShipment.commissionRate}% commission</span>
+                      )}
+                    </h2>
+                    <p className="text-xs text-slate-500 mt-0.5">#{detailShipment.id} · {detailShipment.date}</p>
+                  </div>
+                </div>
+                <button type="button" onClick={() => setDetailShipment(null)} className="modal-close-btn">✕</button>
+              </div>
+              <div className="modal-body max-h-[72vh] overflow-y-auto">
+                <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
+                  <div className="balance-pill"><p>Supplier</p><p>{supplier?.name || '—'}</p></div>
+                  <div className="balance-pill"><p>Date</p><p>{detailShipment.date}</p></div>
+                  <div className="balance-pill"><p>Total Quantity</p><p>{detailShipment.totalQuantity.toLocaleString()}</p></div>
+                </div>
+
+                <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200">
+                  <table className="center-table w-full text-sm">
+                    <thead>
+                      <tr className="bg-slate-50 border-b border-slate-200">
+                        <th className="px-4 py-2 font-semibold text-slate-700">Variety</th>
+                        <th className="px-4 py-2 font-semibold text-slate-700">Lot</th>
+                        <th className="px-4 py-2 font-semibold text-slate-700">Quantity</th>
+                        <th className="px-4 py-2 font-semibold text-slate-700">Total Sold</th>
+                        <th className="px-4 py-2 font-semibold text-slate-700">Left</th>
+                      </tr>
+                    </thead>
+                    <tbody className="divide-y divide-slate-100">
+                      {items.length === 0 ? (
+                        <tr><td colSpan={5} className="px-4 py-4 text-slate-500">No items</td></tr>
+                      ) : items.map((it, i) => {
+                        const left = Number(it.remaining) || 0;
+                        const sold = Math.max(0, (Number(it.quantity) || 0) - left);
+                        return (
+                          <tr key={i}>
+                            <td className="px-4 py-2 font-medium text-slate-900">{it.categoryName || '—'}</td>
+                            <td className="px-4 py-2 text-slate-700">{it.subCategoryName || '—'}</td>
+                            <td className="px-4 py-2 font-semibold text-slate-800">{(Number(it.quantity) || 0).toLocaleString()}</td>
+                            <td className="px-4 py-2 text-slate-700">{sold.toLocaleString()}</td>
+                            <td className="px-4 py-2 font-semibold text-emerald-700">{left.toLocaleString()}</td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
+                </div>
+
+                {detailShipment.note && (
+                  <p className="mt-3 text-sm text-slate-600"><span className="font-semibold">Note:</span> {detailShipment.note}</p>
+                )}
+              </div>
+              <div className="modal-footer">
+                <button type="button" onClick={() => setDetailShipment(null)} className="btn-secondary">Close</button>
+              </div>
+            </div>
+          </div>
+        );
+      })()}
     </div>
   );
 };

@@ -175,6 +175,14 @@ public class WholesalerController {
         return supplierDeliveryService.setCommissionRate(wholesalerId, request);
     }
 
+    @PostMapping("/supplier-deliveries/update")
+    public SupplierDeliveryResponse updateShipment(
+            @PathVariable Long wholesalerId,
+            @RequestBody org.example.dto.UpdateShipmentRequest request
+    ) {
+        return supplierDeliveryService.updateShipment(wholesalerId, request);
+    }
+
     @PostMapping("/shipments/settle")
     public SupplierDeliveryResponse settleShipment(
             @PathVariable Long wholesalerId,

@@ -2,7 +2,7 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   ArrowLeft, Phone, Building2, MapPin, Percent, DollarSign,
   AlertCircle, Receipt, Package, Boxes, Pencil, UserCheck,
-  Power, RotateCcw, FileText, Tag, Truck, Check,
+  Power, RotateCcw, FileText, Tag, Truck, Check, ChevronDown, ChevronUp,
 } from 'lucide-react'
 import { useData } from '../../data/DataContext'
 import { useAuth } from '../auth/AuthContext'
@@ -11,11 +11,58 @@ import { postJson, apiPaths } from '../../services/apiClient'
 
 const formatCurrency = (value) => `৳ ${Math.round(Number(value) || 0).toLocaleString()}`
 
+const METHOD_LABELS = { CASH: 'Cash', BANK: 'Bank', BKASH: 'bKash', NAGAD: 'Nagad', OTHER: 'Other' }
+
+// Details column: sold product for sales, the money operation for payments.
+const txDetails = (t) => {
+  if (t.transactionType === 'Payment') {
+    const v = String(t.paymentOperationType || t.note || '').toUpperCase()
+    if (v.includes('PRODUCT_PAYMENT')) return 'Product payment'
+    if (v.includes('COMMISSION_RECEIVE')) return 'Commission received'
+    if (v.includes('EXPENSE_RECEIVE')) return 'Expense received'
+    if (v.includes('SUPPLIER_CRATE_GIVE')) return 'Crates given'
+    if (v.includes('SUPPLIER_CRATE_RETURN')) return 'Crates returned'
+    const n = Number(t.cratesReturned || 0)
+    if (n > 0) return `Crates: ${n}`
+    return t.note || 'Payment'
+  }
+  const parts = [t.product, t.category && t.category !== 'No Category' ? t.category : null].filter(Boolean)
+  const label = parts.join(' / ') || 'Sale'
+  const qty = Number(t.quantity) > 0 ? ` · ${t.quantity} ${String(t.unit || '').toUpperCase()}`.trimEnd() : ''
+  return label + qty
+}
+
+// Canonical transaction type used by the "Filter by type" dropdown.
+const txCategory = (t) => {
+  if (t.transactionType !== 'Payment') return 'Sale'
+  const v = String(t.paymentOperationType || t.note || '').toUpperCase()
+  if (v.includes('PRODUCT_PAYMENT')) return 'Product payment'
+  if (v.includes('COMMISSION_RECEIVE')) return 'Commission received'
+  if (v.includes('EXPENSE_RECEIVE')) return 'Expense received'
+  if (v.includes('SUPPLIER_CRATE_GIVE')) return 'Crates given'
+  if (v.includes('SUPPLIER_CRATE_RETURN')) return 'Crates returned'
+  return 'Payment'
+}
+
+const txMethod = (t) => {
+  const m = String(t.paymentMethod || '').toUpperCase()
+  if (m && m !== 'NONE') return { label: METHOD_LABELS[m] || 'Other', due: false }
+  if (t.transactionType !== 'Payment') return { label: 'Due', due: true }
+  return { label: '—', due: false }
+}
+
+const txAmount = (t) => (t.transactionType === 'Payment'
+  ? formatCurrency(t.paymentAmount || t.totalAmount)
+  : formatCurrency(t.totalAmount))
+
 const SupplierDetail = ({ supplierId, onBack }) => {
-  const { suppliers, supplierProducts, transactions, getSupplierProfile, updateSupplier, setSupplierStatus, getSupplierShipments, setShipmentCommission, settleShipment } = useData()
+  const { suppliers, supplierProducts, getSupplierProfile, updateSupplier, setSupplierStatus, getSupplierShipments, setShipmentCommission, settleShipment } = useData()
   const { admin } = useAuth()
   const showToast = useToast()
   const [profile, setProfile] = useState(null)
+  const [txFilter, setTxFilter] = useState('all')
+  const [showTransactions, setShowTransactions] = useState(true)
+  const [showStock, setShowStock] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
   const [editForm, setEditForm] = useState({ name: '', businessName: '', location: '', commissionRate: 0 })
   const [editError, setEditError] = useState('')
@@ -30,9 +77,6 @@ const SupplierDetail = ({ supplierId, onBack }) => {
   const [expenseForm, setExpenseForm] = useState({ deliveryId: '', categoryId: '', amount: '', note: '' })
   const [expenseError, setExpenseError] = useState('')
   const [isSavingExpense, setIsSavingExpense] = useState(false)
-  const [statement, setStatement] = useState(null)
-  const [statementPeriod, setStatementPeriod] = useState('all')
-  const [isLoadingStatement, setIsLoadingStatement] = useState(false)
 
   // Shipment-wise tracking
   const [shipments, setShipments] = useState([])
@@ -42,7 +86,6 @@ const SupplierDetail = ({ supplierId, onBack }) => {
   const [commissionError, setCommissionError] = useState('')
   const [isSavingCommission, setIsSavingCommission] = useState(false)
   const [settlingId, setSettlingId] = useState(null)
-  const [showSettled, setShowSettled] = useState(false)
   const [settleTarget, setSettleTarget] = useState(null)  // shipment awaiting confirm
 
   const handleConfirmSettle = async () => {
@@ -54,7 +97,6 @@ const SupplierDetail = ({ supplierId, onBack }) => {
       showToast(`Lot #${shipment.id} settled`, 'success')
       setSettleTarget(null)
       await loadShipments()
-      loadStatement(statementPeriod)
       // refresh supplier balance (amountDue, etc.)
       if (getSupplierProfile && supplierId) {
         try { const fresh = await getSupplierProfile(supplierId); setProfile(fresh) } catch { /* ignore */ }
@@ -77,7 +119,10 @@ const SupplierDetail = ({ supplierId, onBack }) => {
     } finally {
       setIsLoadingShipments(false)
     }
-  }, [supplierId, getSupplierShipments])
+    // getSupplierShipments is recreated on every DataContext render; depending on it
+    // would refetch on every unrelated data change. supplierId is the real input.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supplierId])
 
   useEffect(() => { loadShipments() }, [loadShipments])
 
@@ -104,7 +149,6 @@ const SupplierDetail = ({ supplierId, onBack }) => {
       showToast(`Lot #${commissionForm.deliveryId} commission set to ${rate}%`, 'success')
       setShowCommissionModal(false)
       await loadShipments()
-      loadStatement(statementPeriod)
     } catch (error) {
       setCommissionError(error.message || 'Failed to set commission.')
     } finally {
@@ -112,23 +156,6 @@ const SupplierDetail = ({ supplierId, onBack }) => {
     }
   }
 
-  const loadStatement = useCallback(async (period) => {
-    if (!admin?.wholesalerId || !supplierId) return
-    setIsLoadingStatement(true)
-    try {
-      const data = await postJson(apiPaths.supplierStatement(admin.wholesalerId), {
-        accountId: Number(supplierId),
-        period,
-      })
-      setStatement(data)
-    } catch {
-      setStatement(null)
-    } finally {
-      setIsLoadingStatement(false)
-    }
-  }, [admin?.wholesalerId, supplierId])
-
-  useEffect(() => { loadStatement(statementPeriod) }, [loadStatement, statementPeriod])
 
   const openExpenseModal = async (deliveryId = '') => {
     setExpenseForm({ deliveryId: deliveryId ? String(deliveryId) : '', categoryId: '', amount: '', note: '' })
@@ -160,7 +187,6 @@ const SupplierDetail = ({ supplierId, onBack }) => {
       })
       setShowExpenseModal(false)
       showToast('Expense recorded', 'success')
-      loadStatement(statementPeriod)
       loadShipments()
     } catch (error) {
       setExpenseError(error.message || 'Failed to record expense.')
@@ -177,7 +203,9 @@ const SupplierDetail = ({ supplierId, onBack }) => {
       .then((result) => { if (isActive) setProfile(result) })
       .catch(() => { if (isActive) setProfile(null) })
     return () => { isActive = false }
-  }, [supplierId, getSupplierProfile])
+    // Only refetch when the supplier changes — not on every DataContext re-render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [supplierId])
 
   const fallbackSupplier = suppliers.find((item) => item.id === supplierId)
   const supplier = profile?.account || fallbackSupplier
@@ -241,66 +269,53 @@ const SupplierDetail = ({ supplierId, onBack }) => {
     }
   }
   const products = supplierProducts.filter((product) => product.supplierId === supplierId)
+  const supplierTransactions = profile?.transactions || []
+  const txTypes = [...new Set(supplierTransactions.map(txCategory))]
+  const filteredTransactions = txFilter === 'all'
+    ? supplierTransactions
+    : supplierTransactions.filter((t) => txCategory(t) === txFilter)
   const openShipments = shipments.filter((s) => s.settlementStatus !== 'SETTLED')
   const settledShipments = shipments.filter((s) => s.settlementStatus === 'SETTLED')
   const pendingRateCount = openShipments.filter((s) => s.commissionRate == null).length
   const lotSoldOut = (lotId) => !supplierProducts.some((p) => p.deliveryId === lotId && Number(p.quantity) > 0)
 
-  const renderLot = (s) => {
+  const renderLotRow = (s) => {
     const ratePending = s.commissionRate == null
     const settled = s.settlementStatus === 'SETTLED'
     const soldOut = lotSoldOut(s.id)
     return (
-      <div key={s.id} className="shipment-lot-card">
-        <div className="flex items-stretch gap-3">
-          <div className="min-w-0 flex-1">
-            <div className="shipment-lot-head">
-              <div className="flex flex-wrap items-center gap-2">
-                <span className="shipment-lot-tag">{s.name || `Lot #${s.id}`}</span>
-                {s.name && <span className="text-xs text-slate-400">#{s.id}</span>}
-                <span className="text-sm text-slate-500">{s.date}</span>
-                <span className={`badge ${ratePending ? 'badge-amber' : 'badge-emerald'}`}>
-                  {ratePending ? 'Commission: pending' : `Commission: ${s.commissionRate}%`}
-                </span>
-                {soldOut && !settled && <span className="badge badge-rose">Sold out</span>}
-              </div>
-              <span className={`badge ${settled ? 'badge-emerald' : 'badge-amber'}`}>
-                {settled ? 'Settled' : 'Open'}
-              </span>
-            </div>
-
-            <div className="shipment-lot-grid">
-              <div><span>Est. Value</span><strong>{formatCurrency(s.estimatedValue)}</strong></div>
-              <div><span>Advance Paid</span><strong>{formatCurrency(s.advancePaid)}</strong></div>
-              <div><span>Total Sold</span><strong>{formatCurrency(s.totalSold)}</strong></div>
-              <div><span>Commission</span><strong>{ratePending ? '—' : formatCurrency(s.commissionAmount)}</strong></div>
-              <div><span>Other Expense</span><strong>{formatCurrency(s.expenseTotal)}</strong></div>
-              <div className="shipment-lot-net"><span>Net Payable</span><strong>{formatCurrency(s.netPayable)}</strong></div>
-            </div>
-
-            {s.expenseDue > 0 && (
-              <p className="mt-2 text-xs font-semibold text-rose-600">
-                Supplier owes {formatCurrency(s.expenseDue)} expense on this lot (separate from net payable).
-              </p>
-            )}
-          </div>
-
-          {supplier.status !== 'DISABLED' && !settled && (
-            <div className="flex shrink-0 items-center border-l border-dashed border-slate-200 pl-3">
-              <button
-                onClick={() => setSettleTarget(s)}
-                disabled={settlingId === s.id || !soldOut}
-                className={`btn-compact ${soldOut ? 'btn-compact-primary' : ''}`}
-                title={soldOut
-                  ? 'Settle this shipment (records the payments and closes it)'
-                  : 'Settle becomes available once all stock from this lot is sold'}
-              >
-                <Check size={12} /> Settle
-              </button>
-            </div>
+      <tr key={s.id} className={`hover:bg-slate-50 transition ${settled ? 'opacity-60' : ''}`}>
+        <td className="px-3 py-2 whitespace-nowrap text-left">
+          <span className="font-semibold text-slate-900">{s.name || `Lot #${s.id}`}</span>
+          <span className="block text-xs text-slate-400">{s.date}</span>
+        </td>
+        <td className="px-3 py-2 text-slate-700">{Number(s.totalUnitsSold || 0).toLocaleString()}</td>
+        <td className="px-3 py-2 text-slate-700">{Number(s.totalKgSold) > 0 ? Number(s.totalKgSold).toLocaleString() : '—'}</td>
+        <td className="px-3 py-2 font-semibold text-slate-900">{formatCurrency(s.totalSold)}</td>
+        <td className="px-3 py-2 text-slate-700">
+          {ratePending ? <span className="badge badge-amber">pending</span> : formatCurrency(s.commissionAmount)}
+        </td>
+        <td className="px-3 py-2 text-slate-700">{formatCurrency(s.expenseTotal)}</td>
+        <td className={`px-3 py-2 font-bold ${Number(s.netPayable) < 0 ? 'text-rose-700' : 'text-emerald-700'}`}>{formatCurrency(s.netPayable)}</td>
+        <td className="px-3 py-2">
+          {settled ? (
+            <span className="badge badge-emerald">Settled</span>
+          ) : supplier.status === 'DISABLED' ? (
+            <span className="badge badge-amber">Open</span>
+          ) : (
+            <button
+              onClick={() => setSettleTarget(s)}
+              disabled={settlingId === s.id || !soldOut}
+              className={`btn-compact ${soldOut ? 'btn-compact-primary' : ''}`}
+              title={soldOut
+                ? 'Settle this shipment (records the payments and closes it)'
+                : 'Settle becomes available once all stock from this lot is sold'}
+            >
+              <Check size={12} /> Settle
+            </button>
           )}
-        </div>
-      </div>
+        </td>
+      </tr>
     )
   }
 
@@ -367,67 +382,22 @@ const SupplierDetail = ({ supplierId, onBack }) => {
         </div>
       </div>
 
-      {/* TOP STATS — Total Sale = Your Income + Supplier Payable */}
-      {statement && (() => {
-        const totalSale = Number(statement.totalSale) || 0
-        const commission = Number(statement.commission) || 0
-        const expense = Number(statement.expenseDue) || 0
-        const yourIncome = commission + expense
-        const supplierPayable = Math.max(0, (Number(supplier.amountDue) || 0) - commission - expense)
-        return (
-          <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-            <div className="stat-mini">
-              <p>Total Sale</p>
-              <strong>{formatCurrency(totalSale)}</strong>
-            </div>
-            <div className="stat-mini stat-mini-amber">
-              <p>Your Income (commission + expense)</p>
-              <strong>{formatCurrency(yourIncome)}</strong>
-            </div>
-            <div className="stat-mini stat-mini-rose">
-              <p>Supplier Payable (rest)</p>
-              <strong>{formatCurrency(supplierPayable)}</strong>
-            </div>
-          </div>
-        )
-      })()}
-
-      {/* SETTLEMENT + CRATES */}
-      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_18rem]">
-        <div className="supplier-panel">
-          <h3 className="flex items-center gap-2"><FileText size={17} className="text-blue-600" /> Settlement</h3>
-
-          {isLoadingStatement ? (
-            <p className="mt-3 text-sm text-slate-500">Loading…</p>
-          ) : statement ? (
-            <>
+      {/* MONEY + CRATES side by side */}
+      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        {(() => {
+          const netDue = Number(supplier.amountDue) || 0
+          const payable = netDue > 0 ? netDue : 0
+          const advance = netDue < 0 ? -netDue : 0
+          return (
+            <div className="supplier-panel">
+              <h3 className="flex items-center gap-2"><DollarSign size={17} className="text-blue-600" /> Supplier Money</h3>
               <div className="mt-3 space-y-2">
-                <div className="box-row">
-                  <span>Total Supplier Payable</span>
-                  <strong>{formatCurrency(supplier.amountDue)}</strong>
-                </div>
-                <div className="box-row">
-                  <span>Commission due to you</span>
-                  <strong className="text-amber-700">− {formatCurrency(statement.commission)}</strong>
-                </div>
-                <div className="box-row">
-                  <span>Other Expense (supplier owes)</span>
-                  <strong className="text-rose-700">− {formatCurrency(statement.expenseDue)}</strong>
-                </div>
+                <div className="box-row"><span>Supplier Payable</span><strong className="text-rose-700">{formatCurrency(payable)}</strong></div>
+                <div className="box-row total"><span>Advance Paid</span><strong className="text-amber-700">{formatCurrency(advance)}</strong></div>
               </div>
-              <div className="statement-net mt-3">
-                <span>Net Payable to Supplier</span>
-                <strong>
-                  {formatCurrency(
-                    (Number(supplier.amountDue) || 0) - (Number(statement.commission) || 0) - (Number(statement.expenseDue) || 0)
-                  )}
-                </strong>
-              </div>
-            </>
-          ) : (
-            <p className="mt-3 text-sm text-slate-500">No settlement data.</p>
-          )}
-        </div>
+            </div>
+          )
+        })()}
 
         <div className="supplier-panel">
           <h3 className="flex items-center gap-2"><Boxes size={17} className="text-blue-600" /> Crates</h3>
@@ -449,7 +419,6 @@ const SupplierDetail = ({ supplierId, onBack }) => {
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="flex items-center gap-2"><Truck size={18} className="text-blue-600" /> Shipments</h3>
-            <p>{shipments.length} lot{shipments.length === 1 ? '' : 's'} · each tracked &amp; settled separately</p>
           </div>
           {supplier.status !== 'DISABLED' && shipments.length > 0 && (
             <div className="flex flex-wrap items-center gap-2">
@@ -469,30 +438,105 @@ const SupplierDetail = ({ supplierId, onBack }) => {
           <div className="empty-state !py-8">
             <Truck size={28} className="empty-state-icon" />
             <p className="empty-state-title">No shipments yet</p>
-            <p className="empty-state-sub">Receive a shipment from this supplier to start tracking.</p>
           </div>
         ) : (
-          <div className="space-y-3">
-            {openShipments.length === 0 ? (
-              <p className="text-sm text-slate-500">All shipments are settled.</p>
-            ) : (
-              openShipments.map(renderLot)
-            )}
+          <div className="overflow-x-auto rounded-xl border border-slate-200">
+            <table className="center-table w-full min-w-[760px] text-sm">
+              <thead>
+                <tr className="bg-slate-50 border-b border-slate-200">
+                  <th className="px-3 py-2 font-semibold text-slate-700 text-left">Shipment</th>
+                  <th className="px-3 py-2 font-semibold text-slate-700">Unit Sold</th>
+                  <th className="px-3 py-2 font-semibold text-slate-700">Kg</th>
+                  <th className="px-3 py-2 font-semibold text-slate-700">Total Sold</th>
+                  <th className="px-3 py-2 font-semibold text-slate-700">Commission</th>
+                  <th className="px-3 py-2 font-semibold text-slate-700">Expense</th>
+                  <th className="px-3 py-2 font-semibold text-slate-700">Net Payable</th>
+                  <th className="px-3 py-2 font-semibold text-slate-700">Settle</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {[...openShipments, ...settledShipments].map(renderLotRow)}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
 
-            {settledShipments.length > 0 && (
-              <div className="pt-1">
-                <button
-                  type="button"
-                  onClick={() => setShowSettled((v) => !v)}
-                  className="text-sm font-semibold text-slate-500 hover:text-slate-800"
+      {/* TRANSACTIONS (sales, payments & money movements for this supplier) */}
+      <div className="supplier-panel">
+        <button
+          type="button"
+          onClick={() => setShowTransactions((v) => !v)}
+          className="flex w-full items-center justify-between gap-3 text-left"
+        >
+          <h3 className="flex items-center gap-2"><Receipt size={18} className="text-blue-600" /> Transactions</h3>
+          <span className="flex items-center gap-2 text-sm text-slate-500">
+            {supplierTransactions.length} entr{supplierTransactions.length === 1 ? 'y' : 'ies'}
+            {showTransactions ? <ChevronUp size={18} className="text-slate-400" /> : <ChevronDown size={18} className="text-slate-400" />}
+          </span>
+        </button>
+
+        {showTransactions && (
+          <div className="mt-4">
+            <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <Tag size={14} className="text-slate-400" />
+                <select
+                  value={txFilter}
+                  onChange={(e) => setTxFilter(e.target.value)}
+                  className="input-field !py-1.5 text-sm"
                 >
-                  {showSettled ? '▾ Hide' : '▸ Show'} settled ({settledShipments.length})
-                </button>
-                {showSettled && (
-                  <div className="mt-3 space-y-3 opacity-75">
-                    {settledShipments.map(renderLot)}
-                  </div>
-                )}
+                  <option value="all">All types</option>
+                  {txTypes.map((ty) => (
+                    <option key={ty} value={ty}>{ty}</option>
+                  ))}
+                </select>
+              </div>
+              <span className="badge badge-teal">{filteredTransactions.length} shown</span>
+            </div>
+
+            {filteredTransactions.length === 0 ? (
+              <div className="empty-state !py-8">
+                <Receipt size={28} className="empty-state-icon" />
+                <p className="empty-state-title">No transactions found</p>
+              </div>
+            ) : (
+              <div className="overflow-x-auto rounded-xl border border-slate-200">
+                <table className="center-table w-full min-w-[760px] text-sm">
+                  <thead>
+                <tr className="bg-slate-50 border-b border-slate-200">
+                  <th className="px-4 py-3 font-semibold text-slate-700">Date</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Type</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Details</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Customer</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Amount</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Payment Method</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {filteredTransactions.map((t) => {
+                  const method = txMethod(t)
+                  return (
+                    <tr key={t.id} className="hover:bg-slate-50 transition">
+                      <td className="px-4 py-3 font-semibold text-slate-900 whitespace-nowrap">{t.date}</td>
+                      <td className="px-4 py-3">
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${t.transactionType === 'Payment' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
+                          {t.transactionType === 'Payment' ? 'Payment' : 'Sale'}
+                        </span>
+                      </td>
+                      <td className="px-4 py-3 text-slate-700">{txDetails(t)}</td>
+                      <td className="px-4 py-3 text-slate-800">{t.customer || <span className="text-slate-400">—</span>}</td>
+                      <td className="px-4 py-3 font-extrabold text-slate-900">{txAmount(t)}</td>
+                      <td className="px-4 py-3">
+                        <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${method.due ? 'bg-rose-100 text-rose-700' : 'bg-slate-100 text-slate-600'}`}>
+                          {method.label}
+                        </span>
+                      </td>
+                    </tr>
+                  )
+                })}
+                  </tbody>
+                </table>
               </div>
             )}
           </div>
@@ -501,23 +545,30 @@ const SupplierDetail = ({ supplierId, onBack }) => {
 
       {/* CURRENT STOCK */}
       <div className="supplier-panel">
-        <div className="mb-3 flex items-center justify-between">
+        <button
+          type="button"
+          onClick={() => setShowStock((v) => !v)}
+          className="mb-3 flex w-full items-center justify-between gap-3 text-left"
+        >
           <h3 className="flex items-center gap-2"><Package size={17} className="text-blue-600" /> Current Stock</h3>
-          <span className="text-sm text-slate-500">{products.length} item{products.length === 1 ? '' : 's'}</span>
-        </div>
+          <span className="flex items-center gap-2 text-sm text-slate-500">
+            {products.length} item{products.length === 1 ? '' : 's'}
+            {showStock ? <ChevronUp size={18} className="text-slate-400" /> : <ChevronDown size={18} className="text-slate-400" />}
+          </span>
+        </button>
 
-        {products.length === 0 ? (
+        {showStock && (products.length === 0 ? (
           <p className="text-sm text-slate-500">No stock from this supplier right now.</p>
         ) : (
           <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="w-full min-w-[520px] text-sm">
+            <table className="center-table w-full min-w-[520px] text-sm">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200">
-                  <th className="px-3 py-2 text-left font-semibold text-slate-700">Product</th>
-                  <th className="px-3 py-2 text-left font-semibold text-slate-700">Category</th>
-                  <th className="px-3 py-2 text-left font-semibold text-slate-700">Lot</th>
-                  <th className="px-3 py-2 text-right font-semibold text-slate-700">Qty</th>
-                  <th className="px-3 py-2 text-center font-semibold text-slate-700">Status</th>
+                  <th className="px-3 py-2 font-semibold text-slate-700">Product</th>
+                  <th className="px-3 py-2 font-semibold text-slate-700">Category</th>
+                  <th className="px-3 py-2 font-semibold text-slate-700">Lot</th>
+                  <th className="px-3 py-2 font-semibold text-slate-700">Qty</th>
+                  <th className="px-3 py-2 font-semibold text-slate-700">Status</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -534,10 +585,10 @@ const SupplierDetail = ({ supplierId, onBack }) => {
                           ? <span className={`font-semibold ${isStockOut ? 'text-slate-400' : 'text-blue-700'}`}>{product.subCategoryName}</span>
                           : <span className="text-slate-300">—</span>}
                       </td>
-                      <td className="px-3 py-2 text-right font-semibold text-slate-800">
+                      <td className="px-3 py-2 font-semibold text-slate-800">
                         {product.quantity} <span className="text-xs text-slate-400">{String(product.unit || '').toUpperCase()}</span>
                       </td>
-                      <td className="px-3 py-2 text-center">
+                      <td className="px-3 py-2">
                         <span className={`badge ${isStockOut ? 'badge-rose' : 'badge-emerald'}`}>{isStockOut ? 'Out' : 'In'}</span>
                       </td>
                     </tr>
@@ -546,7 +597,7 @@ const SupplierDetail = ({ supplierId, onBack }) => {
               </tbody>
             </table>
           </div>
-        )}
+        ))}
       </div>
 
       {/* DISABLE CONFIRMATION */}
@@ -560,7 +611,6 @@ const SupplierDetail = ({ supplierId, onBack }) => {
                 </div>
                 <div>
                   <h2>Disable {supplier.name}?</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">Hidden from active lists. History stays intact.</p>
                 </div>
               </div>
               <button onClick={() => setShowDisableConfirm(false)} className="modal-close-btn">✕</button>
@@ -684,7 +734,6 @@ const SupplierDetail = ({ supplierId, onBack }) => {
                   <div className="modal-icon-circle bg-blue-100 text-blue-700"><Check size={18} /></div>
                   <div>
                     <h2>Settle Lot #{t.id}?</h2>
-                    <p className="text-xs text-slate-500 mt-0.5">This records the payments and closes the shipment.</p>
                   </div>
                 </div>
                 <button onClick={() => setSettleTarget(null)} className="modal-close-btn">✕</button>
@@ -733,7 +782,6 @@ const SupplierDetail = ({ supplierId, onBack }) => {
                 <div className="modal-icon-circle bg-blue-100 text-blue-700"><Percent size={18} /></div>
                 <div>
                   <h2>Set Commission Rate</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">Negotiated rate for a shipment</p>
                 </div>
               </div>
               <button onClick={() => setShowCommissionModal(false)} className="modal-close-btn">✕</button>
@@ -755,7 +803,7 @@ const SupplierDetail = ({ supplierId, onBack }) => {
                     <option value="">Select shipment…</option>
                     {shipments.map((s) => (
                       <option key={s.id} value={s.id}>
-                        Lot #{s.id} · {s.date} · {s.commissionRate == null ? 'pending' : `${s.commissionRate}%`}
+                        {s.name || `Lot #${s.id}`} · {s.commissionRate == null ? 'pending' : `${s.commissionRate}%`}
                       </option>
                     ))}
                   </select>
@@ -798,7 +846,6 @@ const SupplierDetail = ({ supplierId, onBack }) => {
                 </div>
                 <div>
                   <h2>Record Expense for {supplier.name}</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">Shipment costs the supplier will adjust at settlement</p>
                 </div>
               </div>
               <button onClick={() => setShowExpenseModal(false)} className="modal-close-btn">✕</button>
@@ -816,7 +863,7 @@ const SupplierDetail = ({ supplierId, onBack }) => {
                     <option value="">Select shipment…</option>
                     {shipments.map((s) => (
                       <option key={s.id} value={s.id}>
-                        Lot #{s.id} · {s.date}{s.totalQuantity ? ` · ${s.totalQuantity}` : ''}
+                        {s.name || `Lot #${s.id}`}
                       </option>
                     ))}
                   </select>

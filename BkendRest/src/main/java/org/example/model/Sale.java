@@ -72,6 +72,10 @@ public class Sale {
     @Column(name = "paid_amount", nullable = false, precision = 14, scale = 2)
     private BigDecimal paidAmount = BigDecimal.ZERO;
 
+    @Enumerated(EnumType.STRING)
+    @Column(name = "payment_method", nullable = false, length = 20)
+    private org.example.model.enums.PaymentMethod paymentMethod = org.example.model.enums.PaymentMethod.NONE;
+
     @Column(name = "due_amount", nullable = false, precision = 14, scale = 2)
     private BigDecimal dueAmount = BigDecimal.ZERO;
 

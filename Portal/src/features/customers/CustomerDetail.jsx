@@ -54,7 +54,9 @@ const CustomerDetail = ({ customerId, onBack }) => {
     return () => {
       isActive = false
     }
-  }, [customerId, getCustomerProfile])
+    // Only refetch when the customer changes — not on every DataContext re-render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [customerId])
 
   const fallbackCustomer = customers.find((item) => item.id === customerId)
   const customer = profile?.account || fallbackCustomer
@@ -150,67 +152,19 @@ const CustomerDetail = ({ customerId, onBack }) => {
         </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
-        <div className="metric-tile danger">
-          <p>Current Due</p>
-          <strong>{formatCurrency(customer.amountDue)}</strong>
-        </div>
-      </div>
-
-      <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_22rem]">
-        <div className="supplier-panel">
-          <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-            <div>
-              <h3>Payment Summary</h3>
-              <p>All sale and payment transactions for this customer.</p>
-            </div>
-            <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-[#1d63ed]">
-              {isProfileLoading ? 'Loading' : customerTransactions.length + ' entries'}
-            </span>
-          </div>
-
-          <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200">
-            {customerTransactions.length === 0 ? (
-              <div className="empty-state">No customer transactions found.</div>
-            ) : (
-              <table className="w-full min-w-[640px] text-sm">
-                <thead>
-                  <tr>
-                    <th>Date</th>
-                    <th>Type</th>
-                    <th>Details</th>
-                    <th className="text-right">Amount</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {customerTransactions.map((transaction) => (
-                    <tr key={transaction.id}>
-                      <td className="font-semibold text-slate-900">{transaction.date}</td>
-                      <td>
-                        <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${
-                          transaction.transactionType === 'Payment'
-                            ? 'bg-blue-100 text-blue-700'
-                            : 'bg-green-100 text-green-700'
-                        }`}>
-                          {transaction.transactionType === 'Payment' ? 'Payment' : 'Sale'}
-                        </span>
-                      </td>
-                      <td className="text-slate-600">
-                        {renderCustomerTransactionDetails(transaction)}
-                      </td>
-                      <td className="text-right font-extrabold text-slate-900">{formatAmount(transaction)}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            )}
+      {/* Compact summary band — Current Due + crate accountability sit side by side
+          on top, so the Payment Summary table below can grow full-width. */}
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+        <div className="supplier-panel flex flex-col">
+          <h3>Current Due</h3>
+          <div className="mt-4 flex flex-1 flex-col justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-5 text-center">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-rose-600">Outstanding balance</p>
+            <strong className="mt-1 text-3xl font-black text-rose-700 tabular-nums">{formatCurrency(customer.amountDue)}</strong>
           </div>
         </div>
 
         <div className="supplier-panel">
           <h3>Crate Accountability</h3>
-          <p>Crates currently due from this customer.</p>
-
           <div className="mt-4 space-y-3">
             {(customer.crateHoldings || []).length === 0 ? (
               <div className="box-row"><span>No crates due</span><strong>0</strong></div>
@@ -227,7 +181,47 @@ const CustomerDetail = ({ customerId, onBack }) => {
               <strong>{customer.totalCratesHolding || 0}</strong>
             </div>
           </div>
+        </div>
+      </div>
 
+      {/* Payment Summary — full width, grows with history */}
+      <div className="supplier-panel">
+        <div className="flex items-center justify-between">
+          <h3>Payment Summary</h3>
+          <span className="badge badge-teal">
+            {isProfileLoading ? 'Loading' : customerTransactions.length + ' entries'}
+          </span>
+        </div>
+
+        <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200">
+          {customerTransactions.length === 0 ? (
+            <div className="empty-state">No customer transactions found.</div>
+          ) : (
+            <table className="center-table w-full min-w-[640px] text-sm">
+              <thead>
+                <tr className="border-b border-slate-200 bg-slate-50">
+                  <th className="px-4 py-3 font-semibold text-slate-700">Date</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Type</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Details</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Amount</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-slate-100">
+                {customerTransactions.map((transaction) => (
+                  <tr key={transaction.id} className="transition hover:bg-slate-50">
+                    <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-900">{transaction.date}</td>
+                    <td className="px-4 py-3">
+                      <span className={`badge ${transaction.transactionType === 'Payment' ? 'badge-teal' : 'badge-emerald'}`}>
+                        {transaction.transactionType === 'Payment' ? 'Payment' : 'Sale'}
+                      </span>
+                    </td>
+                    <td className="px-4 py-3 text-slate-600">{renderCustomerTransactionDetails(transaction)}</td>
+                    <td className="px-4 py-3 font-extrabold text-slate-900 tabular-nums">{formatAmount(transaction)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          )}
         </div>
       </div>
 
@@ -241,7 +235,6 @@ const CustomerDetail = ({ customerId, onBack }) => {
                 </div>
                 <div>
                   <h2>Disable {customer.name}?</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">Hidden from active lists. History stays intact.</p>
                 </div>
               </div>
               <button onClick={() => setShowDisableConfirm(false)} className="modal-close-btn">✕</button>
