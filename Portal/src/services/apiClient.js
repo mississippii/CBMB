@@ -9,21 +9,29 @@ const buildUrl = (path) => {
   return API_BASE_URL + normalizedPath;
 };
 
-export const postJson = async (path, body = undefined) => {
+export const postJson = async (path, body = undefined, extraOptions = {}) => {
   const options = {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(extraOptions.headers || {}) },
   };
 
   if (body !== undefined) {
     options.body = JSON.stringify(body);
   }
 
-  const response = await fetch(buildUrl(path), options);
+  let response;
+  try {
+    response = await fetch(buildUrl(path), options);
+  } catch {
+    throw new Error('Cannot reach the server. Check that the backend is running.');
+  }
+
   const payload = await response.json().catch(() => null);
 
   if (!response.ok) {
-    throw new Error(payload?.message || 'Request failed.');
+    const error = new Error(payload?.message || 'Request failed (' + response.status + ').');
+    error.status = response.status;
+    throw error;
   }
 
   return payload;
@@ -31,6 +39,7 @@ export const postJson = async (path, body = undefined) => {
 
 export const apiPaths = {
   authLogin: '/auth/login',
+  authSupplierLogin: '/auth/supplier-login',
   adminWholesalersList: '/admin/wholesalers/list',
   adminWholesalersSearch: '/admin/wholesalers/search',
   adminWholesalersCreate: '/admin/wholesalers/create',
@@ -93,6 +102,9 @@ export const apiPaths = {
   shopExpenseCreate: (wholesalerId) => '/wholesalers/' + wholesalerId + '/shop-expenses/create',
   shopExpenseList: (wholesalerId) => '/wholesalers/' + wholesalerId + '/shop-expenses/list',
   shopExpenseCancel: (wholesalerId, expenseId) => '/wholesalers/' + wholesalerId + '/shop-expenses/' + expenseId + '/cancel',
+  supplierPortalOverview: (supplierId) => '/supplier-portal/' + supplierId + '/overview',
+  supplierPortalShipments: (supplierId) => '/supplier-portal/' + supplierId + '/shipments/list',
+  supplierPortalSales: (supplierId) => '/supplier-portal/' + supplierId + '/sales/list',
   cashDaily: (wholesalerId) => '/wholesalers/' + wholesalerId + '/cash/daily',
   cashClose: (wholesalerId) => '/wholesalers/' + wholesalerId + '/cash/close',
   cashReopen: (wholesalerId) => '/wholesalers/' + wholesalerId + '/cash/reopen',

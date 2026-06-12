@@ -8,6 +8,7 @@ import {
 import { useData } from '../../data/DataContext';
 import { useAuth } from '../auth/AuthContext';
 import { queryKeys } from '../../services/queryKeys';
+import { formatDate } from '../../shared/utils/format';
 
 const fmt = (value) => '৳ ' + (Number(value) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
 
@@ -20,7 +21,7 @@ const shiftIso = (iso, days) => {
   d.setDate(d.getDate() + days);
   return isoLocal(d);
 };
-const prettyDate = (iso) => new Date(`${iso}T00:00:00`).toLocaleDateString(undefined, { weekday: 'short', day: 'numeric', month: 'short', year: 'numeric' });
+const prettyDate = (iso) => formatDate(iso);
 
 const INFLOW_ROWS = [
   { key: 'cashSales',           label: 'Cash sales' },
@@ -162,8 +163,10 @@ const CashBookPage = () => {
         <div className="empty-state">Loading cash book…</div>
       ) : (
         <>
-          {/* Day summary */}
-          <section className="supplier-panel">
+          <div className="profile-workspace">
+            <main className="profile-main-stack">
+              {/* Day summary */}
+              <section className="supplier-panel">
             <div className="flex items-center justify-between">
               <h3 className="flex items-center gap-2"><TrendingUp size={16} className="text-teal-600" /> Day Summary</h3>
               <span className="badge badge-teal">{data?.sales?.saleCount || 0} sales</span>
@@ -178,7 +181,7 @@ const CashBookPage = () => {
           </section>
 
           {/* Debit / Credit ledger */}
-          <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
+              <div className="grid grid-cols-1 gap-5 lg:grid-cols-2">
             <section className="supplier-panel">
               <div className="flex items-center justify-between border-b border-slate-100 pb-3">
                 <h3 className="flex items-center gap-2 text-emerald-700">
@@ -210,8 +213,11 @@ const CashBookPage = () => {
             </section>
           </div>
 
-          {/* Reconciliation */}
-          <section className="supplier-panel">
+            </main>
+
+            <aside className="profile-side-stack">
+              {/* Reconciliation */}
+              <section className="supplier-panel">
             <h3 className="flex items-center gap-2"><Wallet size={16} className="text-teal-600" /> Drawer Reconciliation</h3>
 
             <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
@@ -280,6 +286,9 @@ const CashBookPage = () => {
               )}
             </div>
           </section>
+
+            </aside>
+          </div>
 
           {queryError && (
             <div className="status-error"><span>!</span><span>{queryError.message || 'Failed to load the cash book.'}</span></div>

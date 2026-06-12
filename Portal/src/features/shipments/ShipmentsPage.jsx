@@ -9,6 +9,7 @@ import { useToast } from '../../shared/components/Toast';
 import { TablePager, usePagination } from '../../shared/components';
 import SearchableSelect from '../../shared/components/SearchableSelect';
 import { queryKeys } from '../../services/queryKeys';
+import { formatDate } from '../../shared/utils/format';
 
 const UNITS = ['KG', 'PCS', 'CRATE', 'DOZEN', 'BAG', 'MOUND'];
 
@@ -98,6 +99,10 @@ const ShipmentsPage = () => {
   }, [shipments]);
 
   const { pageItems: pagedShipments, ...shipmentPager } = usePagination(allShipments, 15);
+  const shipmentTotals = useMemo(() => ({
+    quantity: allShipments.reduce((sum, shipment) => sum + (Number(shipment.totalQuantity) || 0), 0),
+    suppliers: new Set(allShipments.map((shipment) => Number(shipment.supplierId)).filter(Boolean)).size,
+  }), [allShipments]);
 
   const handleField = (key) => (e) =>
     setFormData((prev) => ({
@@ -195,13 +200,12 @@ const ShipmentsPage = () => {
             <h3>Supplier shipments</h3>
           </div>
         </div>
-        <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={openModal}>
-          <Plus size={16} /> Add Shipment
-        </button>
       </section>
 
-      {/* All shipments table */}
-      <div className="supplier-panel">
+      <div className="profile-workspace">
+        <main className="profile-main-stack">
+          {/* All shipments table */}
+          <div className="supplier-panel">
         <div className="mb-4 flex items-center justify-between">
           <div>
             <h3 className="flex items-center gap-2"><Truck size={18} className="text-blue-600" /> All Shipments</h3>
@@ -241,7 +245,7 @@ const ShipmentsPage = () => {
                       <td className="px-4 py-3 text-center whitespace-nowrap font-bold text-blue-700">
                         {shipment.name || '—'}
                       </td>
-                      <td className="px-4 py-3 text-center font-semibold text-slate-900 whitespace-nowrap">{shipment.date}</td>
+                      <td className="px-4 py-3 text-center font-semibold text-slate-900 whitespace-nowrap">{formatDate(shipment.deliveryDate || shipment.date)}</td>
                       <td className="px-4 py-3 text-center font-medium text-slate-800">{supplier?.name || '—'}</td>
                       <td className="px-4 py-3 text-center">
                         <span className="inline-flex items-center justify-center rounded-lg bg-teal-50 px-2.5 py-1 font-extrabold text-teal-700 tabular-nums">
@@ -277,6 +281,25 @@ const ShipmentsPage = () => {
             <TablePager {...shipmentPager} />
           </div>
         )}
+          </div>
+        </main>
+
+        <aside className="profile-side-stack">
+          <div className="supplier-panel">
+            <h3>Shipment Actions</h3>
+            <button type="button" className="btn-primary mt-3 inline-flex w-full items-center justify-center gap-2" onClick={openModal}>
+              <Plus size={16} /> Add Shipment
+            </button>
+          </div>
+          <div className="supplier-panel">
+            <h3>Shipment Summary</h3>
+            <div className="mt-3 space-y-2">
+              <div className="box-row"><span>Total shipments</span><strong>{allShipments.length}</strong></div>
+              <div className="box-row"><span>Suppliers</span><strong>{shipmentTotals.suppliers}</strong></div>
+              <div className="box-row total"><span>Total quantity</span><strong>{shipmentTotals.quantity.toLocaleString()}</strong></div>
+            </div>
+          </div>
+        </aside>
       </div>
 
       {/* Add Shipment modal */}
@@ -545,7 +568,7 @@ const ShipmentsPage = () => {
                         <span className="badge badge-teal">{detailShipment.commissionRate}% commission</span>
                       )}
                     </h2>
-                    <p className="text-xs text-slate-500 mt-0.5">#{detailShipment.id} · {detailShipment.date}</p>
+                    <p className="text-xs text-slate-500 mt-0.5">#{detailShipment.id} · {formatDate(detailShipment.deliveryDate || detailShipment.date)}</p>
                   </div>
                 </div>
                 <button type="button" onClick={() => setDetailShipment(null)} className="modal-close-btn">✕</button>
@@ -553,7 +576,7 @@ const ShipmentsPage = () => {
               <div className="modal-body max-h-[72vh] overflow-y-auto">
                 <div className="grid grid-cols-2 gap-3 md:grid-cols-3">
                   <div className="balance-pill balance-pill-emerald"><p>Supplier</p><p>{supplier?.name || '—'}</p></div>
-                  <div className="balance-pill"><p>Date</p><p>{detailShipment.date}</p></div>
+                  <div className="balance-pill"><p>Date</p><p>{formatDate(detailShipment.deliveryDate || detailShipment.date)}</p></div>
                   <div className="balance-pill balance-pill-amber"><p>Total Quantity</p><p>{detailShipment.totalQuantity.toLocaleString()}</p></div>
                 </div>
 

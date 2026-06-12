@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import {
-  Search, Plus, Users, Phone, User, MapPin, Wallet, ArrowUpDown,
+  Search, Plus, Users, Phone, User, MapPin, Wallet, ArrowUpDown, Filter,
 } from 'lucide-react';
 import { useData } from '../../data/DataContext';
 import { useToast } from '../../shared/components/Toast';
 import { TablePager, usePagination } from '../../shared/components';
+import { formatMoney } from '../../shared/utils/format';
 import CustomerDetail from './CustomerDetail';
 
 const EMPTY_FORM = {
@@ -114,54 +115,13 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
     return <CustomerDetail customerId={selectedCustomerId} onBack={() => setSelectedCustomerId(null)} />;
   }
 
-  return (
-    <div className="space-y-4">
-      <div className="suppliers-toolbar">
-        <button onClick={() => setShowForm(true)} className="btn-primary flex items-center gap-2">
-          <Plus size={16} />
-          Add Customer
-        </button>
-        <div className="suppliers-toolbar-controls">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="input-field !pl-9"
-              placeholder="Search name, owner or phone…"
-            />
-          </div>
-          <div className="suppliers-toolbar-select">
-            <Wallet size={14} className="suppliers-toolbar-select-icon" />
-            <select value={filterDue} onChange={(e) => setFilterDue(e.target.value)} className="input-field !pl-8">
-              <option value="all">All customers</option>
-              <option value="with-due">With due</option>
-              <option value="no-due">No due</option>
-              <option value="holding-crates">Holding crates</option>
-            </select>
-          </div>
-          <label className="toggle-pill" title="Show disabled">
-            <input
-              type="checkbox"
-              checked={showDisabled}
-              onChange={(e) => setShowDisabled(e.target.checked)}
-            />
-            <span>Show disabled</span>
-          </label>
-          <div className="suppliers-toolbar-select">
-            <ArrowUpDown size={14} className="suppliers-toolbar-select-icon" />
-            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="input-field !pl-8">
-              <option value="name-asc">Name A → Z</option>
-              <option value="name-desc">Name Z → A</option>
-              <option value="due-desc">Due (high → low)</option>
-              <option value="due-asc">Due (low → high)</option>
-              <option value="crates-desc">Crates held (high → low)</option>
-            </select>
-          </div>
-        </div>
-      </div>
+  const totalDue = customers.reduce((sum, c) => sum + Math.max(0, Number(c.amountDue) || 0), 0);
+  const withDueCount = customers.filter((c) => Number(c.amountDue) > 0).length;
+  const totalCratesHeld = customers.reduce((sum, c) => sum + (Number(c.totalCratesHolding) || 0), 0);
 
+  return (
+    <div className="profile-workspace">
+      <main className="profile-main-stack">
       {showForm && (
         <div className="modal-overlay">
           <div className="modal-content supplier-form-modal">
@@ -325,45 +285,46 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
             </div>
 
             {/* Desktop table view */}
-            <div className="hidden lg:block overflow-x-auto rounded-xl border border-slate-200">
-              <table className="center-table w-full text-sm min-w-[860px]">
+            <div className="hidden lg:block overflow-x-auto rounded-lg border border-slate-200 bg-white">
+              <table className="party-table w-full text-sm min-w-[880px]">
                 <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200">
-                    <th className="px-4 py-3 font-semibold text-slate-700">Customer</th>
-                    <th className="px-4 py-3 font-semibold text-slate-700">Owner</th>
-                    <th className="px-4 py-3 font-semibold text-slate-700">Location</th>
-                    <th className="px-4 py-3 font-semibold text-slate-700">Phone</th>
-                    <th className="px-4 py-3 font-semibold text-slate-700">Amount Due</th>
-                    <th className="px-4 py-3 font-semibold text-slate-700">Crate Due</th>
+                  <tr>
+                    <th>Customer</th>
+                    <th>Owner Name</th>
+                    <th>Contact</th>
+                    <th>Location</th>
+                    <th className="text-right">Amount Due</th>
+                    <th className="text-right">Crate Due</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody>
                   {pagedCustomers.map((c) => (
                     <tr
                       key={c.id}
                       onClick={() => setSelectedCustomerId(c.id)}
-                      className="cursor-pointer hover:bg-slate-50 transition-colors"
+                      className="cursor-pointer"
                     >
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-center gap-2">
-                          <span className="font-semibold text-slate-900">{c.name}</span>
-                          {c.status === 'DISABLED' && (
-                            <span className="badge badge-rose">Disabled</span>
-                          )}
+                      <td>
+                        <div className="party-cell-main">
+                          <span className="party-avatar">{c.name?.charAt(0).toUpperCase() || 'C'}</span>
+                          <div className="flex flex-wrap items-center gap-2 min-w-0">
+                            <span className="party-name">{c.name}</span>
+                            {c.status === 'DISABLED' && <span className="badge badge-rose">Disabled</span>}
+                          </div>
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-slate-700">
-                        {c.ownerName || c.owner || <span className="text-slate-400">—</span>}
+                      <td className="font-semibold text-slate-700">{c.ownerName || c.owner || '—'}</td>
+                      <td>
+                        <div className="party-contact">
+                          <span>{c.phone || '—'}</span>
+                        </div>
                       </td>
-                      <td className="px-4 py-3 text-slate-700">
-                        {c.address || <span className="text-slate-400">—</span>}
+                      <td className="text-slate-600">{c.address || '—'}</td>
+                      <td className={`text-right font-bold tabular-nums ${Number(c.amountDue) > 0 ? 'text-red-600' : 'text-slate-400'}`}>
+                        {Number(c.amountDue) > 0 ? formatMoney(c.amountDue) : '—'}
                       </td>
-                      <td className="px-4 py-3 text-slate-700">{c.phone}</td>
-                      <td className="px-4 py-3 font-bold text-red-600">
-                        ৳{Number(c.amountDue || 0).toLocaleString()}
-                      </td>
-                      <td className="px-4 py-3 font-semibold text-slate-700">
-                        {c.totalCratesHolding || 0}
+                      <td className={`text-right font-semibold tabular-nums ${Number(c.totalCratesHolding) > 0 ? 'text-slate-700' : 'text-slate-400'}`}>
+                        {Number(c.totalCratesHolding) > 0 ? c.totalCratesHolding : '—'}
                       </td>
                     </tr>
                   ))}
@@ -375,6 +336,71 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
           </>
         )}
       </div>
+      </main>
+
+      <aside className="profile-side-stack">
+        <div className="supplier-panel">
+          <h3>Customer Actions</h3>
+          <button
+            type="button"
+            onClick={() => setShowForm(true)}
+            className="btn-primary mt-3 inline-flex w-full items-center justify-center gap-2"
+          >
+            <Plus size={16} /> Add Customer
+          </button>
+        </div>
+        <div className="supplier-panel">
+          <h3 className="flex items-center gap-2"><Filter size={16} className="text-blue-600" /> Filters</h3>
+          <div className="mt-3 space-y-2.5">
+            <div className="relative">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="input-field !pl-9"
+                placeholder="Search name, owner or phone…"
+              />
+            </div>
+            <div className="suppliers-toolbar-select">
+              <Wallet size={14} className="suppliers-toolbar-select-icon" />
+              <select value={filterDue} onChange={(e) => setFilterDue(e.target.value)} className="input-field !pl-8 w-full">
+                <option value="all">All customers</option>
+                <option value="with-due">With due</option>
+                <option value="no-due">No due</option>
+                <option value="holding-crates">Holding crates</option>
+              </select>
+            </div>
+            <div className="suppliers-toolbar-select">
+              <ArrowUpDown size={14} className="suppliers-toolbar-select-icon" />
+              <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="input-field !pl-8 w-full">
+                <option value="name-asc">Name A → Z</option>
+                <option value="name-desc">Name Z → A</option>
+                <option value="due-desc">Due (high → low)</option>
+                <option value="due-asc">Due (low → high)</option>
+                <option value="crates-desc">Crates held (high → low)</option>
+              </select>
+            </div>
+            <label className="toggle-pill w-full justify-center" title="Show disabled">
+              <input
+                type="checkbox"
+                checked={showDisabled}
+                onChange={(e) => setShowDisabled(e.target.checked)}
+              />
+              <span>Show disabled</span>
+            </label>
+          </div>
+        </div>
+        <div className="supplier-panel">
+          <h3>Customers Summary</h3>
+          <div className="mt-3 space-y-2">
+            <div className="box-row"><span>Total customers</span><strong>{customers.length}</strong></div>
+            <div className="box-row"><span>With due</span><strong>{withDueCount}</strong></div>
+            <div className="box-row"><span>Total due</span><strong className="text-rose-700">{formatMoney(totalDue)}</strong></div>
+            <div className="box-row total"><span>Crates held</span><strong>{totalCratesHeld}</strong></div>
+          </div>
+        </div>
+      </aside>
     </div>
   );
 };

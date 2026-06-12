@@ -1,14 +1,14 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import {
-  BarChart3, Filter, Calendar, Download, FileText, Printer, TrendingUp, TrendingDown,
+  BarChart3, Filter, Download, FileText, Printer, TrendingUp, TrendingDown,
   ChevronRight, Wallet, Percent,
 } from 'lucide-react';
 import { useData } from '../../data/DataContext';
 import { useAuth } from '../auth/AuthContext';
 import { queryKeys } from '../../services/queryKeys';
 import { postJson, apiPaths } from '../../services/apiClient';
-import { formatMoney, formatDate } from '../../shared/utils/format';
+import { formatMoney, formatDate, formatDateTime } from '../../shared/utils/format';
 import { Loader, EmptyRow, ErrorBanner } from '../../shared/components/Loader';
 import { TablePager, usePagination, DateRangeFilter, todayLocalIso, nextDayLocalIso } from '../../shared/components';
 
@@ -138,20 +138,52 @@ const PnLReport = () => {
   const rangeText = fromDate === toDate ? prettyDay(fromDate) : `${prettyDay(fromDate)} – ${prettyDay(toDate)}`;
 
   return (
-    <div className="space-y-4">
-      {/* Toolbar — hidden in print */}
-      <section className="no-print rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="mb-3 flex items-center justify-between gap-3">
-          <div className="flex items-center gap-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-sm">
-              <FileText size={15} />
-            </span>
-            <div>
-              <h3 className="text-sm font-extrabold text-slate-900">Profit &amp; Loss Statement</h3>
-              <p className="text-[11px] text-slate-500">Accrual basis — commission booked when sold, expenses when posted</p>
+    <div className="profile-workspace">
+      <main className="profile-main-stack">
+        {isLoading && <Loader />}
+        {queryError && <ErrorBanner message={queryError.message || 'Failed to load report.'} />}
+
+        {pnl && (
+          <div className="no-print space-y-4">
+            <p className="px-1 text-xs font-semibold text-slate-500">{rangeText}</p>
+            <PnLSummary pnl={pnl} prior={prior} />
+            <ProfitBar income={pnl.totalIncome} expenses={pnl.totalExpenses} />
+            <div className="grid gap-4 lg:grid-cols-2">
+              <FlowCard tone="emerald" icon={TrendingUp} title="Income" total={pnl.totalIncome}>
+                <Line label="Commission earned" amount={pnl.income.commissionEarned} priorAmount={prior?.income?.commissionEarned} />
+                {(pnl.income.bySupplier || []).length > 0 && <BreakdownList items={pnl.income.bySupplier} />}
+                {pnl.income.crateSalesNet != null && Number(pnl.income.crateSalesNet) !== 0 && (
+                  <Line label="Crate sales (net)" amount={pnl.income.crateSalesNet} priorAmount={prior?.income?.crateSalesNet} hint="Sale price minus weighted-average cost basis" />
+                )}
+              </FlowCard>
+              <FlowCard tone="rose" icon={TrendingDown} title="Expenses" total={pnl.totalExpenses}>
+                <Line label="Shop expenses" amount={pnl.expenses.shopExpenses} priorAmount={prior?.expenses?.shopExpenses} />
+                {(pnl.expenses.shopByCategory || []).length > 0 && <BreakdownList items={pnl.expenses.shopByCategory} />}
+                <Line label="Crate loss (absorbed)" amount={pnl.expenses.crateLossAbsorbed} priorAmount={prior?.expenses?.crateLossAbsorbed} hint="Lost/damaged crates no party compensated" />
+              </FlowCard>
+            </div>
+            <EquationBar pnl={pnl} prior={prior} />
+          </div>
+        )}
+
+        {pnl && <PnLInvoice pnl={pnl} account={admin} period={rangeText} />}
+      </main>
+
+      <aside className="profile-side-stack no-print">
+        <section className="supplier-panel">
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-emerald-500 to-teal-600 text-white shadow-sm">
+                <FileText size={15} />
+              </span>
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900">Profit &amp; Loss Statement</h3>
+                <p className="text-[11px] text-slate-500">Accrual basis</p>
+              </div>
             </div>
           </div>
-          <div className="flex items-center gap-2">
+
+          <div className="mb-3 space-y-2">
             <label className="inline-flex items-center gap-1.5 text-[11px] font-semibold text-slate-700">
               <input
                 type="checkbox"
@@ -161,76 +193,47 @@ const PnLReport = () => {
               />
               Compare to prior
             </label>
-            <button
-              type="button"
-              onClick={handlePrint}
-              disabled={!pnl}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-300 disabled:opacity-40"
-            >
-              <Printer size={12} /> Print
-            </button>
-            <button
-              type="button"
-              onClick={handleCsv}
-              disabled={!pnl}
-              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-300 disabled:opacity-40"
-            >
-              <Download size={12} /> CSV
-            </button>
+            <div className="grid grid-cols-2 gap-2">
+              <button
+                type="button"
+                onClick={handlePrint}
+                disabled={!pnl}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:border-slate-300 disabled:opacity-40"
+              >
+                <Printer size={12} /> Print
+              </button>
+              <button
+                type="button"
+                onClick={handleCsv}
+                disabled={!pnl}
+                className="inline-flex items-center justify-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-2 text-xs font-semibold text-slate-700 hover:border-slate-300 disabled:opacity-40"
+              >
+                <Download size={12} /> CSV
+              </button>
+            </div>
           </div>
-        </div>
 
-        <DateRangeFilter from={fromDate} to={toDate} setFrom={setFromDate} setTo={setToDate} />
-      </section>
-
-      {isLoading && <Loader />}
-      {queryError && <ErrorBanner message={queryError.message || 'Failed to load report.'} />}
-
-      {pnl && (
-        <div className="no-print space-y-4">
-          <p className="px-1 text-xs font-semibold text-slate-500">{rangeText}</p>
-          <PnLSummary pnl={pnl} prior={prior} />
-          <ProfitBar income={pnl.totalIncome} expenses={pnl.totalExpenses} />
-          <div className="grid gap-4 lg:grid-cols-2">
-            <FlowCard tone="emerald" icon={TrendingUp} title="Income" total={pnl.totalIncome}>
-              <Line label="Commission earned" amount={pnl.income.commissionEarned} priorAmount={prior?.income?.commissionEarned} />
-              {(pnl.income.bySupplier || []).length > 0 && <BreakdownList items={pnl.income.bySupplier} />}
-              {pnl.income.crateSalesNet != null && Number(pnl.income.crateSalesNet) !== 0 && (
-                <Line label="Crate sales (net)" amount={pnl.income.crateSalesNet} priorAmount={prior?.income?.crateSalesNet} hint="Sale price minus weighted-average cost basis" />
-              )}
-            </FlowCard>
-            <FlowCard tone="rose" icon={TrendingDown} title="Expenses" total={pnl.totalExpenses}>
-              <Line label="Shop expenses" amount={pnl.expenses.shopExpenses} priorAmount={prior?.expenses?.shopExpenses} />
-              {(pnl.expenses.shopByCategory || []).length > 0 && <BreakdownList items={pnl.expenses.shopByCategory} />}
-              <Line label="Crate loss (absorbed)" amount={pnl.expenses.crateLossAbsorbed} priorAmount={prior?.expenses?.crateLossAbsorbed} hint="Lost/damaged crates no party compensated" />
-            </FlowCard>
-          </div>
-          <EquationBar pnl={pnl} prior={prior} />
-        </div>
-      )}
-
-      {/* Print-only professional statement — hidden on screen, becomes the PDF */}
-      {pnl && <PnLInvoice pnl={pnl} account={admin} period={rangeText} />}
+          <DateRangeFilter from={fromDate} to={toDate} setFrom={setFromDate} setTo={setToDate} />
+        </section>
+      </aside>
     </div>
   );
 };
 
 // ── Print-only invoice / statement document ──────────────────────────────────
 
+const InvRow = ({ label, amount, strong, sub }) => (
+  <tr className={strong ? 'inv-row-strong' : ''}>
+    <td className={`inv-cell-label${sub ? ' inv-cell-sub' : ''}`}>{label}</td>
+    <td className="inv-cell-amount">{formatMoney(amount)}</td>
+  </tr>
+);
+
 const PnLInvoice = ({ pnl, account, period }) => {
   const now = new Date();
   const docNo = `PNL-${now.getFullYear()}${String(now.getMonth() + 1).padStart(2, '0')}${String(now.getDate()).padStart(2, '0')}-${String(now.getHours()).padStart(2, '0')}${String(now.getMinutes()).padStart(2, '0')}`;
-  const generated = now.toLocaleString(undefined, {
-    day: 'numeric', month: 'short', year: 'numeric', hour: '2-digit', minute: '2-digit',
-  });
+  const generated = formatDateTime(now);
   const positive = Number(pnl.netProfit) >= 0;
-
-  const InvRow = ({ label, amount, strong, sub }) => (
-    <tr className={strong ? 'inv-row-strong' : ''}>
-      <td className={`inv-cell-label${sub ? ' inv-cell-sub' : ''}`}>{label}</td>
-      <td className="inv-cell-amount">{formatMoney(amount)}</td>
-    </tr>
-  );
 
   return (
     <div className="pnl-print-sheet">
@@ -354,20 +357,21 @@ const PnLSummary = ({ pnl, prior }) => {
   );
 };
 
+const ProfitBarRow = ({ label, value, pct, bar, text }) => (
+  <div className="flex items-center gap-3">
+    <span className={`w-20 shrink-0 text-[11px] font-bold ${text}`}>{label}</span>
+    <div className="h-2.5 flex-1 rounded-full bg-slate-100">
+      <div className={`h-2.5 rounded-full ${bar}`} style={{ width: `${pct}%` }} />
+    </div>
+    <span className="w-28 shrink-0 text-right text-xs font-extrabold tabular-nums text-slate-700">{value}</span>
+  </div>
+);
+
 const ProfitBar = ({ income, expenses }) => {
   const inc = Math.max(0, Number(income) || 0);
   const exp = Math.max(0, Number(expenses) || 0);
   const denom = Math.max(inc, exp, 1);
   const profit = inc - exp;
-  const Row = ({ label, value, pct, bar, text }) => (
-    <div className="flex items-center gap-3">
-      <span className={`w-20 shrink-0 text-[11px] font-bold ${text}`}>{label}</span>
-      <div className="h-2.5 flex-1 rounded-full bg-slate-100">
-        <div className={`h-2.5 rounded-full ${bar}`} style={{ width: `${pct}%` }} />
-      </div>
-      <span className="w-28 shrink-0 text-right text-xs font-extrabold tabular-nums text-slate-700">{value}</span>
-    </div>
-  );
   return (
     <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
       <div className="mb-3 flex items-center justify-between">
@@ -377,8 +381,8 @@ const ProfitBar = ({ income, expenses }) => {
         </span>
       </div>
       <div className="space-y-2.5">
-        <Row label="Income" value={formatMoney(inc)} pct={(inc / denom) * 100} bar="bg-emerald-500" text="text-emerald-700" />
-        <Row label="Expenses" value={formatMoney(exp)} pct={(exp / denom) * 100} bar="bg-rose-400" text="text-rose-700" />
+        <ProfitBarRow label="Income" value={formatMoney(inc)} pct={(inc / denom) * 100} bar="bg-emerald-500" text="text-emerald-700" />
+        <ProfitBarRow label="Expenses" value={formatMoney(exp)} pct={(exp / denom) * 100} bar="bg-rose-400" text="text-rose-700" />
       </div>
     </section>
   );
@@ -538,46 +542,8 @@ const SalesBreakdown = () => {
   };
 
   return (
-    <div className="space-y-4">
-      <section className="rounded-2xl border border-slate-200 bg-white p-4 shadow-sm">
-        <div className="mb-3 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-sm">
-              <BarChart3 size={15} />
-            </span>
-            <div>
-              <h3 className="text-sm font-extrabold text-slate-900">Sales Reports</h3>
-              <p className="text-[11px] text-slate-500">Drill down by product, variety, lot, supplier, or shipment</p>
-            </div>
-          </div>
-          <button
-            type="button"
-            onClick={exportCsv}
-            disabled={!groups.length}
-            className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-300 disabled:opacity-40"
-          >
-            <Download size={12} /> CSV
-          </button>
-        </div>
-
-        <div className="mb-3">
-          <DateRangeFilter from={fromDate} to={toDate} setFrom={setFromDate} setTo={setToDate} />
-        </div>
-
-        <div className="grid grid-cols-2 gap-2.5 md:grid-cols-3 lg:grid-cols-5">
-          <FilterSelect label="Product" value={productId} onChange={(v) => { setProductId(v); setCategoryId(''); setSubCategoryId(''); }}
-            options={[{ value: '', label: 'All products' }, ...catalogProducts.map((p) => ({ value: p.id, label: p.name }))]} />
-          <FilterSelect label="Variety" value={categoryId} disabled={!selectedProduct}
-            onChange={(v) => { setCategoryId(v); setSubCategoryId(''); }}
-            options={[{ value: '', label: 'All varieties' }, ...varieties.map((v) => ({ value: v.id, label: v.name }))]} />
-          <FilterSelect label="Lot" value={subCategoryId} disabled={!lots.length} onChange={setSubCategoryId}
-            options={[{ value: '', label: 'All lots' }, ...lots.map((s) => ({ value: s.id, label: s.name }))]} />
-          <FilterSelect label="Supplier" value={supplierAccountId} onChange={setSupplierAccountId}
-            options={[{ value: '', label: 'All suppliers' }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))]} />
-          <FilterSelect label="Group by" value={groupBy} onChange={setGroupBy} options={GROUP_BY} />
-        </div>
-      </section>
-
+    <div className="profile-workspace">
+      <main className="profile-main-stack">
       <section className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-6">
         <KpiTile label="Total Sold" value={formatMoney(summary.totalSold)} tone="blue" />
         <KpiTile label="Cash at Sale" value={formatMoney(summary.cashAtSale)} tone="emerald" />
@@ -635,6 +601,48 @@ const SalesBreakdown = () => {
       )}
 
       {error && <ErrorBanner message={error} />}
+      </main>
+
+      <aside className="profile-side-stack">
+        <section className="supplier-panel">
+          <div className="mb-3 flex items-start justify-between gap-3">
+            <div className="flex items-center gap-2">
+              <span className="flex h-9 w-9 items-center justify-center rounded-xl bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-sm">
+                <BarChart3 size={15} />
+              </span>
+              <div>
+                <h3 className="text-sm font-extrabold text-slate-900">Sales Reports</h3>
+                <p className="text-[11px] text-slate-500">Drill down by product, variety, lot, supplier, or shipment</p>
+              </div>
+            </div>
+            <button
+              type="button"
+              onClick={exportCsv}
+              disabled={!groups.length}
+              className="inline-flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-xs font-semibold text-slate-700 hover:border-slate-300 disabled:opacity-40"
+            >
+              <Download size={12} /> CSV
+            </button>
+          </div>
+
+          <div className="mb-3">
+            <DateRangeFilter from={fromDate} to={toDate} setFrom={setFromDate} setTo={setToDate} />
+          </div>
+
+          <div className="grid grid-cols-1 gap-2.5">
+            <FilterSelect label="Product" value={productId} onChange={(v) => { setProductId(v); setCategoryId(''); setSubCategoryId(''); }}
+              options={[{ value: '', label: 'All products' }, ...catalogProducts.map((p) => ({ value: p.id, label: p.name }))]} />
+            <FilterSelect label="Variety" value={categoryId} disabled={!selectedProduct}
+              onChange={(v) => { setCategoryId(v); setSubCategoryId(''); }}
+              options={[{ value: '', label: 'All varieties' }, ...varieties.map((v) => ({ value: v.id, label: v.name }))]} />
+            <FilterSelect label="Lot" value={subCategoryId} disabled={!lots.length} onChange={setSubCategoryId}
+              options={[{ value: '', label: 'All lots' }, ...lots.map((s) => ({ value: s.id, label: s.name }))]} />
+            <FilterSelect label="Supplier" value={supplierAccountId} onChange={setSupplierAccountId}
+              options={[{ value: '', label: 'All suppliers' }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))]} />
+            <FilterSelect label="Group by" value={groupBy} onChange={setGroupBy} options={GROUP_BY} />
+          </div>
+        </section>
+      </aside>
     </div>
   );
 };

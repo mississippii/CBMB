@@ -13,13 +13,17 @@ const DetailCell = ({ label, value, full }) => {
   );
 };
 
-const Navbar = ({ onHome, subtitle }) => {
+const Navbar = ({ onHome, subtitle, onLogout }) => {
   const { admin, logout } = useAuth();
   const isAdmin = admin?.role === 'ADMIN';
-  const displaySubtitle = subtitle ?? (isAdmin ? 'Admin Console' : 'Wholesaler Workspace');
-  const roleLabel = isAdmin ? 'Administrator' : 'Wholesaler';
-  const accountName = admin?.businessName || admin?.fullName || roleLabel;
-  const HeaderIcon = isAdmin ? ShieldCheck : Store;
+  const isSupplier = admin?.role === 'SUPPLIER';
+  const displaySubtitle = subtitle ?? (isAdmin ? 'Admin Console' : isSupplier ? 'Supplier Portal' : 'Wholesaler Workspace');
+  const roleLabel = isAdmin ? 'Administrator' : isSupplier ? 'Supplier' : 'Wholesaler';
+  const accountName = isSupplier
+    ? (admin?.fullName || admin?.businessName || roleLabel)
+    : (admin?.businessName || admin?.fullName || roleLabel);
+  const HeaderIcon = isAdmin ? ShieldCheck : isSupplier ? UserRound : Store;
+  const AccountButtonIcon = UserRound;
 
   const [open, setOpen] = useState(false);
   const menuRef = useRef(null);
@@ -59,7 +63,7 @@ const Navbar = ({ onHome, subtitle }) => {
               aria-label="Account"
               aria-expanded={open}
             >
-              <UserRound size={19} />
+              <AccountButtonIcon size={19} />
             </button>
 
             {open && (
@@ -85,10 +89,21 @@ const Navbar = ({ onHome, subtitle }) => {
 
                 {/* Secondary details — oriented in a 2-column grid */}
                 <div className="grid grid-cols-2 gap-x-4 gap-y-3 px-5 py-4">
-                  <DetailCell label="Owner" value={admin?.businessName ? admin?.fullName : null} />
-                  <DetailCell label="Phone" value={admin?.phone} />
-                  <DetailCell label="Location" value={admin?.address} full />
-                  <DetailCell label="Email" value={admin?.email} full />
+                  {isSupplier ? (
+                    <>
+                      <DetailCell label="Phone" value={admin?.phone} />
+                      <DetailCell label="Business" value={admin?.businessName} />
+                      <DetailCell label="Location" value={admin?.address} full />
+                      <DetailCell label="Portal" value="Read-only account view" full />
+                    </>
+                  ) : (
+                    <>
+                      <DetailCell label="Owner" value={admin?.businessName ? admin?.fullName : null} />
+                      <DetailCell label="Phone" value={admin?.phone} />
+                      <DetailCell label="Location" value={admin?.address} full />
+                      <DetailCell label="Email" value={admin?.email} full />
+                    </>
+                  )}
                 </div>
               </div>
             )}
@@ -96,7 +111,7 @@ const Navbar = ({ onHome, subtitle }) => {
 
           <button
             type="button"
-            onClick={logout}
+            onClick={onLogout || logout}
             className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 focus:outline-none focus:ring-2 focus:ring-rose-200"
             aria-label="Logout"
             title="Logout"

@@ -52,7 +52,7 @@ const formatNumber = (value) =>
 
 const formatMoney = (value) => '৳ ' + (Number(value) || 0).toLocaleString();
 
-const StoreInventory = ({ onOpenProfile }) => {
+const StoreInventory = () => {
   const { suppliers, writeOffStock, fetchShipments, fetchInventoryList, fetchDashboardSummary } = useData();
   const { admin } = useAuth();
   const showToast = useToast();
@@ -231,30 +231,8 @@ const StoreInventory = ({ onOpenProfile }) => {
   const { pageItems: pagedGrouped, ...productPager } = usePagination(grouped, 12);
 
   return (
-    <div className="store-inventory space-y-4">
-
-      {/* Today's sales — full money flow lives in the Cash Book */}
-      <section className="supplier-panel">
-        <div className="flex items-center justify-between">
-          <h3 className="flex items-center gap-2"><ShoppingCart size={16} className="text-teal-600" /> Today's Sales</h3>
-          <span className="badge badge-teal">{Number(todaySales.saleCount) || 0} sales</span>
-        </div>
-        <div className="mt-4 grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <div className="rounded-2xl border border-teal-200 bg-gradient-to-br from-teal-50 to-white px-3.5 py-3 shadow-sm">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-teal-600">Total Sold</p>
-            <p className="mt-1 text-xl font-extrabold leading-tight text-teal-700 tabular-nums">{formatMoney(todaySales.totalSold)}</p>
-          </div>
-          <div className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white px-3.5 py-3 shadow-sm">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">Cash</p>
-            <p className="mt-1 text-xl font-extrabold leading-tight text-emerald-700 tabular-nums">{formatMoney(todaySales.cashAtSale)}</p>
-          </div>
-          <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white px-3.5 py-3 shadow-sm">
-            <p className="text-[10px] font-bold uppercase tracking-wider text-amber-600">Due</p>
-            <p className="mt-1 text-xl font-extrabold leading-tight text-amber-600 tabular-nums">{formatMoney(todaySales.dueCreated)}</p>
-          </div>
-        </div>
-      </section>
-
+    <div className="store-inventory profile-workspace">
+      <main className="profile-main-stack">
       <section className="supplier-panel inventory-panel">
         <div className="inventory-panel-header">
           <div>
@@ -487,6 +465,31 @@ const StoreInventory = ({ onOpenProfile }) => {
           </div>
         )}
       </section>
+      </main>
+
+      <aside className="profile-side-stack">
+        {/* Today's sales — full money flow lives in the Cash Book */}
+        <section className="supplier-panel">
+          <div className="flex items-center justify-between">
+            <h3 className="flex items-center gap-2"><ShoppingCart size={16} className="text-teal-600" /> Today's Sales</h3>
+            <span className="badge badge-teal">{Number(todaySales.saleCount) || 0} sales</span>
+          </div>
+          <div className="mt-4 grid grid-cols-1 gap-3">
+            <div className="rounded-2xl border border-teal-200 bg-gradient-to-br from-teal-50 to-white px-3.5 py-3 shadow-sm">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-teal-600">Total Sold</p>
+              <p className="mt-1 text-xl font-extrabold leading-tight text-teal-700 tabular-nums">{formatMoney(todaySales.totalSold)}</p>
+            </div>
+            <div className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white px-3.5 py-3 shadow-sm">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">Cash</p>
+              <p className="mt-1 text-xl font-extrabold leading-tight text-emerald-700 tabular-nums">{formatMoney(todaySales.cashAtSale)}</p>
+            </div>
+            <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white px-3.5 py-3 shadow-sm">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-amber-600">Due</p>
+              <p className="mt-1 text-xl font-extrabold leading-tight text-amber-600 tabular-nums">{formatMoney(todaySales.dueCreated)}</p>
+            </div>
+          </div>
+        </section>
+      </aside>
 
       {writeOff && (
         <div className="modal-overlay">

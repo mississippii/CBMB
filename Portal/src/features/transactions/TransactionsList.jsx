@@ -4,6 +4,7 @@ import { useData } from '../../data/DataContext';
 import { useAuth } from '../auth/AuthContext';
 import { queryKeys } from '../../services/queryKeys';
 import { TablePager, usePagination } from '../../shared/components';
+import { formatDate, formatDateTime } from '../../shared/utils/format';
 
 const toStartOfDay = (dateString) => new Date(`${dateString}T00:00:00`);
 const toEndOfDay = (dateString) => new Date(`${dateString}T23:59:59.999`);
@@ -196,7 +197,7 @@ const TransactionsList = () => {
     if (transaction.product) {
       const parts = [transaction.product];
       if (transaction.category && transaction.category !== 'No Category') parts.push(transaction.category);
-      const label = parts.join(' / ');
+      const label = parts.join(' · ');
       const qty = Number(transaction.quantity) > 0
         ? ` · ${transaction.quantity} ${String(transaction.unit || '').toUpperCase()}`.trimEnd()
         : '';
@@ -208,6 +209,22 @@ const TransactionsList = () => {
       return n > 0 ? `Crate · ${n}` : 'Crate';
     }
     return '—';
+  };
+
+
+  const getItemParts = (transaction) => {
+    if (!transaction.product) return { title: getItemLabel(transaction), meta: '' };
+    const quantity = Number(transaction.quantity) > 0
+      ? `${transaction.quantity} ${String(transaction.unit || '').toUpperCase()}`.trim()
+      : '';
+    return {
+      title: transaction.product,
+      meta: [
+        transaction.category && transaction.category !== 'No Category' ? transaction.category : null,
+        transaction.subCategoryName || null,
+        quantity,
+      ].filter(Boolean).join(' · '),
+    };
   };
 
   // Payment method column: how it was paid, or "Due" when a sale was taken on credit.
@@ -251,7 +268,7 @@ const TransactionsList = () => {
 
     const productLabel = [transaction.product, transaction.category && transaction.category !== 'No Category' ? transaction.category : null]
       .filter(Boolean)
-      .join(' / ');
+      .join(' · ');
     const quantity = Number(transaction.quantity) > 0
       ? (transaction.quantity + ' ' + String(transaction.unit || '').toUpperCase()).trim()
       : '';
@@ -274,7 +291,7 @@ const TransactionsList = () => {
         .map(
           (transaction) => `
             <tr>
-              <td>${escapeHtml(transaction.date)}</td>
+              <td>${escapeHtml(formatDate(transaction.createdAt || transaction.date))}</td>
               <td>${escapeHtml(getSupplierName(transaction))}</td>
               <td>${escapeHtml(getCustomerName(transaction))}</td>
               <td class="right">${escapeHtml(renderAmount(transaction))}</td>
@@ -342,7 +359,7 @@ const TransactionsList = () => {
           </div>
           <div class="print-footer">
             <span class="page-number">Page </span>
-            <span class="generated-at">${escapeHtml(new Date().toLocaleString())}</span>
+            <span class="generated-at">${escapeHtml(formatDateTime(new Date()))}</span>
           </div>
         </body>
       </html>
@@ -354,65 +371,9 @@ const TransactionsList = () => {
 
   return (
     <div className="space-y-4">
-      <div className="transaction-filter-panel">
-        <div className="transaction-filter-header">
-          <div>
-            <h3>Transactions</h3>
-          </div>
-          <span className="transaction-filter-count">{filteredTransactions.length} entries</span>
-        </div>
-
-        <div className="transaction-filter-grid">
-          <div className="filter-control type">
-            <label>Type</label>
-            <select
-              value={typeFilter}
-              onChange={(event) => setTypeFilter(event.target.value)}
-              className="input-field"
-            >
-              <option value="all">All Transactions</option>
-              <option value="sale">Sale</option>
-              <option value="payment">Payment</option>
-            </select>
-          </div>
-          <div className="filter-control phone">
-            <label>Customer / Supplier ID</label>
-            <input
-              type="text"
-              inputMode="tel"
-              value={search}
-              onChange={(event) => setSearch(event.target.value)}
-              className="input-field"
-              placeholder="Phone number, e.g. 01711234567"
-            />
-          </div>
-          <div className="filter-control">
-            <label>Start Date</label>
-            <input
-              type="date"
-              value={startDate}
-              onChange={(event) => setStartDate(event.target.value)}
-              className="input-field"
-            />
-          </div>
-          <div className="filter-control">
-            <label>End Date</label>
-            <input
-              type="date"
-              value={endDate}
-              onChange={(event) => setEndDate(event.target.value)}
-              className="input-field"
-            />
-          </div>
-          <div className="filter-control clear">
-            <button onClick={clearFilters} className="btn-secondary w-full">
-              Clear
-            </button>
-          </div>
-        </div>
-      </div>
-
-      <div className="supplier-panel">
+      <div className="profile-workspace">
+        <main className="profile-main-stack">
+          <div className="supplier-panel">
         <div className="mb-4 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
           <h3>Transaction Ledger</h3>
           <span className="rounded-full bg-emerald-100 px-3 py-1 text-xs font-bold text-[#1d63ed]">
@@ -433,8 +394,18 @@ const TransactionsList = () => {
                   <div key={transaction.id} className="rounded-xl border border-slate-200 bg-white p-4 shadow-sm">
                     <div className="mb-2 flex items-start justify-between gap-3">
                       <div>
-                        <p className="text-sm font-bold text-slate-900">{transaction.date}</p>
-                        <p className="mt-1 text-sm font-semibold text-slate-800">{getItemLabel(transaction)}</p>
+                        <p className="text-sm font-bold text-slate-900">{formatDate(transaction.createdAt || transaction.date)}</p>
+                        <div className="mt-1">
+                          {(() => {
+                            const item = getItemParts(transaction);
+                            return (
+                              <>
+                                <p className="text-sm font-semibold text-slate-800">{item.title}</p>
+                                {item.meta ? <p className="text-xs font-medium text-slate-500">{item.meta}</p> : null}
+                              </>
+                            );
+                          })()}
+                        </div>
                         <div className="mt-1 grid grid-cols-2 gap-2 text-xs">
                           <div>
                             <p className="font-bold uppercase tracking-wider text-slate-400">Supplier</p>
@@ -485,7 +456,7 @@ const TransactionsList = () => {
                     const method = getMethod(transaction);
                     return (
                       <tr key={transaction.id} className="hover:bg-slate-50 transition">
-                        <td className="px-4 py-3 font-semibold text-slate-900 whitespace-nowrap">{transaction.date}</td>
+                        <td className="px-4 py-3 font-semibold text-slate-900 whitespace-nowrap">{formatDate(transaction.createdAt || transaction.date)}</td>
                         <td className="px-4 py-3">
                           <span
                             className={`rounded-full px-2.5 py-1 text-xs font-bold ${
@@ -497,7 +468,17 @@ const TransactionsList = () => {
                             {getTypeLabel(transaction)}
                           </span>
                         </td>
-                        <td className="px-4 py-3 text-slate-700">{getItemLabel(transaction)}</td>
+                        <td className="px-4 py-3 text-left">
+                          {(() => {
+                            const item = getItemParts(transaction);
+                            return (
+                              <>
+                                <span className="font-semibold text-slate-900">{item.title}</span>
+                                {item.meta ? <span className="block text-xs text-slate-500">{item.meta}</span> : null}
+                              </>
+                            );
+                          })()}
+                        </td>
                         <td className="px-4 py-3 text-slate-800">{getSupplierName(transaction)}</td>
                         <td className="px-4 py-3 text-slate-800">{getCustomerName(transaction)}</td>
                         <td className="px-4 py-3 font-extrabold text-slate-900">{renderAmount(transaction)}</td>
@@ -515,14 +496,75 @@ const TransactionsList = () => {
           </>
         )}
 
-        <TablePager
-          {...pager}
-          actions={(
-            <button onClick={exportPdf} className="btn-primary inline-flex items-center gap-2">
+        <TablePager {...pager} />
+      </div>
+        </main>
+
+        <aside className="profile-side-stack">
+          <div className="supplier-panel">
+            <h3>Transaction Actions</h3>
+            <button onClick={exportPdf} className="btn-primary mt-3 inline-flex w-full items-center justify-center gap-2">
               Export
             </button>
-          )}
-        />
+          </div>
+          <div className="transaction-filter-panel">
+        <div className="transaction-filter-header">
+          <div>
+            <h3>Filters</h3>
+          </div>
+          <span className="transaction-filter-count">{filteredTransactions.length}</span>
+        </div>
+
+        <div className="grid gap-3">
+          <div className="filter-control type">
+            <label>Type</label>
+            <select
+              value={typeFilter}
+              onChange={(event) => setTypeFilter(event.target.value)}
+              className="input-field"
+            >
+              <option value="all">All Transactions</option>
+              <option value="sale">Sale</option>
+              <option value="payment">Payment</option>
+            </select>
+          </div>
+          <div className="filter-control phone">
+            <label>Customer / Supplier ID</label>
+            <input
+              type="text"
+              inputMode="tel"
+              value={search}
+              onChange={(event) => setSearch(event.target.value)}
+              className="input-field"
+              placeholder="Phone number, e.g. 01711234567"
+            />
+          </div>
+          <div className="filter-control">
+            <label>Start Date</label>
+            <input
+              type="date"
+              value={startDate}
+              onChange={(event) => setStartDate(event.target.value)}
+              className="input-field"
+            />
+          </div>
+          <div className="filter-control">
+            <label>End Date</label>
+            <input
+              type="date"
+              value={endDate}
+              onChange={(event) => setEndDate(event.target.value)}
+              className="input-field"
+            />
+          </div>
+          <div className="filter-control clear">
+            <button onClick={clearFilters} className="btn-secondary w-full">
+              Clear
+            </button>
+          </div>
+        </div>
+      </div>
+        </aside>
       </div>
     </div>
   );

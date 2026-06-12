@@ -52,6 +52,7 @@ public class WholesalerService {
     private final SupplierSettlementRepository supplierSettlementRepository;
     private final SupplierDueService supplierDueService;
     private final TransactionService transactionService;
+    private final SupplierLoginService supplierLoginService;
 
     public WholesalerService(
             WholesalerRepository wholesalerRepository,
@@ -66,7 +67,8 @@ public class WholesalerService {
             PaymentRepository paymentRepository,
             SupplierSettlementRepository supplierSettlementRepository,
             SupplierDueService supplierDueService,
-            TransactionService transactionService
+            TransactionService transactionService,
+            SupplierLoginService supplierLoginService
     ) {
         this.wholesalerRepository = wholesalerRepository;
         this.supplierRepository = supplierRepository;
@@ -81,6 +83,7 @@ public class WholesalerService {
         this.supplierSettlementRepository = supplierSettlementRepository;
         this.supplierDueService = supplierDueService;
         this.transactionService = transactionService;
+        this.supplierLoginService = supplierLoginService;
     }
 
     /**
@@ -125,6 +128,9 @@ public class WholesalerService {
         if (changed) {
             supplierRepository.save(supplier);
         }
+
+        // Every supplier gets a portal identity automatically (phone-only sign-in).
+        supplierLoginService.ensureSupplierUser(supplier);
 
         if (wholesalerSupplierRepository.existsByWholesaler_IdAndSupplier_Id(wholesalerId, supplier.getId())) {
             throw new BadRequestException("Supplier is already connected to this wholesaler.");

@@ -1,10 +1,11 @@
 import { useEffect, useState } from 'react';
 import {
-  Search, Plus, UserCheck, Phone, Building2, Percent, Wallet, MapPin, ArrowUpDown,
+  Search, Plus, UserCheck, Phone, Building2, Percent, Wallet, MapPin, ArrowUpDown, Filter,
 } from 'lucide-react';
 import { useData } from '../../data/DataContext';
 import { useToast } from '../../shared/components/Toast';
 import { TablePager, usePagination } from '../../shared/components';
+import { formatMoney } from '../../shared/utils/format';
 import SupplierDetail from './SupplierDetail';
 
 const EMPTY_FORM = {
@@ -115,54 +116,13 @@ const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
     return <SupplierDetail supplierId={selectedSupplierId} onBack={() => setSelectedSupplierId(null)} />;
   }
 
-  return (
-    <div className="space-y-4">
-      <div className="suppliers-toolbar">
-        <button onClick={() => setShowForm(true)} className="btn-primary flex items-center gap-2">
-          <Plus size={16} />
-          Add Supplier
-        </button>
-        <div className="suppliers-toolbar-controls">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="input-field !pl-9"
-              placeholder="Search name, business or phone…"
-            />
-          </div>
-          <div className="suppliers-toolbar-select">
-            <Wallet size={14} className="suppliers-toolbar-select-icon" />
-            <select value={filterDue} onChange={(e) => setFilterDue(e.target.value)} className="input-field !pl-8">
-              <option value="all">All suppliers</option>
-              <option value="with-due">With due</option>
-              <option value="no-due">No due</option>
-            </select>
-          </div>
-          <label className="toggle-pill" title="Show disabled">
-            <input
-              type="checkbox"
-              checked={showDisabled}
-              onChange={(e) => setShowDisabled(e.target.checked)}
-            />
-            <span>Show disabled</span>
-          </label>
-          <div className="suppliers-toolbar-select">
-            <ArrowUpDown size={14} className="suppliers-toolbar-select-icon" />
-            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="input-field !pl-8">
-              <option value="name-asc">Name A → Z</option>
-              <option value="name-desc">Name Z → A</option>
-              <option value="due-desc">Due (high → low)</option>
-              <option value="due-asc">Due (low → high)</option>
-              <option value="comm-desc">Commission (high → low)</option>
-              <option value="comm-asc">Commission (low → high)</option>
-            </select>
-          </div>
-        </div>
-      </div>
+  const totalDue = suppliers.reduce((sum, s) => sum + Math.max(0, Number(s.amountDue) || 0), 0);
+  const totalAdvance = suppliers.reduce((sum, s) => sum + Math.max(0, -(Number(s.amountDue) || 0)), 0);
+  const totalCratesDue = suppliers.reduce((sum, s) => sum + (Number(s.totalCratesHolding) || 0), 0);
 
+  return (
+    <div className="profile-workspace">
+      <main className="profile-main-stack">
       {showForm && (
         <div className="modal-overlay">
           <div className="modal-content supplier-form-modal">
@@ -368,20 +328,20 @@ const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
             </div>
 
             {/* Desktop table view */}
-            <div className="hidden lg:block overflow-x-auto rounded-xl border border-slate-200">
-              <table className="center-table w-full text-sm min-w-[860px]">
+            <div className="hidden lg:block overflow-x-auto rounded-lg border border-slate-200 bg-white">
+              <table className="party-table w-full text-sm min-w-[980px]">
                 <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200">
-                    <th className="px-4 py-3 font-semibold text-slate-700">Supplier</th>
-                    <th className="px-4 py-3 font-semibold text-slate-700">Business Name</th>
-                    <th className="px-4 py-3 font-semibold text-slate-700">Location</th>
-                    <th className="px-4 py-3 font-semibold text-slate-700">Phone</th>
-                    <th className="px-4 py-3 font-semibold text-slate-700">Amount Due</th>
-                    <th className="px-4 py-3 font-semibold text-slate-700">Advance Paid</th>
-                    <th className="px-4 py-3 font-semibold text-slate-700">Crate Due</th>
+                  <tr>
+                    <th>Supplier</th>
+                    <th>Business Name</th>
+                    <th>Contact</th>
+                    <th>Location</th>
+                    <th className="text-right">Amount Due</th>
+                    <th className="text-right">Advance Paid</th>
+                    <th className="text-right">Crate Due</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
+                <tbody>
                   {pagedSuppliers.map((supplier) => {
                     const net = Number(supplier.amountDue || 0);
                     const due = net > 0 ? net : 0;
@@ -390,31 +350,32 @@ const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
                       <tr
                         key={supplier.id}
                         onClick={() => setSelectedSupplierId(supplier.id)}
-                        className="cursor-pointer hover:bg-slate-50 transition-colors"
+                        className="cursor-pointer"
                       >
-                        <td className="px-4 py-3">
-                          <div className="flex items-center justify-center gap-2">
-                            <span className="font-semibold text-slate-900">{supplier.name}</span>
-                            {supplier.status === 'DISABLED' && (
-                              <span className="badge badge-rose">Disabled</span>
-                            )}
+                        <td>
+                          <div className="party-cell-main">
+                            <span className="party-avatar">{supplier.name?.charAt(0).toUpperCase() || 'S'}</span>
+                            <div className="flex flex-wrap items-center gap-2 min-w-0">
+                              <span className="party-name">{supplier.name}</span>
+                              {supplier.status === 'DISABLED' && <span className="badge badge-rose">Disabled</span>}
+                            </div>
                           </div>
                         </td>
-                        <td className="px-4 py-3 text-slate-700">
-                          {supplier.businessName || <span className="text-slate-400">—</span>}
+                        <td className="font-semibold text-slate-700">{supplier.businessName || '—'}</td>
+                        <td>
+                          <div className="party-contact">
+                            <span>{supplier.contact || '—'}</span>
+                          </div>
                         </td>
-                        <td className="px-4 py-3 text-slate-700">
-                          {supplier.location || <span className="text-slate-400">—</span>}
+                        <td className="text-slate-600">{supplier.location || '—'}</td>
+                        <td className={`text-right font-bold tabular-nums ${due > 0 ? 'text-red-600' : 'text-slate-400'}`}>
+                          {due > 0 ? formatMoney(due) : '—'}
                         </td>
-                        <td className="px-4 py-3 text-slate-700">{supplier.contact}</td>
-                        <td className={`px-4 py-3 font-bold ${due > 0 ? 'text-red-600' : 'text-slate-400'}`}>
-                          {due > 0 ? `৳${due.toLocaleString()}` : '—'}
+                        <td className={`text-right font-bold tabular-nums ${advance > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
+                          {advance > 0 ? formatMoney(advance) : '—'}
                         </td>
-                        <td className={`px-4 py-3 font-bold ${advance > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
-                          {advance > 0 ? `৳${advance.toLocaleString()}` : '—'}
-                        </td>
-                        <td className="px-4 py-3 font-semibold text-slate-700">
-                          {supplier.totalCratesHolding}
+                        <td className={`text-right font-semibold tabular-nums ${Number(supplier.totalCratesHolding) > 0 ? 'text-slate-700' : 'text-slate-400'}`}>
+                          {Number(supplier.totalCratesHolding) > 0 ? supplier.totalCratesHolding : '—'}
                         </td>
                       </tr>
                     );
@@ -427,6 +388,71 @@ const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
           </>
         )}
       </div>
+      </main>
+
+      <aside className="profile-side-stack">
+        <div className="supplier-panel">
+          <h3>Supplier Actions</h3>
+          <button
+            type="button"
+            onClick={() => setShowForm(true)}
+            className="btn-primary mt-3 inline-flex w-full items-center justify-center gap-2"
+          >
+            <Plus size={16} /> Add Supplier
+          </button>
+        </div>
+        <div className="supplier-panel">
+          <h3 className="flex items-center gap-2"><Filter size={16} className="text-blue-600" /> Filters</h3>
+          <div className="mt-3 space-y-2.5">
+            <div className="relative">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="input-field !pl-9"
+                placeholder="Search name, business or phone…"
+              />
+            </div>
+            <div className="suppliers-toolbar-select">
+              <Wallet size={14} className="suppliers-toolbar-select-icon" />
+              <select value={filterDue} onChange={(e) => setFilterDue(e.target.value)} className="input-field !pl-8 w-full">
+                <option value="all">All suppliers</option>
+                <option value="with-due">With due</option>
+                <option value="no-due">No due</option>
+              </select>
+            </div>
+            <div className="suppliers-toolbar-select">
+              <ArrowUpDown size={14} className="suppliers-toolbar-select-icon" />
+              <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="input-field !pl-8 w-full">
+                <option value="name-asc">Name A → Z</option>
+                <option value="name-desc">Name Z → A</option>
+                <option value="due-desc">Due (high → low)</option>
+                <option value="due-asc">Due (low → high)</option>
+                <option value="comm-desc">Commission (high → low)</option>
+                <option value="comm-asc">Commission (low → high)</option>
+              </select>
+            </div>
+            <label className="toggle-pill w-full justify-center" title="Show disabled">
+              <input
+                type="checkbox"
+                checked={showDisabled}
+                onChange={(e) => setShowDisabled(e.target.checked)}
+              />
+              <span>Show disabled</span>
+            </label>
+          </div>
+        </div>
+        <div className="supplier-panel">
+          <h3>Suppliers Summary</h3>
+          <div className="mt-3 space-y-2">
+            <div className="box-row"><span>Total suppliers</span><strong>{suppliers.length}</strong></div>
+            <div className="box-row"><span>Total due</span><strong className="text-rose-700">{formatMoney(totalDue)}</strong></div>
+            <div className="box-row"><span>Advance paid</span><strong className="text-emerald-700">{formatMoney(totalAdvance)}</strong></div>
+            <div className="box-row total"><span>Crates due</span><strong>{totalCratesDue}</strong></div>
+          </div>
+        </div>
+      </aside>
     </div>
   );
 };

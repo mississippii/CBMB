@@ -3,6 +3,7 @@ import { Power, RotateCcw, Users, ArrowLeft, Phone, MapPin, User } from 'lucide-
 import { useData } from '../../data/DataContext'
 import { useToast } from '../../shared/components/Toast'
 import { TablePager, usePagination } from '../../shared/components'
+import { formatDate } from '../../shared/utils/format'
 
 const formatCurrency = (value) => '৳ ' + (Number(value) || 0).toLocaleString()
 const formatAmount = (transaction) => {
@@ -22,7 +23,7 @@ const renderCustomerTransactionDetails = (transaction) => {
 
   return [transaction.product, transaction.category && transaction.category !== 'No Category' ? transaction.category : null]
     .filter(Boolean)
-    .join(' / ') || 'Sale recorded'
+    .join(' · ') || 'Sale recorded'
 }
 
 const CustomerDetail = ({ customerId, onBack }) => {
@@ -157,40 +158,10 @@ const CustomerDetail = ({ customerId, onBack }) => {
         </div>
       </div>
 
-      {/* Compact summary band — Current Due + crate accountability sit side by side
-          on top, so the Payment Summary table below can grow full-width. */}
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
-        <div className="supplier-panel flex flex-col">
-          <h3>Current Due</h3>
-          <div className="mt-4 flex flex-1 flex-col justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-5 text-center">
-            <p className="text-[11px] font-bold uppercase tracking-wider text-rose-600">Outstanding balance</p>
-            <strong className="mt-1 text-3xl font-black text-rose-700 tabular-nums">{formatCurrency(customer.amountDue)}</strong>
-          </div>
-        </div>
-
-        <div className="supplier-panel">
-          <h3>Crate Accountability</h3>
-          <div className="mt-4 space-y-3">
-            {(customer.crateHoldings || []).length === 0 ? (
-              <div className="box-row"><span>No crates due</span><strong>0</strong></div>
-            ) : (
-              (customer.crateHoldings || []).map((c) => (
-                <div key={c.crateType} className="box-row">
-                  <span>{c.crateType}</span>
-                  <strong>{c.quantity || 0}</strong>
-                </div>
-              ))
-            )}
-            <div className="box-row total">
-              <span>Total Crates Due</span>
-              <strong>{customer.totalCratesHolding || 0}</strong>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Payment Summary — full width, grows with history */}
-      <div className="supplier-panel">
+      <div className="profile-workspace">
+        <main className="profile-main-stack">
+          {/* Payment Summary — full width, grows with history */}
+          <div className="supplier-panel">
         <div className="flex items-center justify-between">
           <h3>Payment Summary</h3>
           <span className="badge badge-teal">
@@ -214,7 +185,7 @@ const CustomerDetail = ({ customerId, onBack }) => {
               <tbody className="divide-y divide-slate-100">
                 {pagedTransactions.map((transaction) => (
                   <tr key={transaction.id} className="transition hover:bg-slate-50">
-                    <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-900">{transaction.date}</td>
+                    <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-900">{formatDate(transaction.createdAt || transaction.date)}</td>
                     <td className="px-4 py-3">
                       <span className={`badge ${transaction.transactionType === 'Payment' ? 'badge-teal' : 'badge-emerald'}`}>
                         {transaction.transactionType === 'Payment' ? 'Payment' : 'Sale'}
@@ -230,6 +201,44 @@ const CustomerDetail = ({ customerId, onBack }) => {
         </div>
 
         <TablePager {...txnPager} />
+      </div>
+
+
+        </main>
+
+        <aside className="profile-side-stack">
+          {/* ACCOUNT SUMMARY */}
+          <div className="grid grid-cols-1 gap-4">
+            <div className="supplier-panel flex flex-col">
+          <h3>Current Due</h3>
+          <div className="mt-4 flex flex-1 flex-col justify-center rounded-xl border border-rose-200 bg-rose-50 px-4 py-5 text-center">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-rose-600">Outstanding balance</p>
+            <strong className="mt-1 text-3xl font-black text-rose-700 tabular-nums">{formatCurrency(customer.amountDue)}</strong>
+          </div>
+        </div>
+
+            <div className="supplier-panel">
+          <h3>Crate Accountability</h3>
+          <div className="mt-4 space-y-3">
+            {(customer.crateHoldings || []).length === 0 ? (
+              <div className="box-row"><span>No crates due</span><strong>0</strong></div>
+            ) : (
+              (customer.crateHoldings || []).map((c) => (
+                <div key={c.crateType} className="box-row">
+                  <span>{c.crateType}</span>
+                  <strong>{c.quantity || 0}</strong>
+                </div>
+              ))
+            )}
+            <div className="box-row total">
+              <span>Total Crates Due</span>
+              <strong>{customer.totalCratesHolding || 0}</strong>
+            </div>
+          </div>
+        </div>
+          </div>
+
+        </aside>
       </div>
 
       {showDisableConfirm && (

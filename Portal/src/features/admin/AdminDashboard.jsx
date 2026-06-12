@@ -4,7 +4,6 @@ import {
   Building2, User, Mail, Phone, MapPin, Lock, Database,
   ChevronLeft, ChevronRight, ChevronDown, Pencil, FolderPlus, Tag, MoreVertical, X, LifeBuoy, Boxes,
 } from 'lucide-react';
-import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../../shared/components/Toast';
 import Navbar from '../../shared/components/Navbar';
 import { TablePager } from '../../shared/components';
@@ -36,8 +35,8 @@ const avatarGradient = (key) => {
 
 // Left-side modules (mirrors the wholesaler workspace nav). Add more here as the admin grows.
 const modules = [
-  { id: 'list', label: 'Wholesalers', icon: Users, color: '#FF0000' },     // red
-  { id: 'support', label: 'Admin Support', icon: LifeBuoy, color: '#008000' }, // green
+  { id: 'list', label: 'Wholesalers', icon: Users, color: '#FF0000' },
+  { id: 'support', label: 'Admin Support', icon: LifeBuoy, color: '#008000' },
 ];
 
 // White icon on dark colours, black on bright ones (e.g. yellow) for readability.
@@ -62,7 +61,6 @@ const Field = ({ icon: Icon, label, required, children, hint }) => (
 );
 
 const AdminDashboard = () => {
-  const { admin } = useAuth();
   const showToast = useToast();
 
   // Pagination state

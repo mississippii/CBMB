@@ -18,7 +18,10 @@ const loadAuthState = () => {
   try {
     const parsed = JSON.parse(raw);
     const savedAdmin = parsed.admin || null;
-    if (savedAdmin?.role === 'WHOLESALER' && !savedAdmin.wholesalerId) {
+    if (
+      (savedAdmin?.role === 'WHOLESALER' && !savedAdmin.wholesalerId) ||
+      (savedAdmin?.role === 'SUPPLIER' && (!savedAdmin.supplierId || !savedAdmin.supplierPortalToken))
+    ) {
       window.localStorage.removeItem(AUTH_STORAGE_KEY);
       return { isAuthenticated: false, admin: null };
     }
@@ -57,6 +60,22 @@ export const AuthProvider = ({ children }) => {
     if (payload?.role === 'WHOLESALER' && !payload.wholesalerId) {
       throw new Error('Wholesaler profile not found. Ask admin to create the wholesaler profile again.');
     }
+    if (payload?.role === 'SUPPLIER' && !payload.supplierId) {
+      throw new Error('Supplier profile not found. Ask your wholesaler to recreate the login.');
+    }
+
+    setIsAuthenticated(true);
+    setAdmin(payload);
+    return payload;
+  };
+
+  // Phone-only sign-in for the read-only supplier portal (no password by design).
+  const supplierLogin = async (phone) => {
+    const payload = await postJson(apiPaths.authSupplierLogin, { phone });
+
+    if (!payload?.supplierId) {
+      throw new Error('Supplier profile not found for this phone number.');
+    }
 
     setIsAuthenticated(true);
     setAdmin(payload);
@@ -69,7 +88,7 @@ export const AuthProvider = ({ children }) => {
   };
 
   return (
-    <AuthContext.Provider value={{ isAuthenticated, admin, login, logout }}>
+    <AuthContext.Provider value={{ isAuthenticated, admin, login, supplierLogin, logout }}>
       {children}
     </AuthContext.Provider>
   );

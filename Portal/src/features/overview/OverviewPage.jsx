@@ -8,6 +8,7 @@ import { useData } from '../../data/DataContext';
 import { useAuth } from '../auth/AuthContext';
 import { queryKeys } from '../../services/queryKeys';
 import { DateRangeFilter, todayLocalIso, nextDayLocalIso } from '../../shared/components';
+import { formatDate } from '../../shared/utils/format';
 
 const formatMoney = (value) => '৳ ' + (Number(value) || 0).toLocaleString();
 const formatRate = (value) => (value == null ? '—' : `${Number(value).toFixed(2)}%`);
@@ -112,7 +113,7 @@ const OverviewPage = ({ onOpenProfile }) => {
             <div>
               <h3 className="text-sm font-extrabold leading-tight">Today</h3>
               <p className="text-[11px] text-slate-300">
-                {new Date().toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })}
+                {formatDate(new Date())}
               </p>
             </div>
           </div>
@@ -189,7 +190,7 @@ const OverviewPage = ({ onOpenProfile }) => {
               <h3 className="text-sm font-extrabold text-slate-900">Cash flow</h3>
               <p className="text-[11px] text-slate-500 inline-flex items-center gap-1">
                 <Calendar size={10} />
-                {data?.from ? new Date(data.from).toLocaleDateString() : '—'} → {data?.to ? new Date(data.to).toLocaleDateString() : 'now'}
+                {formatDate(data?.from)} → {data?.to ? formatDate(data.to) : 'now'}
               </p>
             </div>
           </div>

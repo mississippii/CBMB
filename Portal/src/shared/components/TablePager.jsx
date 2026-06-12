@@ -68,10 +68,10 @@ const TablePager = ({
 
   return (
     <div className="mt-4 flex flex-col gap-3 border-t border-slate-100 pt-4 sm:grid sm:grid-cols-3 sm:items-center">
-      {/* Left — row info + page-size picker */}
-      <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 sm:justify-start">
+      {/* Left — page-size picker */}
+      <div className="flex items-center justify-center sm:justify-start">
         {showSizePicker && (
-          <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-500">
+          <label className="flex items-center gap-1.5 text-xs font-semibold text-slate-500 whitespace-nowrap">
             <span>Show</span>
             <select
               value={pageSize}
@@ -85,10 +85,6 @@ const TablePager = ({
             <span>per page</span>
           </label>
         )}
-        <p className="text-xs font-semibold text-slate-500">
-          Showing <span className="text-slate-800">{rangeStart}–{rangeEnd}</span> of{' '}
-          <span className="text-slate-800">{total}</span>
-        </p>
       </div>
 
       {/* Center — page navigation */}
@@ -133,9 +129,13 @@ const TablePager = ({
         )}
       </div>
 
-      {/* Right — optional actions (e.g. Export) */}
-      <div className="flex justify-center sm:justify-end">
+      {/* Right — row info + optional actions (e.g. Export) */}
+      <div className="flex flex-wrap items-center justify-center gap-x-3 gap-y-1.5 sm:justify-end">
         {actions}
+        <p className="text-xs font-semibold text-slate-500 whitespace-nowrap">
+          Showing <span className="text-slate-800">{rangeStart}–{rangeEnd}</span> of{' '}
+          <span className="text-slate-800">{total}</span>
+        </p>
       </div>
     </div>
   );

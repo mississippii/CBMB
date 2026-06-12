@@ -8,3 +8,4 @@ export { default as Pagination } from './Pagination';
 export { default as TablePager, usePagination } from './TablePager';
 export { default as DateRangeFilter, todayLocalIso, nextDayLocalIso } from './DateRangeFilter';
 export { default as Skeleton } from './Skeleton';
+export { default as ErrorBoundary } from './ErrorBoundary';

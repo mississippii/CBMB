@@ -8,6 +8,7 @@ import { useData } from '../../data/DataContext'
 import { useAuth } from '../auth/AuthContext'
 import { useToast } from '../../shared/components/Toast'
 import { TablePager, usePagination } from '../../shared/components'
+import { formatDate } from '../../shared/utils/format'
 import { postJson, apiPaths } from '../../services/apiClient'
 
 const formatCurrency = (value) => `৳ ${Math.round(Number(value) || 0).toLocaleString()}`
@@ -28,7 +29,7 @@ const txDetails = (t) => {
     return t.note || 'Payment'
   }
   const parts = [t.product, t.category && t.category !== 'No Category' ? t.category : null].filter(Boolean)
-  const label = parts.join(' / ') || 'Sale'
+  const label = parts.join(' · ') || 'Sale'
   const qty = Number(t.quantity) > 0 ? ` · ${t.quantity} ${String(t.unit || '').toUpperCase()}`.trimEnd() : ''
   return label + qty
 }
@@ -289,7 +290,7 @@ const SupplierDetail = ({ supplierId, onBack }) => {
       <tr key={s.id} className={`hover:bg-slate-50 transition ${settled ? 'opacity-60' : ''}`}>
         <td className="px-3 py-2 whitespace-nowrap text-left">
           <span className="font-semibold text-slate-900">{s.name || `Lot #${s.id}`}</span>
-          <span className="block text-xs text-slate-400">{s.date}</span>
+          <span className="block text-xs text-slate-400">{formatDate(s.deliveryDate || s.date)}</span>
         </td>
         <td className="px-3 py-2 text-slate-700">{Number(s.totalUnitsSold || 0).toLocaleString()}</td>
         <td className="px-3 py-2 text-slate-700">{Number(s.totalKgSold) > 0 ? Number(s.totalKgSold).toLocaleString() : '—'}</td>
@@ -385,40 +386,10 @@ const SupplierDetail = ({ supplierId, onBack }) => {
         </div>
       </div>
 
-      {/* MONEY + CRATES side by side */}
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-        {(() => {
-          const netDue = Number(supplier.amountDue) || 0
-          const payable = netDue > 0 ? netDue : 0
-          const advance = netDue < 0 ? -netDue : 0
-          return (
-            <div className="supplier-panel">
-              <h3 className="flex items-center gap-2"><DollarSign size={17} className="text-blue-600" /> Supplier Money</h3>
-              <div className="mt-3 space-y-2">
-                <div className="box-row"><span>Supplier Payable</span><strong className="text-rose-700">{formatCurrency(payable)}</strong></div>
-                <div className="box-row total"><span>Advance Paid</span><strong className="text-amber-700">{formatCurrency(advance)}</strong></div>
-              </div>
-            </div>
-          )
-        })()}
-
-        <div className="supplier-panel">
-          <h3 className="flex items-center gap-2"><Boxes size={17} className="text-blue-600" /> Crates</h3>
-          <div className="mt-3 space-y-2">
-            {(supplier.crateHoldings || []).length === 0 ? (
-              <div className="box-row"><span>No crates due</span><strong>0</strong></div>
-            ) : (
-              (supplier.crateHoldings || []).map((c) => (
-                <div key={c.crateType} className="box-row"><span>{c.crateType}</span><strong>{c.quantity || 0}</strong></div>
-              ))
-            )}
-            <div className="box-row total"><span>Total Due</span><strong>{supplier.totalCratesHolding || 0}</strong></div>
-          </div>
-        </div>
-      </div>
-
-      {/* SHIPMENTS (per-lot consignment accounting) */}
-      <div className="supplier-panel">
+      <div className="profile-workspace">
+        <main className="profile-main-stack">
+          {/* SHIPMENTS (per-lot consignment accounting) */}
+          <div className="supplier-panel">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
           <div>
             <h3 className="flex items-center gap-2"><Truck size={18} className="text-blue-600" /> Shipments</h3>
@@ -466,7 +437,7 @@ const SupplierDetail = ({ supplierId, onBack }) => {
       </div>
 
       {/* TRANSACTIONS (sales, payments & money movements for this supplier) */}
-      <div className="supplier-panel">
+          <div className="supplier-panel">
         <button
           type="button"
           onClick={() => setShowTransactions((v) => !v)}
@@ -521,7 +492,7 @@ const SupplierDetail = ({ supplierId, onBack }) => {
                   const method = txMethod(t)
                   return (
                     <tr key={t.id} className="hover:bg-slate-50 transition">
-                      <td className="px-4 py-3 font-semibold text-slate-900 whitespace-nowrap">{t.date}</td>
+                      <td className="px-4 py-3 font-semibold text-slate-900 whitespace-nowrap">{formatDate(t.createdAt || t.date)}</td>
                       <td className="px-4 py-3">
                         <span className={`rounded-full px-2.5 py-1 text-xs font-bold ${t.transactionType === 'Payment' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
                           {t.transactionType === 'Payment' ? 'Payment' : 'Sale'}
@@ -548,7 +519,7 @@ const SupplierDetail = ({ supplierId, onBack }) => {
       </div>
 
       {/* CURRENT STOCK */}
-      <div className="supplier-panel">
+          <div className="supplier-panel">
         <button
           type="button"
           onClick={() => setShowStock((v) => !v)}
@@ -602,6 +573,45 @@ const SupplierDetail = ({ supplierId, onBack }) => {
             </table>
           </div>
         ))}
+      </div>
+
+
+        </main>
+
+        <aside className="profile-side-stack">
+          {/* ACCOUNT SUMMARY */}
+          <div className="grid grid-cols-1 gap-4">
+        {(() => {
+          const netDue = Number(supplier.amountDue) || 0
+          const payable = netDue > 0 ? netDue : 0
+          const advance = netDue < 0 ? -netDue : 0
+          return (
+            <div className="supplier-panel">
+              <h3 className="flex items-center gap-2"><DollarSign size={17} className="text-blue-600" /> Supplier Money</h3>
+              <div className="mt-3 space-y-2">
+                <div className="box-row"><span>Supplier Payable</span><strong className="text-rose-700">{formatCurrency(payable)}</strong></div>
+                <div className="box-row total"><span>Advance Paid</span><strong className="text-amber-700">{formatCurrency(advance)}</strong></div>
+              </div>
+            </div>
+          )
+        })()}
+
+            <div className="supplier-panel">
+          <h3 className="flex items-center gap-2"><Boxes size={17} className="text-blue-600" /> Crates</h3>
+          <div className="mt-3 space-y-2">
+            {(supplier.crateHoldings || []).length === 0 ? (
+              <div className="box-row"><span>No crates due</span><strong>0</strong></div>
+            ) : (
+              (supplier.crateHoldings || []).map((c) => (
+                <div key={c.crateType} className="box-row"><span>{c.crateType}</span><strong>{c.quantity || 0}</strong></div>
+              ))
+            )}
+            <div className="box-row total"><span>Total Due</span><strong>{supplier.totalCratesHolding || 0}</strong></div>
+          </div>
+        </div>
+          </div>
+
+        </aside>
       </div>
 
       {/* DISABLE CONFIRMATION */}

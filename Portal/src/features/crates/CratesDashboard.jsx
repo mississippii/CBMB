@@ -355,7 +355,8 @@ const BoxDashboard = () => {
   };
 
   return (
-    <div className="space-y-5">
+    <div className="profile-workspace">
+      <main className="profile-main-stack">
       {/* HERO */}
       <div className="crate-hero">
         <div className="flex items-center gap-4 min-w-0 flex-1">
@@ -391,7 +392,6 @@ const BoxDashboard = () => {
       </div>
 
       {/* ALLOCATION BAR + TYPE BREAKDOWN */}
-      <div className="grid grid-cols-1 xl:grid-cols-[minmax(0,1fr)_22rem] gap-4">
         <div className="supplier-panel">
           <h3 className="flex items-center gap-2"><Package size={18} className="text-blue-600" /> Allocation</h3>
 
@@ -425,44 +425,6 @@ const BoxDashboard = () => {
             ))}
           </div>
         </div>
-
-        {/* CRATE TOOLKIT */}
-        <div className="supplier-panel toolkit-panel">
-          <div className="toolkit-header">
-            <div className="toolkit-icon"><Zap size={16} /></div>
-            <div>
-              <h3 className="toolkit-title">Crate Toolkit</h3>
-            </div>
-          </div>
-          <div className="quick-action-list">
-            <button onClick={() => setShowCustomerModal(true)} className="quick-action-row">
-              <span className="quick-action-icon" style={{ background: '#0000FF', color: '#fff' }}><Users size={14} /></span>
-              <span className="quick-action-label">Customer Crates</span>
-              <ArrowUpRight size={13} className="quick-action-arrow" />
-            </button>
-            <button onClick={() => setShowSupplierModal(true)} className="quick-action-row">
-              <span className="quick-action-icon" style={{ background: '#FFFF00', color: '#000' }}><UserCheck size={14} /></span>
-              <span className="quick-action-label">Supplier Crates</span>
-              <ArrowUpRight size={13} className="quick-action-arrow" />
-            </button>
-            <button onClick={openLossModal} className="quick-action-row">
-              <span className="quick-action-icon" style={{ background: '#FF0000', color: '#fff' }}><AlertTriangle size={14} /></span>
-              <span className="quick-action-label">Mark Lost / Damaged</span>
-              <ArrowUpRight size={13} className="quick-action-arrow" />
-            </button>
-            <button onClick={openSellModal} className="quick-action-row">
-              <span className="quick-action-icon" style={{ background: '#008000', color: '#fff' }}><ShoppingCart size={14} /></span>
-              <span className="quick-action-label">Sell Crates</span>
-              <ArrowUpRight size={13} className="quick-action-arrow" />
-            </button>
-            <button onClick={openPurchaseModal} className="quick-action-row quick-action-row-primary">
-              <span className="quick-action-icon" style={{ background: '#FF00FF', color: '#fff' }}><Plus size={14} /></span>
-              <span className="quick-action-label">Add New Crates</span>
-              <ArrowUpRight size={13} className="quick-action-arrow" />
-            </button>
-          </div>
-        </div>
-      </div>
 
       {/* LOSS TREND CHART */}
       <div className="supplier-panel">
@@ -634,6 +596,46 @@ const BoxDashboard = () => {
           </div>
         )}
       </div>
+      </main>
+
+      <aside className="profile-side-stack">
+        {/* CRATE TOOLKIT */}
+        <div className="supplier-panel toolkit-panel">
+          <div className="toolkit-header">
+            <div className="toolkit-icon"><Zap size={16} /></div>
+            <div>
+              <h3 className="toolkit-title">Crate Toolkit</h3>
+            </div>
+          </div>
+          <div className="quick-action-list">
+            <button onClick={() => setShowCustomerModal(true)} className="quick-action-row">
+              <span className="quick-action-icon" style={{ background: '#0000FF', color: '#fff' }}><Users size={14} /></span>
+              <span className="quick-action-label">Customer Crates</span>
+              <ArrowUpRight size={13} className="quick-action-arrow" />
+            </button>
+            <button onClick={() => setShowSupplierModal(true)} className="quick-action-row">
+              <span className="quick-action-icon" style={{ background: '#FFFF00', color: '#000' }}><UserCheck size={14} /></span>
+              <span className="quick-action-label">Supplier Crates</span>
+              <ArrowUpRight size={13} className="quick-action-arrow" />
+            </button>
+            <button onClick={openLossModal} className="quick-action-row">
+              <span className="quick-action-icon" style={{ background: '#FF0000', color: '#fff' }}><AlertTriangle size={14} /></span>
+              <span className="quick-action-label">Mark Lost / Damaged</span>
+              <ArrowUpRight size={13} className="quick-action-arrow" />
+            </button>
+            <button onClick={openSellModal} className="quick-action-row">
+              <span className="quick-action-icon" style={{ background: '#008000', color: '#fff' }}><ShoppingCart size={14} /></span>
+              <span className="quick-action-label">Sell Crates</span>
+              <ArrowUpRight size={13} className="quick-action-arrow" />
+            </button>
+            <button onClick={openPurchaseModal} className="quick-action-row quick-action-row-primary">
+              <span className="quick-action-icon" style={{ background: '#FF00FF', color: '#fff' }}><Plus size={14} /></span>
+              <span className="quick-action-label">Add New Crates</span>
+              <ArrowUpRight size={13} className="quick-action-arrow" />
+            </button>
+          </div>
+        </div>
+      </aside>
 
       {/* ADD CRATES MODAL */}
       {showPurchaseModal && (

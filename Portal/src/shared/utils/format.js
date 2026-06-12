@@ -48,25 +48,33 @@ export const formatQuantity = (value, { decimals = 3 } = {}) => {
 
 export const formatNumber = (value) => (Number(value) || 0).toLocaleString();
 
+const parseDateValue = (value) => {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  }
+  return new Date(value);
+};
+
 /**
- * Date formatter — short locale date ("26/05/2026" in en-GB).
- *   formatDate('2026-05-26T08:00:00') → "26/05/2026"
+ * Date formatter — fixed app display format: "11 Jun 2026".
+ *   formatDate('2026-06-11T08:00:00') → "11 Jun 2026"
  *   formatDate(null) → "—"
  */
 export const formatDate = (value) => {
-  if (!value) return '—';
-  const d = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const d = parseDateValue(value);
+  if (!d || Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
-/** "26/05/2026, 08:15" */
+/** "11 Jun 2026, 08:15" */
 export const formatDateTime = (value) => {
-  if (!value) return '—';
-  const d = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(d.getTime())) return '—';
+  const d = parseDateValue(value);
+  if (!d || Number.isNaN(d.getTime())) return '—';
   return d.toLocaleString('en-GB', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
+    day: '2-digit', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit', hour12: false,
   });
 };

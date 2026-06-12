@@ -67,7 +67,23 @@ ADMIN
 WHOLESALER
   Uses the operating portal.
   Can only access data under their own wholesalers.id.
+
+SUPPLIER (added V5, 2026-06)
+  Read-only portal: their shipments (sold/remaining, commission,
+  expenses, settlement status) and net due per wholesaler.
+  Identity (users row, role SUPPLIER) is created AUTOMATICALLY when a
+  wholesaler adds the supplier (and lazily on first sign-in for older
+  suppliers). Signs in PHONE-ONLY, no password, via /auth/supplier-login
+  (the stored password hash is random/unusable, so /auth/login can
+  never match a supplier account).
+  Endpoints under /supplier-portal/{supplierId}/** — strictly no mutations.
 ```
+
+Admin/wholesaler login (`/auth/login`) accepts **email or phone** + password:
+`users.email` → `users.phone` → `wholesalers.phone` fallback.
+Note: no server-side authorization yet — RBAC/token enforcement is planned
+as a separate security service; until then the API trusts path IDs (and the
+phone-only supplier login is a deliberate interim trade-off for read-only data).
 
 ### Current Portal Scope
 
@@ -89,6 +105,13 @@ Wholesaler dashboard
   - customer profile
   - supplier expense workflow (planned — entities exist, API not yet exposed)
   - transaction ledger and export
+
+Supplier portal (read-only)
+  - per-wholesaler account cards (commission rate, net due / advance)
+  - shipment list with sold / remaining per product and settlement status
+  - dedicated login page at /supplier-login (phone only, no password);
+    intentionally NOT linked from the main /login card — the wholesaler
+    shares the URL with suppliers directly
 ```
 
 ## Backend Shape
@@ -265,7 +288,7 @@ Once you see these recurring patterns, the whole schema makes sense:
 
 | Table | Why it exists | Key fields |
 |---|---|---|
-| `users` | Pure authentication. Separate from `wholesalers` because admins exist without a shop, and one auth table for everyone is simpler than one per role. | `email`, `password_hash`, `role` (ADMIN / WHOLESALER) |
+| `users` | Pure authentication. Separate from `wholesalers` because admins exist without a shop, and one auth table for everyone is simpler than one per role. | `email`, `phone` (V5, supplier logins), `password_hash`, `role` (ADMIN / WHOLESALER / SUPPLIER) |
 | `wholesalers` | The shop itself — the tenant root every operational table FKs to. One per WHOLESALER user. | `business_name`, `phone`, `address` |
 | `suppliers` | **Global** directory of supplier identity. Same trader sells to many wholesalers — don't duplicate his phone/address per shop. | `name`, `phone`, `address` |
 | `wholesaler_suppliers` | The **relationship** row: this shop's account with this supplier. Carries shop-specific state. **Every supplier-side balance/ledger row keys off this id, not `suppliers.id`** — because "money owed" only makes sense per-shop. | `opening_due`, `commission_rate`, `status` |
@@ -470,9 +493,10 @@ CHARSET/COLLATION boilerplate is `utf8mb4 / utf8mb4_unicode_ci` for every table 
 users
   id PK
   name
-  email UK
+  email UK NULL      -- V5: nullable; supplier logins may have no email
+  phone UK NULL      -- V5: login phone for SUPPLIER accounts
   password_hash      -- BCrypt only; no plaintext fallback permitted
-  role ADMIN | WHOLESALER
+  role ADMIN | WHOLESALER | SUPPLIER   -- SUPPLIER added in V5
   status ACTIVE | DISABLED
   created_at, updated_at
 
@@ -500,6 +524,8 @@ CREATE TABLE `users` (
   UNIQUE KEY `uk_users_email` (`email`),
   KEY `idx_users_role_status` (`role`,`status`)
 ) ENGINE=InnoDB;
+-- V5: role gains 'SUPPLIER', email becomes nullable, phone varchar(30) NULL UK added;
+--     suppliers gains user_id bigint NULL UK FK -> users(id).
 
 CREATE TABLE `wholesalers` (
   `id` bigint unsigned NOT NULL AUTO_INCREMENT,

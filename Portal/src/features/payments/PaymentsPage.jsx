@@ -92,6 +92,13 @@ const PaymentsPage = () => {
   );
 
   const { pageItems: pagedPayments, ...paymentPager } = usePagination(payments, 15);
+  const paymentTotals = useMemo(() => payments.reduce((acc, t) => {
+    const cls = classify(t);
+    const amount = Number(t.paymentAmount) || 0;
+    if (cls.dir === 'out') acc.out += amount;
+    else acc.in += amount;
+    return acc;
+  }, { in: 0, out: 0 }), [payments]);
 
   return (
     <div className="space-y-5">
@@ -100,12 +107,11 @@ const PaymentsPage = () => {
           <span className="box-eyebrow">Payments</span>
           <h3>Record &amp; track payments</h3>
         </div>
-        <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setShowModal(true)}>
-          <Plus size={16} /> New Payment
-        </button>
       </section>
 
-      <div className="supplier-panel">
+      <div className="profile-workspace">
+        <main className="profile-main-stack">
+          <div className="supplier-panel">
         <div className="mb-4 flex items-center justify-between">
           <div>
             <h3 className="flex items-center gap-2"><Receipt size={18} className="text-blue-600" /> Recent Payments</h3>
@@ -161,6 +167,25 @@ const PaymentsPage = () => {
         {!isLoading && payments.length > 0 && <TablePager {...paymentPager} />}
 
         {queryError && <div className="mt-3"><ErrorBanner message={queryError.message || 'Failed to load payments.'} /></div>}
+          </div>
+        </main>
+
+        <aside className="profile-side-stack">
+          <div className="supplier-panel">
+            <h3>Payment Actions</h3>
+            <button type="button" className="btn-primary mt-3 inline-flex w-full items-center justify-center gap-2" onClick={() => setShowModal(true)}>
+              <Plus size={16} /> New Payment
+            </button>
+          </div>
+          <div className="supplier-panel">
+            <h3>Payment Summary</h3>
+            <div className="mt-3 space-y-2">
+              <div className="box-row"><span>Total entries</span><strong>{payments.length}</strong></div>
+              <div className="box-row"><span>Money in</span><strong className="text-emerald-700">{formatMoney(paymentTotals.in)}</strong></div>
+              <div className="box-row total"><span>Money out</span><strong className="text-rose-700">{formatMoney(paymentTotals.out)}</strong></div>
+            </div>
+          </div>
+        </aside>
       </div>
 
       {showModal && <PaymentForm onClose={() => setShowModal(false)} />}

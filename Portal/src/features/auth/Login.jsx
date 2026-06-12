@@ -22,7 +22,8 @@ const Login = () => {
     setIsSubmitting(true);
     try {
       const user = await login(email, password);
-      navigate(user.role === 'ADMIN' ? '/admin' : '/dashboard', { replace: true });
+      const home = user.role === 'ADMIN' ? '/admin' : user.role === 'SUPPLIER' ? '/supplier' : '/dashboard';
+      navigate(home, { replace: true });
     } catch (err) {
       setError(err.message || 'Invalid email or password');
     } finally {
@@ -51,16 +52,16 @@ const Login = () => {
 
             <form onSubmit={handleSubmit} className="login-form">
               <div className="login-field">
-                <label htmlFor="email">{'Email address'}</label>
+                <label htmlFor="email">{'Email or phone'}</label>
                 <div className="login-input-wrap">
                   <Mail size={16} className="login-input-icon" />
                   <input
                     id="email"
-                    type="email"
+                    type="text"
                     value={email}
                     onChange={(e) => setEmail(e.target.value)}
-                    placeholder={'you@example.com'}
-                    autoComplete="email"
+                    placeholder={'you@example.com or 01XXXXXXXXX'}
+                    autoComplete="username"
                     required
                   />
                 </div>

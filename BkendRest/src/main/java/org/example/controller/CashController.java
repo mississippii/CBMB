@@ -4,7 +4,6 @@ import org.example.dto.CloseCashDayRequest;
 import org.example.dto.DailyCashRequest;
 import org.example.dto.DailyCashResponse;
 import org.example.service.CashReconciliationService;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -15,7 +14,6 @@ import org.springframework.web.bind.annotation.RestController;
  * Day-end cash book: debit/credit drawer reconciliation and day-close.
  */
 @RestController
-@CrossOrigin(origins = "*")
 @RequestMapping("/wholesalers/{wholesalerId}/cash")
 public class CashController {
 
