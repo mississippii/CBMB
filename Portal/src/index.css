@@ -50,9 +50,10 @@ html[lang="bn"] button {
   --shadow-lg:      0 24px 48px rgba(15, 23, 42, 0.13), 0 6px 16px rgba(15, 23, 42, 0.07);
 }
 
+/* NOTE: no global `* { margin/padding: 0 }` here. Tailwind v4's preflight already
+   resets those inside @layer base; an unlayered duplicate would override every
+   Tailwind margin/padding utility in the app (unlayered CSS beats layered). */
 * {
-  margin: 0;
-  padding: 0;
   box-sizing: border-box;
 }
 
@@ -160,7 +161,7 @@ select {
   box-shadow:
     0 10px 30px rgba(15, 23, 42, 0.08),
     inset 0 1px 0 rgba(255, 255, 255, 0.75);
-  padding: 1.3rem;
+  padding: var(--space-card);
   backdrop-filter: blur(10px);
   transition: box-shadow 0.25s ease, border-color 0.25s ease;
 }
@@ -599,7 +600,7 @@ tbody tr:hover {
 }
 
 .modal-body {
-  padding: 1.3rem;
+  padding: var(--space-card);
 }
 
 .modal-footer {
@@ -707,10 +708,13 @@ tbody tr:hover {
 .workspace-sidebar {
   position: sticky;
   top: 5.2rem;
-  max-height: calc(100vh - 6.5rem);
+  /* Flush to the bottom of the display — new modules just slot in. */
+  height: calc(100vh - 5.2rem);
+  max-height: calc(100vh - 5.2rem);
   overflow-y: auto;
   border: 1px solid rgba(226, 232, 240, 0.95);
-  border-radius: 1rem;
+  border-bottom: 0;
+  border-radius: 1rem 1rem 0 0;
   background: rgba(255, 255, 255, 0.88);
   box-shadow: 0 12px 30px rgba(15, 23, 42, 0.08);
   padding: 0.75rem;
@@ -724,8 +728,8 @@ tbody tr:hover {
 
 .sidebar-nav {
   display: grid;
-  gap: 0.35rem;
-  padding-top: 0.75rem;
+  gap: 0.2rem;
+  padding-top: 0.5rem;
 }
 
 .sidebar-nav-item {
@@ -804,7 +808,7 @@ tbody tr:hover {
 .supplier-profile-header {
   border-color: rgba(48, 125, 126, 0.22);
   border-radius: 1rem;
-  padding: 1rem;
+  padding: var(--space-card);
 }
 
 .supplier-avatar {
@@ -824,7 +828,7 @@ tbody tr:hover {
 
 .metric-tile {
   border-radius: 0.95rem;
-  padding: 0.95rem 1rem;
+  padding: 0.75rem 1rem;
 }
 
 .metric-tile p {
@@ -849,7 +853,7 @@ tbody tr:hover {
 
 .supplier-panel {
   border-radius: 1rem;
-  padding: 1.05rem;
+  padding: var(--space-card);
   transition: box-shadow 0.22s ease, border-color 0.22s ease, transform 0.22s ease;
 }
 
@@ -877,7 +881,7 @@ tbody tr:hover {
   background:
     linear-gradient(180deg, rgba(255, 255, 255, 0.96) 0%, rgba(248, 250, 252, 0.92) 100%);
   box-shadow: 0 14px 34px rgba(15, 23, 42, 0.08);
-  padding: 1rem;
+  padding: var(--space-card);
 }
 
 .transaction-filter-header {
@@ -954,7 +958,7 @@ tbody tr:hover {
   gap: 1rem;
   border-color: rgba(48, 125, 126, 0.22);
   border-radius: 1rem;
-  padding: 1rem;
+  padding: var(--space-card);
   background:
     linear-gradient(135deg, rgba(255, 255, 255, 0.94) 0%, rgba(233, 244, 244, 0.94) 100%);
 }
@@ -1058,7 +1062,7 @@ tbody tr:hover {
 
 .box-panel {
   border-radius: 1rem;
-  padding: 1rem;
+  padding: var(--space-card);
 }
 
 .box-panel-header {
@@ -1422,7 +1426,7 @@ tbody tr:hover {
   border: 1px solid #e2e8f0;
   border-radius: 8px;
   background: #f8fafc;
-  padding: 1rem;
+  padding: var(--space-card);
 }
 
 .inventory-card-title,
@@ -1527,7 +1531,7 @@ tbody tr:hover {
 
 .payment-panel {
   border-radius: 1rem;
-  padding: 1rem;
+  padding: var(--space-card);
 }
 
 .payment-panel h4 {
@@ -1930,7 +1934,10 @@ tbody tr:hover {
 
   .workspace-sidebar {
     position: static;
+    height: auto;
     max-height: none;
+    border-bottom: 1px solid rgba(226, 232, 240, 0.95);
+    border-radius: 1rem;
   }
 
   .sidebar-nav {
@@ -2276,7 +2283,7 @@ tbody tr:hover {
   border-radius: 0.85rem;
   background: #fff7ed;
   color: #9a3412;
-  padding: 0.85rem 1rem;
+  padding: 0.75rem 1rem;
   font-size: 0.88rem;
   font-weight: 750;
 }
@@ -2667,7 +2674,7 @@ tbody tr:hover {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.85rem 1rem;
+  padding: 0.75rem 1rem;
   border-radius: 0.95rem;
   border: 1px solid #e2e8f0;
   background: rgba(255, 255, 255, 0.95);
@@ -2722,7 +2729,7 @@ tbody tr:hover {
 
 /* ── Balance pills ─────────────────────────────────────── */
 .balance-pill {
-  padding: 0.85rem 1rem;
+  padding: 0.75rem 1rem;
   border-radius: 0.85rem;
   border: 1px solid transparent;
 }
@@ -2988,7 +2995,7 @@ tbody tr:hover {
   display: flex;
   align-items: center;
   gap: 0.85rem;
-  padding: 0.85rem 1rem;
+  padding: 0.75rem 1rem;
   border-radius: 0.75rem;
   border: 1px dashed #99d4d4;
   background: #f0fafa;
@@ -3491,7 +3498,7 @@ tbody tr:hover {
   align-items: center;
   justify-content: space-between;
   gap: 0.85rem;
-  padding: 0.95rem 1rem;
+  padding: 0.75rem 1rem;
   border-radius: 0.85rem;
   border: 1px solid #e2e8f0;
   background: #fff;
@@ -3662,7 +3669,7 @@ tbody tr:hover {
   display: flex;
   align-items: center;
   gap: 0.85rem;
-  padding: 0.95rem 1.1rem;
+  padding: 0.75rem 1rem;
   background: #fff;
   border: 1px solid #e2e8f0;
   border-radius: 0.95rem;
@@ -3903,7 +3910,7 @@ tbody tr:hover {
 
 /* Type breakdown cards */
 .type-card {
-  padding: 0.95rem 1rem;
+  padding: 0.75rem 1rem;
   border-radius: 0.85rem;
   border: 1px solid #e2e8f0;
   background: #fff;
@@ -4019,7 +4026,7 @@ tbody tr:hover {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
   gap: 0.75rem;
-  padding: 0.85rem 1rem;
+  padding: 0.75rem 1rem;
   background: #f8fafc;
   border-radius: 0.7rem;
   border: 1px solid #e2e8f0;
@@ -4107,7 +4114,7 @@ tbody tr:hover {
   align-items: center;
   justify-content: space-between;
   gap: 1rem;
-  padding: 0.85rem 1.1rem;
+  padding: 0.75rem 1rem;
   border-radius: 0.95rem;
   background: #fff;
   border: 1px solid #e2e8f0;
@@ -4133,7 +4140,7 @@ tbody tr:hover {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  padding: 0.85rem 1rem;
+  padding: 0.75rem 1rem;
   border-radius: 0.85rem;
   background: #fff;
   border: 1px solid #e2e8f0;
@@ -4242,7 +4249,7 @@ tbody tr:hover {
   align-items: center;
   justify-content: space-between;
   gap: 0.75rem;
-  padding: 0.85rem 1rem;
+  padding: 0.75rem 1rem;
   border-bottom: 1px solid #f1f5f9;
 }
 
@@ -4261,7 +4268,9 @@ tbody tr:hover {
 .data-table {
   width: 100%;
   border-collapse: collapse;
-  min-width: 760px;
+  min-width: 680px;
+  /* Honor the <th> percentage widths so the table fits its card exactly. */
+  table-layout: fixed;
 }
 
 .data-table thead th {
@@ -5257,6 +5266,10 @@ tbody tr:hover {
   --radius-card: 0.5rem;
   --radius-control: 0.45rem;
   --surface-page: #f6f8fb;
+  /* 8px spacing grid — keep every layout margin/padding on this scale. */
+  --space-gap: 1rem;     /* 16px — between layout columns and stacked cards */
+  --space-card: 1.25rem; /* 20px — inner padding of panels and cards */
+  --space-page: 1.25rem; /* 20px — page edge padding */
 }
 
 body {
@@ -5265,7 +5278,7 @@ body {
 
 .container-main {
   max-width: 100rem;
-  padding: 1rem 1.2rem 1.4rem;
+  padding: var(--space-page);
 }
 
 .app-navbar {
@@ -5289,7 +5302,8 @@ body {
 
 .workspace-layout {
   grid-template-columns: 14.5rem minmax(0, 1fr);
-  gap: 0.9rem;
+  column-gap: var(--space-gap);
+  row-gap: var(--space-gap);
 }
 
 .workspace-sidebar,
@@ -5371,8 +5385,8 @@ body {
 }
 
 .sidebar-nav-group + .sidebar-nav-group {
-  margin-top: 0.55rem;
-  padding-top: 0.55rem;
+  margin-top: 0.75rem;
+  padding-top: 0.75rem;
   border-top: 1px solid #eef2f7;
 }
 
@@ -5398,7 +5412,7 @@ body {
 .box-panel,
 .data-card-header,
 .support-panel {
-  padding: 0.9rem;
+  padding: var(--space-card);
 }
 
 .supplier-panel:hover,
@@ -5563,7 +5577,7 @@ tbody tr:hover,
 
 /* ── Restore bright wholesaler tree ───────────────────────────── */
 .sidebar-nav {
-  gap: 0.35rem;
+  gap: 0.25rem;
 }
 
 .sidebar-nav-item.active {
@@ -5589,10 +5603,18 @@ tbody tr:hover,
 
 
 /* ── Party tables: customers/suppliers ─────────────────────── */
+.party-table {
+  font-size: 0.82rem;
+  /* Fixed layout: columns honor the <th> widths and the table always fits
+     its container — no horizontal scroll hiding the money columns. */
+  table-layout: fixed;
+}
+
 .party-table th,
 .party-table td {
   text-align: left;
-  padding: 0.68rem 0.9rem;
+  padding: 0.6rem 0.6rem;
+  overflow-wrap: break-word;
 }
 
 .party-table th {
@@ -5627,13 +5649,13 @@ tbody tr:hover,
 .party-cell-main {
   display: flex;
   align-items: center;
-  gap: 0.75rem;
+  gap: 0.6rem;
   min-width: 0;
 }
 
 .party-avatar {
-  width: 2.15rem;
-  height: 2.15rem;
+  width: 1.9rem;
+  height: 1.9rem;
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -5679,14 +5701,22 @@ tbody tr:hover,
 .profile-workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 19rem;
-  gap: 1rem;
+  column-gap: var(--space-gap);
+  row-gap: var(--space-gap);
   align-items: start;
 }
 
 .profile-main-stack,
 .profile-side-stack {
   display: grid;
-  gap: 1rem;
+  gap: var(--space-gap);
+  min-width: 0;
+}
+
+/* Grid items default to min-width:auto — wide tables would push the card
+   underneath the side stack instead of scrolling inside it. */
+.profile-main-stack > *,
+.profile-side-stack > * {
   min-width: 0;
 }
 
@@ -5724,4 +5754,511 @@ tbody tr:hover,
 /* Profile side stack column safety */
 .profile-side-stack .grid {
   grid-template-columns: 1fr !important;
+}
+
+
+/* Admin dashboard two-column finishing */
+.admin-dashboard-content {
+  min-width: 0;
+}
+
+.admin-two-column {
+  grid-template-columns: minmax(0, 1fr) 17.5rem;
+}
+
+.admin-table-card {
+  overflow: hidden;
+}
+
+.admin-data-header {
+  gap: 0.75rem;
+  flex-wrap: wrap;
+}
+
+.admin-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+}
+
+.admin-wholesaler-table {
+  min-width: 42rem;
+}
+
+.admin-wholesaler-table td,
+.admin-wholesaler-table th {
+  vertical-align: middle;
+}
+
+.admin-wholesaler-table td:nth-child(4) {
+  max-width: 14rem;
+}
+
+@media (max-width: 1100px) {
+  .admin-two-column {
+    grid-template-columns: 1fr;
+  }
+}
+
+
+/* Admin product catalog table */
+.admin-catalog-table-wrap {
+  width: 100%;
+  overflow-x: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius-card);
+  background: #fff;
+}
+
+.admin-catalog-table {
+  width: 100%;
+  min-width: 48rem;
+  border-collapse: collapse;
+}
+
+.admin-catalog-table th,
+.admin-catalog-table td {
+  padding: 0.68rem 0.8rem;
+  border-bottom: 1px solid #edf2f7;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.admin-catalog-table th {
+  background: #f8fafc;
+  color: #475569;
+  font-size: 0.68rem;
+  font-weight: 850;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.admin-catalog-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.admin-catalog-row:hover td {
+  background: #f8fafc;
+}
+
+.admin-catalog-product {
+  display: inline-flex;
+  max-width: 20rem;
+  align-items: center;
+  gap: 0.45rem;
+  color: #0f172a;
+  font-size: 0.9rem;
+  font-weight: 850;
+  text-align: left;
+}
+
+.admin-catalog-product span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-catalog-preview {
+  display: flex;
+  max-width: 28rem;
+  flex-wrap: wrap;
+  gap: 0.35rem;
+}
+
+.admin-catalog-chip,
+.admin-catalog-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.28rem;
+  max-width: 9rem;
+  border-radius: var(--radius-control);
+  background: #f1f5f9;
+  padding: 0.22rem 0.45rem;
+  color: #334155;
+  font-size: 0.72rem;
+  font-weight: 750;
+}
+
+.admin-catalog-chip {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.admin-catalog-chip small {
+  border-radius: 999px;
+  background: #fef3c7;
+  padding: 0.05rem 0.28rem;
+  color: #92400e;
+  font-size: 0.62rem;
+  font-weight: 850;
+}
+
+.admin-catalog-more {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.admin-catalog-detail-row td {
+  background: #fbfdff;
+  padding-block: 0.75rem;
+}
+
+.admin-catalog-detail-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(13rem, 1fr));
+  gap: 0.45rem;
+}
+
+.admin-catalog-detail-item {
+  display: flex;
+  min-width: 0;
+  align-items: center;
+  gap: 0.45rem;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius-control);
+  background: #fff;
+  padding: 0.45rem 0.55rem;
+}
+
+.admin-catalog-empty-detail {
+  border: 1px dashed #cbd5e1;
+  border-radius: var(--radius-control);
+  padding: 0.7rem;
+  color: #64748b;
+  font-size: 0.82rem;
+  font-weight: 650;
+}
+
+
+/* Admin product catalog modal */
+.admin-catalog-summary-panel {
+  min-height: 12rem;
+}
+
+.admin-catalog-summary-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.75rem;
+}
+
+.admin-catalog-modal {
+  width: min(72rem, calc(100vw - 2rem));
+  max-width: 72rem !important;
+  max-height: calc(100vh - 2rem);
+  display: flex;
+  flex-direction: column;
+}
+
+.admin-catalog-modal .modal-body {
+  overflow: auto;
+}
+
+.admin-catalog-modal-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+@media (max-width: 720px) {
+  .admin-catalog-summary-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .admin-catalog-modal-toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+}
+
+
+/* Compact admin catalog summary */
+.admin-catalog-compact {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius-card);
+  background: #f8fafc;
+  padding: 0.55rem;
+}
+
+.admin-catalog-compact-stats,
+.admin-catalog-compact-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.45rem;
+}
+
+.admin-catalog-compact-stats span {
+  display: inline-flex;
+  align-items: baseline;
+  gap: 0.28rem;
+  border-radius: var(--radius-control);
+  background: #fff;
+  padding: 0.35rem 0.5rem;
+  color: #64748b;
+  font-size: 0.76rem;
+  font-weight: 750;
+  box-shadow: 0 1px 1px rgba(15, 23, 42, 0.03);
+}
+
+.admin-catalog-compact-stats strong {
+  color: #0f172a;
+  font-size: 0.88rem;
+  font-weight: 900;
+}
+
+.admin-catalog-compact-actions .btn-primary,
+.admin-catalog-compact-actions .btn-secondary {
+  min-height: 2.05rem;
+  padding-block: 0.38rem;
+}
+
+@media (max-width: 720px) {
+  .admin-catalog-compact {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .admin-catalog-compact-actions .btn-primary,
+  .admin-catalog-compact-actions .btn-secondary {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+}
+
+
+/* Compact catalog label row */
+.admin-catalog-summary-panel {
+  min-height: 0;
+}
+
+.admin-catalog-label-row {
+  align-items: center;
+  gap: 0.6rem;
+}
+
+.admin-catalog-label-row .support-panel-title {
+  flex: 0 0 auto;
+}
+
+.admin-catalog-label-row .admin-catalog-compact-stats {
+  margin-left: auto;
+}
+
+@media (max-width: 720px) {
+  .admin-catalog-label-row .admin-catalog-compact-stats {
+    width: 100%;
+    margin-left: 0;
+  }
+}
+
+
+.admin-catalog-label-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.admin-catalog-label-actions .btn-primary,
+.admin-catalog-label-actions .btn-secondary {
+  min-height: 2.05rem;
+  padding-block: 0.38rem;
+}
+
+@media (max-width: 900px) {
+  .admin-catalog-label-actions {
+    width: 100%;
+  }
+
+  .admin-catalog-label-actions .btn-primary,
+  .admin-catalog-label-actions .btn-secondary {
+    flex: 1 1 auto;
+    justify-content: center;
+  }
+}
+
+
+.admin-catalog-product-cell {
+  display: inline-flex;
+  max-width: 22rem;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.admin-catalog-expand-btn {
+  display: inline-flex;
+  width: 1.6rem;
+  height: 1.6rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-control);
+  color: #64748b;
+}
+
+.admin-catalog-expand-btn:hover {
+  background: #e2e8f0;
+  color: #0f172a;
+}
+
+
+.modal-overlay-front {
+  z-index: 80;
+}
+
+
+/* Inventory product-in-store table refinement */
+.inventory-product-row {
+  border-radius: var(--radius-card);
+}
+
+.inventory-product-header {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem 0.8rem;
+}
+
+.inventory-product-avatar {
+  display: flex;
+  width: 2.65rem;
+  height: 2.65rem;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-card);
+}
+
+.inventory-supplier-chip,
+.inventory-supplier-more {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.32rem;
+  border-radius: 999px;
+  background: #f1f5f9;
+  padding: 0.22rem 0.5rem;
+  color: #334155;
+  font-size: 0.7rem;
+  font-weight: 750;
+}
+
+.inventory-supplier-chip span {
+  color: #64748b;
+  font-weight: 650;
+}
+
+.inventory-supplier-more {
+  background: #e0f2fe;
+  color: #0369a1;
+}
+
+.inventory-qty-summary {
+  flex: 0 0 auto;
+  min-width: 7.4rem;
+  border-left: 1px solid #e2e8f0;
+  padding-left: 0.8rem;
+  text-align: right;
+}
+
+.inventory-qty-value {
+  color: #0f172a;
+  font-size: 1.05rem;
+  font-weight: 900;
+  line-height: 1;
+}
+
+.inventory-qty-label {
+  margin-top: 0.18rem;
+  color: #64748b;
+  font-size: 0.66rem;
+  font-weight: 850;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.inventory-lot-panel {
+  border-top: 1px solid #dbeafe;
+  background: #f8fafc;
+  padding: 0.7rem 0.8rem 0.8rem;
+}
+
+.inventory-stock-table-wrap {
+  overflow-x: auto;
+  border: 1px solid #e2e8f0;
+  border-radius: var(--radius-card);
+  background: #fff;
+}
+
+.inventory-stock-table {
+  width: 100%;
+  min-width: 48rem;
+  border-collapse: collapse;
+  font-size: 0.82rem;
+}
+
+.inventory-stock-table th,
+.inventory-stock-table td {
+  border-bottom: 1px solid #edf2f7;
+  padding: 0.52rem 0.68rem;
+  text-align: left;
+  vertical-align: middle;
+}
+
+.inventory-stock-table th {
+  background: #f8fafc;
+  color: #475569;
+  font-size: 0.66rem;
+  font-weight: 850;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.inventory-stock-table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.inventory-stock-table tbody tr:hover td {
+  background: #f8fafc;
+}
+
+.inventory-qty-cell,
+.inventory-action-cell {
+  text-align: right !important;
+  white-space: nowrap;
+}
+
+.inventory-status-cell {
+  white-space: nowrap;
+}
+
+.inventory-variety-cell,
+.inventory-lot-cell,
+.inventory-supplier-cell,
+.inventory-shipment-cell {
+  color: #334155;
+  font-weight: 650;
+}
+
+.inventory-lot-cell span {
+  font-weight: 850;
+}
+
+@media (max-width: 900px) {
+  .inventory-product-header {
+    align-items: stretch;
+    flex-wrap: wrap;
+  }
+
+  .inventory-qty-summary {
+    width: 100%;
+    min-width: 0;
+    border-left: 0;
+    border-top: 1px solid #e2e8f0;
+    padding-top: 0.55rem;
+    padding-left: 0;
+    text-align: left;
+  }
 }

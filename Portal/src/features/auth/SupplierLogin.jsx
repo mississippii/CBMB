@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { Phone, ArrowRight, UserRound } from 'lucide-react';
 import { useAuth } from './AuthContext';
+import { isValidPhone, normalizePhone, PHONE_HINT } from '../../shared/utils/validation';
 
 /**
  * Dedicated supplier sign-in at /supplier-login (not linked from the main
@@ -22,9 +23,13 @@ const SupplierLogin = () => {
       setError('Please enter your phone number');
       return;
     }
+    if (!isValidPhone(phone)) {
+      setError(PHONE_HINT);
+      return;
+    }
     setIsSubmitting(true);
     try {
-      await supplierLogin(phone.trim());
+      await supplierLogin(normalizePhone(phone));
       navigate('/supplier', { replace: true });
     } catch (err) {
       setError(err.message || 'No supplier found with this phone number');

@@ -1,11 +1,11 @@
 import { useEffect, useState } from 'react'
-import { Power, RotateCcw, Users, ArrowLeft, Phone, MapPin, User } from 'lucide-react'
+import { Power, RotateCcw, Users, ArrowLeft, Phone, MapPin, Building2 } from 'lucide-react'
 import { useData } from '../../data/DataContext'
 import { useToast } from '../../shared/components/Toast'
 import { TablePager, usePagination } from '../../shared/components'
 import { formatDate } from '../../shared/utils/format'
 
-const formatCurrency = (value) => '৳ ' + (Number(value) || 0).toLocaleString()
+const formatCurrency = (value) => '৳ ' + Math.ceil(Number(value) || 0).toLocaleString()
 const formatAmount = (transaction) => {
   if (transaction.transactionType === 'Payment') {
     return formatCurrency(transaction.paymentAmount || transaction.totalAmount)
@@ -124,7 +124,7 @@ const CustomerDetail = ({ customerId, onBack }) => {
             </div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-lg font-extrabold text-slate-900 truncate">{customer.name}</h2>
+                <h2 className="text-lg font-extrabold text-slate-900 truncate">{customer.ownerName || customer.owner || customer.name}</h2>
                 <span className="rounded-full bg-emerald-100 px-2.5 py-1 text-xs font-bold text-[#1d63ed]">
                   {customer.type}
                 </span>
@@ -133,8 +133,8 @@ const CustomerDetail = ({ customerId, onBack }) => {
                 )}
               </div>
               <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
-                {customer.owner && (
-                  <span className="inline-flex items-center gap-1"><User size={12} /> {customer.owner}</span>
+                {customer.name && (
+                  <span className="inline-flex items-center gap-1"><Building2 size={12} /> {customer.name}</span>
                 )}
                 <span className="inline-flex items-center gap-1"><Phone size={12} /> {customer.phone}</span>
                 {customer.address && (

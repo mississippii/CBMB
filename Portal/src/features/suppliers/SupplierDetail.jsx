@@ -11,7 +11,7 @@ import { TablePager, usePagination } from '../../shared/components'
 import { formatDate } from '../../shared/utils/format'
 import { postJson, apiPaths } from '../../services/apiClient'
 
-const formatCurrency = (value) => `৳ ${Math.round(Number(value) || 0).toLocaleString()}`
+const formatCurrency = (value) => `৳ ${Math.ceil(Number(value) || 0).toLocaleString()}`
 
 const METHOD_LABELS = { CASH: 'Cash', BANK: 'Bank', BKASH: 'bKash', NAGAD: 'Nagad', OTHER: 'Other' }
 
@@ -229,6 +229,11 @@ const SupplierDetail = ({ supplierId, onBack }) => {
       setEditError('Supplier name is required.')
       return
     }
+    const rate = Number(editForm.commissionRate)
+    if (editForm.commissionRate !== '' && (Number.isNaN(rate) || rate < 0 || rate > 100)) {
+      setEditError('Commission rate must be between 0 and 100.')
+      return
+    }
     setIsSavingEdit(true)
     setEditError('')
     try {
@@ -353,7 +358,7 @@ const SupplierDetail = ({ supplierId, onBack }) => {
             </div>
             <div className="min-w-0">
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-lg font-extrabold text-slate-900 truncate">{supplier.name}</h2>
+                <h2 className="text-lg font-extrabold text-slate-900 truncate">{supplier.businessName || supplier.name}</h2>
                 {supplier.status === 'DISABLED' && <span className="badge badge-rose">Disabled</span>}
                 {pendingRateCount > 0 && (
                   <span className="badge badge-amber">{pendingRateCount} lot{pendingRateCount === 1 ? '' : 's'} need rate</span>
@@ -361,7 +366,7 @@ const SupplierDetail = ({ supplierId, onBack }) => {
               </div>
               <div className="mt-0.5 flex flex-wrap items-center gap-x-3 gap-y-0.5 text-xs text-slate-500">
                 {supplier.businessName && (
-                  <span className="inline-flex items-center gap-1"><Building2 size={12} /> {supplier.businessName}</span>
+                  <span className="inline-flex items-center gap-1"><UserCheck size={12} /> {supplier.name}</span>
                 )}
                 {supplier.location && (
                   <span className="inline-flex items-center gap-1"><MapPin size={12} /> {supplier.location}</span>

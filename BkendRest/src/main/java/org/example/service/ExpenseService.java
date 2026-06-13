@@ -1,6 +1,7 @@
 package org.example.service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
@@ -115,7 +116,7 @@ public class ExpenseService {
         if (paid.compareTo(amount) > 0) {
             throw new BadRequestException("Supplier-funded amount cannot exceed the expense amount.");
         }
-        BigDecimal due = amount.subtract(paid);
+        BigDecimal due = money(amount.subtract(paid));
 
         ExpenseCategory category = resolveCategory(wholesaler, request.categoryId(), request.categoryName());
 
@@ -143,7 +144,7 @@ public class ExpenseService {
                         b.setDueAmount(BigDecimal.ZERO);
                         return b;
                     });
-            balance.setDueAmount(balance.getDueAmount().add(due));
+            balance.setDueAmount(money(balance.getDueAmount().add(due)));
             otherDueBalanceRepository.save(balance);
         }
 
@@ -262,11 +263,15 @@ public class ExpenseService {
     private BigDecimal nonNegative(BigDecimal value, String message) {
         BigDecimal v = value == null ? BigDecimal.ZERO : value;
         if (v.signum() < 0) throw new BadRequestException(message);
-        return v;
+        return money(v);
     }
 
     private BigDecimal zero(BigDecimal v) {
         return v == null ? BigDecimal.ZERO : v;
+    }
+
+    private BigDecimal money(BigDecimal value) {
+        return (value == null ? BigDecimal.ZERO : value).setScale(0, RoundingMode.CEILING);
     }
 
     private String clean(String value) {

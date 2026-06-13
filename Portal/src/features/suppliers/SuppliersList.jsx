@@ -6,6 +6,7 @@ import { useData } from '../../data/DataContext';
 import { useToast } from '../../shared/components/Toast';
 import { TablePager, usePagination } from '../../shared/components';
 import { formatMoney } from '../../shared/utils/format';
+import { isValidPhone, numberInRange, PHONE_HINT } from '../../shared/utils/validation';
 import SupplierDetail from './SupplierDetail';
 
 const EMPTY_FORM = {
@@ -49,9 +50,21 @@ const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
 
   const handleAddSupplier = async () => {
     const name = formData.name.trim();
-    const contact = formData.contact.trim();
+    const contact = normalizePhone(formData.contact);
     if (!name || !contact) {
       setFormError('Supplier name and phone number are required.');
+      return;
+    }
+    if (!isValidPhone(contact)) {
+      setFormError(PHONE_HINT);
+      return;
+    }
+    if (formData.commissionRate !== '' && !numberInRange(formData.commissionRate, 0, 100)) {
+      setFormError('Commission rate must be between 0 and 100.');
+      return;
+    }
+    if (formData.openingDue !== '' && !numberInRange(formData.openingDue, 0)) {
+      setFormError('Opening due must be zero or a positive amount.');
       return;
     }
     setIsSaving(true);
@@ -97,9 +110,12 @@ const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
       return true;
     })
     .sort((a, b) => {
+      // The table title is the business name, so name sorting follows it.
+      const titleA = a.businessName || a.name;
+      const titleB = b.businessName || b.name;
       switch (sortBy) {
-        case 'name-asc':   return a.name.localeCompare(b.name);
-        case 'name-desc':  return b.name.localeCompare(a.name);
+        case 'name-asc':   return titleA.localeCompare(titleB);
+        case 'name-desc':  return titleB.localeCompare(titleA);
         case 'due-desc':   return Number(b.amountDue || 0) - Number(a.amountDue || 0);
         case 'due-asc':    return Number(a.amountDue || 0) - Number(b.amountDue || 0);
         case 'comm-desc':  return Number(b.commissionRate || 0) - Number(a.commissionRate || 0);
@@ -287,12 +303,12 @@ const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-center gap-3 min-w-0">
                         <div className="supplier-card-avatar">
-                          {supplier.name?.charAt(0).toUpperCase() || 'S'}
+                          {(supplier.businessName || supplier.name)?.charAt(0).toUpperCase() || 'S'}
                         </div>
                         <div className="min-w-0">
-                          <p className="font-semibold text-slate-900 truncate">{supplier.name}</p>
+                          <p className="font-semibold text-slate-900 truncate">{supplier.businessName || supplier.name}</p>
                           {supplier.businessName && (
-                            <p className="text-xs text-blue-700 truncate">{supplier.businessName}</p>
+                            <p className="text-xs text-blue-700 truncate">{supplier.name}</p>
                           )}
                           <p className="text-xs text-slate-500 truncate">{supplier.contact}</p>
                         </div>
@@ -302,12 +318,12 @@ const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
                       {advance > 0 ? (
                         <div className="rounded-lg bg-emerald-50 px-2 py-2">
                           <p className="text-slate-500">Advance</p>
-                          <p className="font-bold text-emerald-600">৳{advance.toLocaleString()}</p>
+                          <p className="font-bold text-emerald-600">৳{Math.ceil(advance).toLocaleString()}</p>
                         </div>
                       ) : (
                         <div className="rounded-lg bg-red-50 px-2 py-2">
                           <p className="text-slate-500">Due</p>
-                          <p className="font-bold text-red-600">৳{net.toLocaleString()}</p>
+                          <p className="font-bold text-red-600">৳{Math.ceil(net).toLocaleString()}</p>
                         </div>
                       )}
                       <div className="rounded-lg bg-blue-50 px-2 py-2">
@@ -329,16 +345,16 @@ const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
 
             {/* Desktop table view */}
             <div className="hidden lg:block overflow-x-auto rounded-lg border border-slate-200 bg-white">
-              <table className="party-table w-full text-sm min-w-[980px]">
+              <table className="party-table w-full min-w-[680px]">
                 <thead>
                   <tr>
-                    <th>Supplier</th>
-                    <th>Business Name</th>
-                    <th>Contact</th>
-                    <th>Location</th>
-                    <th className="text-right">Amount Due</th>
-                    <th className="text-right">Advance Paid</th>
-                    <th className="text-right">Crate Due</th>
+                    <th className="w-[20%]">Supplier</th>
+                    <th className="w-[14%]">Owner Name</th>
+                    <th className="w-[16%]">Contact</th>
+                    <th className="w-[14%]">Location</th>
+                    <th className="w-[12%] text-right">Amount Due</th>
+                    <th className="w-[13%] text-right">Advance Paid</th>
+                    <th className="w-[11%] text-right">Crate Due</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -354,14 +370,14 @@ const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
                       >
                         <td>
                           <div className="party-cell-main">
-                            <span className="party-avatar">{supplier.name?.charAt(0).toUpperCase() || 'S'}</span>
+                            <span className="party-avatar">{(supplier.businessName || supplier.name)?.charAt(0).toUpperCase() || 'S'}</span>
                             <div className="flex flex-wrap items-center gap-2 min-w-0">
-                              <span className="party-name">{supplier.name}</span>
+                              <span className="party-name">{supplier.businessName || supplier.name}</span>
                               {supplier.status === 'DISABLED' && <span className="badge badge-rose">Disabled</span>}
                             </div>
                           </div>
                         </td>
-                        <td className="font-semibold text-slate-700">{supplier.businessName || '—'}</td>
+                        <td className="font-semibold text-slate-700">{supplier.name || '—'}</td>
                         <td>
                           <div className="party-contact">
                             <span>{supplier.contact || '—'}</span>

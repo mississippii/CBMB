@@ -1,5 +1,6 @@
 import { useCallback, useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
+import { Filter } from 'lucide-react';
 import { useData } from '../../data/DataContext';
 import { useAuth } from '../auth/AuthContext';
 import { queryKeys } from '../../services/queryKeys';
@@ -8,7 +9,7 @@ import { formatDate, formatDateTime } from '../../shared/utils/format';
 
 const toStartOfDay = (dateString) => new Date(`${dateString}T00:00:00`);
 const toEndOfDay = (dateString) => new Date(`${dateString}T23:59:59.999`);
-const formatCurrency = (value) => `৳ ${(Number(value) || 0).toLocaleString()}`;
+const formatCurrency = (value) => `৳ ${Math.ceil(Number(value) || 0).toLocaleString()}`;
 const METHOD_LABELS = { CASH: 'Cash', BANK: 'Bank', BKASH: 'bKash', NAGAD: 'Nagad', OTHER: 'Other' };
 const getTransactionDate = (transaction) => new Date(transaction.createdAt || transaction.date);
 const normalizePhone = (value) => String(value ?? '').replace(/\D/g, '');
@@ -510,7 +511,7 @@ const TransactionsList = () => {
           <div className="transaction-filter-panel">
         <div className="transaction-filter-header">
           <div>
-            <h3>Filters</h3>
+            <h3 className="flex items-center gap-2"><Filter size={16} className="text-blue-600" /> Filters</h3>
           </div>
           <span className="transaction-filter-count">{filteredTransactions.length}</span>
         </div>

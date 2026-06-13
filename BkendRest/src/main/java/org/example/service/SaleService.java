@@ -109,8 +109,8 @@ public class SaleService {
         }
 
         BigDecimal quantity = positive(request.quantity(), "Quantity must be greater than zero.");
-        BigDecimal unitPrice = nonNegative(request.unitPrice(), "Unit price cannot be negative.");
-        BigDecimal paidAmount = nonNegative(request.paymentAmount(), "Payment amount cannot be negative.");
+        BigDecimal unitPrice = preciseMoney(request.unitPrice(), "Unit price cannot be negative.");
+        BigDecimal paidAmount = cashMoney(nonNegative(request.paymentAmount(), "Payment amount cannot be negative."));
         // Weight-priced sale: line_total = saleWeightKg × unitPrice (unitPrice = per-kg).
         // Pack-priced sale (default): line_total = quantity × unitPrice (unitPrice = per-pack).
         // Inventory still deducts `quantity` (pack count) either way.
@@ -121,15 +121,15 @@ public class SaleService {
             throw new BadRequestException("Sale weight cannot be negative.");
         }
         BigDecimal grossAmount = saleWeightKg != null
-                ? money(saleWeightKg.multiply(unitPrice))
-                : money(quantity.multiply(unitPrice));
-        BigDecimal discountAmount = nonNegative(request.discountAmount(), "Discount cannot be negative.");
+                ? cashMoney(saleWeightKg.multiply(unitPrice))
+                : cashMoney(quantity.multiply(unitPrice));
+        BigDecimal discountAmount = cashMoney(nonNegative(request.discountAmount(), "Discount cannot be negative."));
         if (discountAmount.compareTo(grossAmount) > 0) {
             throw new BadRequestException("Discount cannot exceed the sale amount.");
         }
         // Net = gross - discount. Everything downstream (due, commission, supplier payable)
         // works off the net (discounted) amount.
-        BigDecimal netAmount = money(grossAmount.subtract(discountAmount));
+        BigDecimal netAmount = cashMoney(grossAmount.subtract(discountAmount));
         boolean oneTimeCustomer = request.wholesalerCustomerId() == null;
         // Crate-borrow on a sale is now opt-in: only honoured when the caller explicitly
         // passes a crateType + cratesGiven > 0. The SaleForm no longer sends these; crate
@@ -153,7 +153,7 @@ public class SaleService {
         if (paidAmount.compareTo(netAmount) > 0) {
             throw new BadRequestException("Paid amount cannot exceed sale amount. To settle prior due, use the customer settle endpoint after this sale.");
         }
-        BigDecimal dueAmount = money(netAmount.subtract(paidAmount));
+        BigDecimal dueAmount = cashMoney(netAmount.subtract(paidAmount));
 
         Sale sale = new Sale();
         sale.setWholesaler(wholesaler);
@@ -182,7 +182,7 @@ public class SaleService {
         BigDecimal commissionRate = delivery != null && delivery.getCommissionRate() != null
                 ? delivery.getCommissionRate()
                 : BigDecimal.ZERO;
-        BigDecimal commissionAmount = money(netAmount.multiply(commissionRate).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP));
+        BigDecimal commissionAmount = cashMoney(netAmount.multiply(commissionRate).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP));
 
         SaleItem item = new SaleItem();
         item.setWholesaler(wholesaler);
@@ -286,7 +286,7 @@ public class SaleService {
         AccountBalance balance = accountBalanceService.getOrCreate(
                 wholesaler, PartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), customerAccount.getOpeningDue());
 
-        balance.setBalance(money(balance.getBalance().add(netAmount).subtract(paidAmount)));
+        balance.setBalance(cashMoney(balance.getBalance().add(netAmount).subtract(paidAmount)));
         accountBalanceRepository.save(balance);
 
         AccountLedger saleLedger = new AccountLedger();
@@ -390,7 +390,7 @@ public class SaleService {
             return balance.getBalance();
         }
 
-        balance.setBalance(money(balance.getBalance().add(saleAmount)));
+        balance.setBalance(cashMoney(balance.getBalance().add(saleAmount)));
         accountBalanceRepository.save(balance);
 
         AccountLedger ledger = new AccountLedger();
@@ -449,11 +449,15 @@ public class SaleService {
         if (normalized.signum() < 0) {
             throw new BadRequestException(message);
         }
-        return money(normalized);
+        return normalized.setScale(2, RoundingMode.HALF_UP);
     }
 
-    private BigDecimal money(BigDecimal value) {
-        return value.setScale(2, RoundingMode.HALF_UP);
+    private BigDecimal preciseMoney(BigDecimal value, String message) {
+        return nonNegative(value, message);
+    }
+
+    private BigDecimal cashMoney(BigDecimal value) {
+        return (value == null ? BigDecimal.ZERO : value).setScale(0, RoundingMode.CEILING);
     }
 
     /** Three-decimal scale for weight (kg). */

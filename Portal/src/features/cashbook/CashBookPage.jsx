@@ -10,7 +10,7 @@ import { useAuth } from '../auth/AuthContext';
 import { queryKeys } from '../../services/queryKeys';
 import { formatDate } from '../../shared/utils/format';
 
-const fmt = (value) => '৳ ' + (Number(value) || 0).toLocaleString(undefined, { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+const fmt = (value) => '৳ ' + Math.ceil(Number(value) || 0).toLocaleString();
 
 // Local calendar date (yyyy-mm-dd). toISOString() would report the UTC day, which
 // rolls a day early/late for users off UTC (e.g. an early-morning market in UTC+6).

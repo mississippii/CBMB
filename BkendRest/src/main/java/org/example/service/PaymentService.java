@@ -555,7 +555,7 @@ public class PaymentService {
     }
 
     private BigDecimal money(BigDecimal value) {
-        return value.setScale(2, RoundingMode.HALF_UP);
+        return value.setScale(0, RoundingMode.CEILING);
     }
 
     private String requireText(String value, String message) {

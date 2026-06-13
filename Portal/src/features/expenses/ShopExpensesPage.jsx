@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Ban, Plus, Wallet } from 'lucide-react';
+import { AlertTriangle, Filter, Plus, Wallet } from 'lucide-react';
 import { useData } from '../../data/DataContext';
 import { useAuth } from '../auth/AuthContext';
 import { queryKeys } from '../../services/queryKeys';
@@ -8,7 +8,7 @@ import Modal from '../../shared/components/Modal';
 import { TablePager, usePagination, DateRangeFilter } from '../../shared/components';
 import { formatDate } from '../../shared/utils/format';
 
-const fmt = (value) => '৳ ' + (Number(value) || 0).toLocaleString();
+const fmt = (value) => '৳ ' + Math.ceil(Number(value) || 0).toLocaleString();
 
 const PAYMENT_METHODS = [
   { value: 'CASH',  label: 'Cash' },
@@ -27,7 +27,7 @@ const toEndOfDay = (s) => new Date(`${s}T23:59:59.999`).toISOString();
 const ShopExpensesPage = () => {
   const { admin } = useAuth();
   const queryClient = useQueryClient();
-  const { fetchShopExpenseCategories, fetchShopExpenses, createShopExpense, cancelShopExpense } = useData();
+  const { fetchShopExpenseCategories, fetchShopExpenses, createShopExpense } = useData();
   const [startDate, setStartDate] = useState(todayIso());
   const [endDate, setEndDate] = useState(todayIso());
 
@@ -39,9 +39,7 @@ const ShopExpensesPage = () => {
   const [formNote, setFormNote] = useState('');
   const [formError, setFormError] = useState('');
 
-  const [cancelTargetId, setCancelTargetId] = useState(null);
-  const [cancelReason, setCancelReason] = useState('');
-  const [cancelError, setCancelError] = useState('');
+  const [showSaveWarning, setShowSaveWarning] = useState(false);
 
   const fromIso = startDate ? toStartOfDay(startDate) : null;
   const toIso = endDate ? toEndOfDay(endDate) : null;
@@ -67,9 +65,7 @@ const ShopExpensesPage = () => {
   };
 
   const createMutation = useMutation({ mutationFn: (p) => createShopExpense(p), onSuccess: invalidateShopExpenses });
-  const cancelMutation = useMutation({ mutationFn: ({ id, reason }) => cancelShopExpense(id, reason), onSuccess: invalidateShopExpenses });
   const formBusy = createMutation.isPending;
-  const cancelBusy = cancelMutation.isPending;
 
   const totals = useMemo(() => {
     const active = expenses.filter((e) => e.status !== 'CANCELLED');
@@ -93,36 +89,33 @@ const ShopExpensesPage = () => {
     setFormDate(todayIso()); setFormNote(''); setFormError('');
   };
 
-  const handleSubmit = async (e) => {
+  // Step 1 — validate, then ask for confirmation. Expenses are final once saved.
+  const handleSubmit = (e) => {
     e.preventDefault();
     setFormError('');
     const amount = Number(formAmount);
     if (!amount || amount <= 0) { setFormError('Amount must be greater than zero.'); return; }
     if (!formCategoryId) { setFormError('Pick a category.'); return; }
+    setShowSaveWarning(true);
+  };
+
+  // Step 2 — actually save after the user confirms the warning.
+  const handleConfirmSave = async () => {
+    setFormError('');
     try {
       await createMutation.mutateAsync({
         categoryId: Number(formCategoryId),
-        amount,
+        amount: Number(formAmount),
         paymentMethod: formPaymentMethod,
         expenseDate: new Date(`${formDate}T${new Date().toTimeString().slice(0, 8)}`).toISOString(),
         note: formNote.trim() || null,
       });
+      setShowSaveWarning(false);
       resetForm();
       setShowForm(false);
     } catch (err) {
+      setShowSaveWarning(false);
       setFormError(err.message || 'Failed to save.');
-    }
-  };
-
-  const handleCancel = async () => {
-    if (!cancelTargetId) return;
-    setCancelError('');
-    try {
-      await cancelMutation.mutateAsync({ id: cancelTargetId, reason: cancelReason });
-      setCancelTargetId(null);
-      setCancelReason('');
-    } catch (err) {
-      setCancelError(err.message || 'Failed to cancel.');
     }
   };
 
@@ -163,7 +156,6 @@ const ShopExpensesPage = () => {
                   <th className="px-4 py-3 font-semibold text-slate-700">Amount</th>
                   <th className="px-4 py-3 font-semibold text-slate-700">Method</th>
                   <th className="px-4 py-3 font-semibold text-slate-700">Note</th>
-                  <th className="px-4 py-3 font-semibold text-slate-700">Action</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -180,14 +172,6 @@ const ShopExpensesPage = () => {
                         <span className="badge badge-teal">{expense.paymentMethod}</span>
                       </td>
                       <td className="px-4 py-3 text-slate-500">{expense.note || '—'}</td>
-                      <td className="px-4 py-3">
-                        {!cancelled && (
-                          <button type="button" onClick={() => { setCancelTargetId(expense.id); setCancelReason(''); setCancelError(''); }}
-                            className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-100">
-                            <Ban size={11} /> Cancel
-                          </button>
-                        )}
-                      </td>
                     </tr>
                   );
                 })}
@@ -210,9 +194,10 @@ const ShopExpensesPage = () => {
           </div>
           {/* Filters + KPIs */}
           <section className="supplier-panel">
+        <h3 className="mb-3 flex items-center gap-2"><Filter size={16} className="text-blue-600" /> Filters</h3>
         <DateRangeFilter from={startDate} to={endDate} setFrom={setStartDate} setTo={setEndDate} />
 
-        <div className="mt-4 grid grid-cols-2 gap-3 sm:grid-cols-4">
+        <div className="mt-4 grid grid-cols-1 gap-3">
           <div className="rounded-2xl border border-rose-200 bg-gradient-to-br from-rose-50 to-white px-3.5 py-3 shadow-sm">
             <p className="text-[10px] font-bold uppercase tracking-wider text-rose-600">Period Total</p>
             <p className="mt-1 text-xl font-extrabold leading-tight text-rose-600 tabular-nums">{fmt(totals.total)}</p>
@@ -240,7 +225,6 @@ const ShopExpensesPage = () => {
         maxWidth="32rem"
         footer={(
           <div className="flex w-full justify-end gap-2">
-            <button type="button" onClick={() => setShowForm(false)} disabled={formBusy} className="btn-secondary">Cancel</button>
             <button type="submit" form="shop-expense-form" disabled={formBusy} className="btn-primary">{formBusy ? 'Saving…' : 'Save'}</button>
           </div>
         )}
@@ -277,27 +261,31 @@ const ShopExpensesPage = () => {
         </form>
       </Modal>
 
-      {/* Cancel modal */}
+      {/* Save warning — expenses cannot be changed after saving */}
       <Modal
-        open={cancelTargetId != null}
-        onClose={() => { if (!cancelBusy) setCancelTargetId(null); }}
-        title="Cancel this expense?"
-        icon={Ban}
-        iconClass="bg-rose-100 text-rose-600"
+        open={showSaveWarning}
+        onClose={() => { if (!formBusy) setShowSaveWarning(false); }}
+        title="Save this expense?"
+        icon={AlertTriangle}
+        iconClass="bg-amber-100 text-amber-600"
         maxWidth="28rem"
         footer={(
           <div className="flex w-full justify-end gap-2">
-            <button type="button" onClick={() => setCancelTargetId(null)} disabled={cancelBusy} className="btn-secondary">Keep</button>
-            <button type="button" onClick={handleCancel} disabled={cancelBusy} className="btn-danger">{cancelBusy ? 'Cancelling…' : 'Confirm Cancel'}</button>
+            <button type="button" onClick={() => setShowSaveWarning(false)} disabled={formBusy} className="btn-secondary">Back</button>
+            <button type="button" onClick={handleConfirmSave} disabled={formBusy} className="btn-primary">{formBusy ? 'Saving…' : 'Confirm Save'}</button>
           </div>
         )}
       >
         <div className="space-y-3">
-          <div>
-            <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Reason (optional)</label>
-            <input type="text" value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} className="input-field mt-1 w-full" placeholder="e.g. duplicate entry" />
+          <p className="text-sm text-slate-600">
+            Please review before saving — an expense <strong>cannot be changed or cancelled</strong> once recorded.
+          </p>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+            <div className="flex justify-between py-0.5"><span className="text-slate-500">Category</span><strong className="text-slate-800">{categories.find((c) => String(c.id) === String(formCategoryId))?.name || '—'}</strong></div>
+            <div className="flex justify-between py-0.5"><span className="text-slate-500">Amount</span><strong className="text-slate-900">{fmt(formAmount)}</strong></div>
+            <div className="flex justify-between py-0.5"><span className="text-slate-500">Payment</span><strong className="text-slate-800">{PAYMENT_METHODS.find((m) => m.value === formPaymentMethod)?.label || formPaymentMethod}</strong></div>
+            <div className="flex justify-between py-0.5"><span className="text-slate-500">Date</span><strong className="text-slate-800">{formatDate(formDate)}</strong></div>
           </div>
-          {cancelError && (<div className="status-error"><span>!</span><span>{cancelError}</span></div>)}
         </div>
       </Modal>
     </div>

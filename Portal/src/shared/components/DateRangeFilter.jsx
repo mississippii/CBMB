@@ -1,4 +1,4 @@
-import { Calendar } from 'lucide-react';
+import { Calendar, Filter } from 'lucide-react';
 
 // Local calendar date (yyyy-mm-dd) — avoids toISOString()'s UTC day-shift, so the
 // day always matches the user's wall clock.
@@ -13,24 +13,25 @@ export const nextDayLocalIso = (iso) => { const d = new Date(`${iso}T00:00:00`);
  */
 const DateRangeFilter = ({ from, to, setFrom, setTo, max = todayLocalIso() }) => (
   <div className="flex flex-wrap items-center gap-2">
-    <div className="inline-flex items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-3 py-1.5 shadow-sm">
-      <Calendar size={13} className="text-slate-400" />
+    <div className="flex max-w-full items-center gap-1.5 rounded-xl border border-slate-200 bg-white px-2.5 py-1.5 shadow-sm">
+      <Filter size={13} className="shrink-0 text-blue-500" />
+      <Calendar size={13} className="shrink-0 text-slate-400" />
       <input
         type="date"
         value={from}
         max={to}
         onChange={(e) => setFrom(e.target.value)}
-        className="bg-transparent text-xs font-bold text-slate-700 outline-none"
+        className="min-w-0 flex-1 bg-transparent text-xs font-bold text-slate-700 outline-none"
         aria-label="From date"
       />
-      <span className="text-slate-300">→</span>
+      <span className="shrink-0 text-slate-300">→</span>
       <input
         type="date"
         value={to}
         min={from}
         max={max}
         onChange={(e) => setTo(e.target.value)}
-        className="bg-transparent text-xs font-bold text-slate-700 outline-none"
+        className="min-w-0 flex-1 bg-transparent text-xs font-bold text-slate-700 outline-none"
         aria-label="To date"
       />
     </div>

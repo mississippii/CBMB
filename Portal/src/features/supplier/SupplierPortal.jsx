@@ -181,7 +181,7 @@ const SalesTransactionsTable = ({ sales, isLoading, error }) => {
                       <td className="px-4 py-3 font-semibold text-slate-700 tabular-nums">
                         {row.saleWeightKg != null ? `${formatQuantity(row.saleWeightKg)} kg` : '-'}
                       </td>
-                      <td className="px-4 py-3 font-semibold text-slate-700 tabular-nums">{formatMoney(row.unitPrice)}</td>
+                      <td className="px-4 py-3 font-semibold text-slate-700 tabular-nums">{formatMoney(row.unitPrice, { decimals: 2 })}</td>
                       <td className="px-4 py-3 font-bold text-slate-900 tabular-nums">{formatMoney(row.saleAmount)}</td>
                     </tr>
                   );
@@ -211,7 +211,7 @@ const WholesalerDetail = ({ link, shipments, supplierId, supplierHeaders, onBack
   return (
     <div className="space-y-5">
       {/* HEADER — mirrors the supplier profile header */}
-      <div className="supplier-profile-header" style={{ padding: '0.9rem 1.1rem' }}>
+      <div className="supplier-profile-header">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             <button type="button" onClick={onBack} className="back-arrow-btn" title="Back to wholesalers">
@@ -490,15 +490,15 @@ const SupplierPortal = () => {
                       <EmptyRow label="No wholesaler accounts yet." />
                     ) : (
                       <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-                        <table className="party-table w-full text-sm min-w-[760px]">
+                        <table className="party-table w-full min-w-[680px]">
                           <thead>
                             <tr>
-                              <th>Wholesaler</th>
-                              <th>Contact</th>
-                              <th className="text-right">Shipments</th>
-                              <th className="text-right">Crates Held</th>
-                              <th className="text-right">Net Position</th>
-                              <th aria-label="Open" />
+                              <th className="w-[28%]">Wholesaler</th>
+                              <th className="w-[20%]">Contact</th>
+                              <th className="w-[13%] text-right">Shipments</th>
+                              <th className="w-[13%] text-right">Crates Held</th>
+                              <th className="w-[20%] text-right">Net Position</th>
+                              <th className="w-[6%]" aria-label="Open" />
                             </tr>
                           </thead>
                           <tbody>

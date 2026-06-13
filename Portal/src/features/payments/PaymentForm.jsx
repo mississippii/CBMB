@@ -1,13 +1,13 @@
 import { useMemo, useState } from 'react';
 import {
-  CreditCard, User, UserCheck, DollarSign, FileText, Save, ArrowDownRight, ArrowUpRight, Wallet,
+  AlertTriangle, CreditCard, User, UserCheck, DollarSign, FileText, Save, ArrowDownRight, ArrowUpRight, Wallet,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { useData } from '../../data/DataContext';
 import { useToast } from '../../shared/components/Toast';
 import { postJson, apiPaths } from '../../services/apiClient';
 
-const fmt = (value) => `৳ ${Math.round(Number(value) || 0).toLocaleString()}`;
+const fmt = (value) => `৳ ${Math.ceil(Number(value) || 0).toLocaleString()}`;
 
 // Backend PaymentMethod enum (CASH / BANK / BKASH / NAGAD / OTHER). NONE is for crate-only
 // movements, so it isn't offered for a money payment.
@@ -51,6 +51,7 @@ const PaymentForm = ({ onClose }) => {
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const config = DIRECTIONS[direction];
   const isCustomer = config.party === 'customer';
@@ -71,7 +72,8 @@ const PaymentForm = ({ onClose }) => {
     setError('');
   };
 
-  const handleSubmit = async (event) => {
+  // Step 1 — validate, then ask for confirmation. Payments are final once saved.
+  const handleSubmit = (event) => {
     event.preventDefault();
     setError('');
 
@@ -84,6 +86,12 @@ const PaymentForm = ({ onClose }) => {
       return;
     }
 
+    setShowConfirm(true);
+  };
+
+  // Step 2 — actually save after the user confirms the warning.
+  const handleConfirmSave = async () => {
+    const amt = Number(amount);
     setIsSaving(true);
     try {
       const body = isCustomer
@@ -110,6 +118,7 @@ const PaymentForm = ({ onClose }) => {
       ]);
       onClose?.();
     } catch (err) {
+      setShowConfirm(false);
       setError(err instanceof Error ? err.message : 'Failed to record payment.');
     } finally {
       setIsSaving(false);
@@ -232,12 +241,43 @@ const PaymentForm = ({ onClose }) => {
         </div>
 
         <div className="modal-footer">
-          <button type="button" onClick={() => onClose?.()} className="btn-secondary" disabled={isSaving}>Cancel</button>
           <button type="submit" className="btn-primary flex items-center gap-2" disabled={isSaving}>
             <Save size={15} /> {isSaving ? 'Saving…' : 'Record Payment'}
           </button>
         </div>
       </form>
+
+      {showConfirm && (
+        <div className="modal-overlay" style={{ zIndex: 60 }}>
+          <div className="modal-content" style={{ maxWidth: '26rem' }}>
+            <div className="modal-header">
+              <div className="flex items-center gap-2.5">
+                <div className="modal-icon-circle bg-amber-100 text-amber-700"><AlertTriangle size={18} /></div>
+                <div><h2>Confirm payment</h2></div>
+              </div>
+            </div>
+            <div className="px-1 py-1 space-y-3">
+              <p className="text-sm text-slate-600">
+                A recorded payment <span className="font-semibold text-slate-800">cannot be undone</span>. Please review before saving.
+              </p>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm space-y-1.5">
+                <div className="flex justify-between"><span className="text-slate-500">{config.label}</span><span className="font-semibold text-slate-800">{selectedParty?.name || '—'}</span></div>
+                <div className="flex justify-between"><span className="text-slate-500">Amount</span><span className="font-semibold text-slate-900">{fmt(amount)} · {PAYMENT_METHODS.find((m) => m.value === method)?.label || method}</span></div>
+                <div className="flex justify-between border-t border-slate-200 pt-1.5 mt-1.5">
+                  <span className="font-semibold text-slate-600">{dueAfter < 0 ? 'Advance after' : 'Due after'}</span>
+                  <span className={`font-bold ${dueAfter < 0 ? 'text-amber-700' : 'text-rose-600'}`}>{fmt(Math.abs(dueAfter))}</span>
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button type="button" onClick={() => setShowConfirm(false)} className="btn-secondary" disabled={isSaving}>Back</button>
+              <button type="button" onClick={handleConfirmSave} className="btn-primary flex items-center gap-2" disabled={isSaving}>
+                <Save size={15} /> {isSaving ? 'Saving…' : 'Confirm & Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

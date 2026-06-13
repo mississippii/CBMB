@@ -42,22 +42,29 @@ public class SupplierDueService {
     @Transactional(readOnly = true)
     public BigDecimal netDue(Long wholesalerId, WholesalerSupplier account) {
         BigDecimal opening = zero(account.getOpeningDue());
-        BigDecimal totalSold = zero(saleItemRepository.sumLineTotalBySupplier(wholesalerId, account.getId()));
-        BigDecimal commission = BigDecimal.ZERO;
+        // Sum each shipment's net payable, computed IDENTICALLY to
+        // SupplierDeliveryService.toDeliveryResponse (commission ceiled per shipment, then
+        // sold − commission − expense). This way the account balance always equals the sum
+        // of the per-shipment net payables shown in the supplier profile, with no rounding
+        // drift: positive lots add to the supplier payable, negative lots (where the
+        // wholesaler is out of pocket) add to the advance held by the supplier. Keep the two
+        // formulas in sync.
+        BigDecimal shipmentsNet = BigDecimal.ZERO;
         for (SupplierDelivery lot : supplierDeliveryRepository
                 .findByWholesaler_IdAndWholesalerSupplier_IdOrderByDeliveryDateDesc(wholesalerId, account.getId())) {
-            BigDecimal rate = lot.getCommissionRate();
-            if (rate == null || rate.signum() == 0) {
-                continue;
-            }
             BigDecimal sold = zero(saleItemRepository.sumLineTotalByDelivery(lot.getId()));
-            commission = commission.add(sold.multiply(rate).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP));
+            BigDecimal rate = lot.getCommissionRate();
+            BigDecimal commission = (rate == null || rate.signum() == 0) ? BigDecimal.ZERO
+                    : sold.multiply(rate).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP)
+                        .setScale(0, RoundingMode.CEILING);
+            BigDecimal expense = zero(supplierExpenseRepository.sumAmountByDelivery(lot.getId()));
+            shipmentsNet = shipmentsNet.add(sold.subtract(commission).subtract(expense));
         }
-        BigDecimal expense = zero(supplierExpenseRepository.sumAmountBySupplier(wholesalerId, account.getId()));
         BigDecimal payments = zero(supplierSettlementRepository.sumAmountBySupplierAndType(
                 wholesalerId, account.getId(), SettlementType.PRODUCT_PAYMENT));
-        return opening.add(totalSold).subtract(commission).subtract(expense).subtract(payments)
-                .setScale(2, RoundingMode.HALF_UP);
+        // UP = round magnitude away from zero, so a fractional advance (negative balance)
+        // rounds UP in size rather than shrinking toward zero (the bug this fixes).
+        return opening.add(shipmentsNet).subtract(payments).setScale(0, RoundingMode.UP);
     }
 
     private static BigDecimal zero(BigDecimal v) {

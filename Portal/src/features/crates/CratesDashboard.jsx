@@ -187,7 +187,7 @@ const BoxDashboard = () => {
     setIsSavingPurchase(true); setPurchaseError('');
     try {
       await addCrates(purchaseForm.crateType, qty, price);
-      showToast(`Added ${qty} ${purchaseForm.crateType} crates @ ৳${price.toLocaleString()}`, 'success');
+      showToast(`Added ${qty} ${purchaseForm.crateType} crates @ ৳${Math.ceil(price).toLocaleString()}`, 'success');
       setPurchaseForm(EMPTY_PURCHASE);
       setShowPurchaseModal(false);
     } catch (err) {
@@ -261,7 +261,7 @@ const BoxDashboard = () => {
         note: sellForm.note,
       });
       const buyerLabel = sellForm.buyerKind === 'customer' ? 'on account' : 'cash';
-      showToast(`Sold ${qty} ${sellForm.crateType} crates @ ৳${price.toLocaleString()} (${buyerLabel})`, 'success');
+      showToast(`Sold ${qty} ${sellForm.crateType} crates @ ৳${Math.ceil(price).toLocaleString()} (${buyerLabel})`, 'success');
       setSellForm(EMPTY_SELL);
       setShowSellModal(false);
     } catch (err) {
@@ -1073,12 +1073,12 @@ const BoxDashboard = () => {
                   const profit = gross - cost;
                   return (
                     <div className="rounded-md border border-slate-200 bg-slate-50 px-3 py-2 text-xs space-y-1">
-                      <div className="flex justify-between"><span className="text-slate-500">Sale total (customer owes)</span><strong>৳ {gross.toLocaleString()}</strong></div>
-                      <div className="flex justify-between"><span className="text-slate-500">Cost basis (avg)</span><span>৳ {cost.toLocaleString()}</span></div>
+                      <div className="flex justify-between"><span className="text-slate-500">Sale total (customer owes)</span><strong>৳ {Math.ceil(gross).toLocaleString()}</strong></div>
+                      <div className="flex justify-between"><span className="text-slate-500">Cost basis (avg)</span><span>৳ {Math.ceil(cost).toLocaleString()}</span></div>
                       <div className="flex justify-between border-t border-slate-200 pt-1">
                         <span className="text-slate-700 font-semibold">P&amp;L impact</span>
                         <strong className={profit >= 0 ? 'text-emerald-700' : 'text-rose-700'}>
-                          {profit >= 0 ? '+' : ''}৳ {profit.toLocaleString()}
+                          {profit >= 0 ? '+' : ''}৳ {Math.ceil(profit).toLocaleString()}
                         </strong>
                       </div>
                     </div>

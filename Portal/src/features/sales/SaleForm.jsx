@@ -8,7 +8,8 @@ import { useToast } from '../../shared/components/Toast';
 import SearchableSelect from '../../shared/components/SearchableSelect';
 
 const PAYMENT_METHODS = ['CASH', 'BANK', 'BKASH', 'NAGAD', 'OTHER'];
-const fmt = (v) => `৳ ${(Number(v) || 0).toLocaleString()}`;
+const cashRound = (v) => Math.ceil(Number(v) || 0);
+const fmt = (v) => `৳ ${cashRound(v).toLocaleString()}`;
 const titleCase = (s) => {
   const str = String(s || '').trim();
   return str ? str.charAt(0).toUpperCase() + str.slice(1).toLowerCase() : str;
@@ -112,9 +113,10 @@ const SaleForm = ({ onClose }) => {
   const saleWeightKg = Number(form.saleWeightKg) || 0;
   const unitPrice = Number(form.unitPrice) || 0;
   const pricedByWeight = saleWeightKg > 0;
-  const grossAmount = Math.max(0, pricedByWeight ? saleWeightKg * unitPrice : quantity * unitPrice);
-  const discount = showDiscount ? Math.min(Math.max(0, Number(form.discount) || 0), grossAmount) : 0;
-  const netSale = Math.max(0, grossAmount - discount);
+  const preciseGrossAmount = Math.max(0, pricedByWeight ? saleWeightKg * unitPrice : quantity * unitPrice);
+  const grossAmount = cashRound(preciseGrossAmount);
+  const discount = showDiscount ? Math.min(cashRound(Math.max(0, Number(form.discount) || 0)), grossAmount) : 0;
+  const netSale = cashRound(Math.max(0, grossAmount - discount));
   const isOneTime = form.customerId === 'ONE_TIME';
   const hasCustomer = Boolean(form.customerId);
   const paymentReceived = isOneTime
@@ -122,16 +124,16 @@ const SaleForm = ({ onClose }) => {
     : form.paymentType === 'FULL_PAY'
       ? netSale
       : form.paymentType === 'PARTIAL_PAY'
-        ? Number(form.paymentAmount) || 0
+        ? cashRound(form.paymentAmount)
         : 0;
-  const dueAfter = Math.max(0, netSale - paymentReceived);
+  const dueAfter = cashRound(Math.max(0, netSale - paymentReceived));
   const overStock = selectedProduct && quantity > selectedProduct.quantity;
 
   // Crate add-on derived figures
   const validCrateLines = crateLines.filter((l) => l.crateType && Number(l.quantity) > 0);
   const crateBorrowQty = validCrateLines.reduce((s, l) => s + (Number(l.quantity) || 0), 0);
   const crateSellTotal = isOneTime
-    ? validCrateLines.reduce((s, l) => s + (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0), 0)
+    ? cashRound(validCrateLines.reduce((s, l) => s + (Number(l.quantity) || 0) * (Number(l.unitPrice) || 0), 0))
     : 0;
 
   const handleSupplierChange = (supplierId) => {
@@ -489,7 +491,6 @@ const SaleForm = ({ onClose }) => {
         </div>
 
         <div className="modal-footer">
-          <button type="button" onClick={() => onClose?.()} className="btn-secondary" disabled={isSaving}>Cancel</button>
           <button type="submit" className="btn-primary flex items-center gap-2" disabled={isSaving || overStock}>
             <Save size={15} /> Record Sale
           </button>

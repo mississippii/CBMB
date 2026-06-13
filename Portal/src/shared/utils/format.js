@@ -5,10 +5,7 @@
 
 const CURRENCY_SYMBOL = '৳';
 
-export const roundMoney = (value) => {
-  const n = Number(value) || 0;
-  return Math.round(n * 100) / 100;
-};
+export const roundMoney = (value) => Math.ceil(Number(value) || 0);
 
 /**
  * Money formatter.
@@ -24,8 +21,9 @@ export const roundMoney = (value) => {
 export const formatMoney = (value, { decimals = 0 } = {}) => {
   const num = Number(value);
   if (!Number.isFinite(num)) return `${CURRENCY_SYMBOL} 0`;
-  const sign = num < 0 ? '− ' : '';
-  const abs = Math.abs(num);
+  const rounded = decimals === 0 ? Math.ceil(num) : num;
+  const sign = rounded < 0 ? '− ' : '';
+  const abs = Math.abs(rounded);
   const formatted = abs.toLocaleString(undefined, {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,

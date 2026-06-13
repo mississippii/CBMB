@@ -10,7 +10,7 @@ import { queryKeys } from '../../services/queryKeys';
 import { DateRangeFilter, todayLocalIso, nextDayLocalIso } from '../../shared/components';
 import { formatDate } from '../../shared/utils/format';
 
-const formatMoney = (value) => '৳ ' + (Number(value) || 0).toLocaleString();
+const formatMoney = (value) => '৳ ' + Math.ceil(Number(value) || 0).toLocaleString();
 const formatRate = (value) => (value == null ? '—' : `${Number(value).toFixed(2)}%`);
 const formatCount = (value) => (Number(value) || 0).toLocaleString();
 

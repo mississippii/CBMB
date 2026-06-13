@@ -341,7 +341,7 @@ public class CrateService {
     }
 
     private static BigDecimal money(BigDecimal value) {
-        return (value == null ? BigDecimal.ZERO : value).setScale(2, java.math.RoundingMode.HALF_UP);
+        return (value == null ? BigDecimal.ZERO : value).setScale(0, java.math.RoundingMode.CEILING);
     }
 
     private BoxLedger saveLossLedger(

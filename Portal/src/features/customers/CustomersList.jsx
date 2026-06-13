@@ -6,6 +6,7 @@ import { useData } from '../../data/DataContext';
 import { useToast } from '../../shared/components/Toast';
 import { TablePager, usePagination } from '../../shared/components';
 import { formatMoney } from '../../shared/utils/format';
+import { isValidPhone, numberInRange, PHONE_HINT } from '../../shared/utils/validation';
 import CustomerDetail from './CustomerDetail';
 
 const EMPTY_FORM = {
@@ -48,9 +49,17 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
 
   const handleAddCustomer = async () => {
     const name = formData.name.trim();
-    const phone = formData.phone.trim();
+    const phone = normalizePhone(formData.phone);
     if (!name || !phone) {
       setFormError('Customer name and phone are required.');
+      return;
+    }
+    if (!isValidPhone(phone)) {
+      setFormError(PHONE_HINT);
+      return;
+    }
+    if (formData.openingDue !== '' && !numberInRange(formData.openingDue, 0)) {
+      setFormError('Opening due must be zero or a positive amount.');
       return;
     }
     setIsSaving(true);
@@ -97,9 +106,12 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
       return true;
     })
     .sort((a, b) => {
+      // The table title is the owner (person) name, so name sorting follows it.
+      const titleA = a.ownerName || a.owner || a.name;
+      const titleB = b.ownerName || b.owner || b.name;
       switch (sortBy) {
-        case 'name-asc':       return a.name.localeCompare(b.name);
-        case 'name-desc':      return b.name.localeCompare(a.name);
+        case 'name-asc':       return titleA.localeCompare(titleB);
+        case 'name-desc':      return titleB.localeCompare(titleA);
         case 'due-desc':       return Number(b.amountDue || 0) - Number(a.amountDue || 0);
         case 'due-asc':        return Number(a.amountDue || 0) - Number(b.amountDue || 0);
         case 'crates-desc':    return Number(b.totalCratesHolding || 0) - Number(a.totalCratesHolding || 0);
@@ -259,12 +271,12 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="supplier-card-avatar">
-                        {c.name?.charAt(0).toUpperCase() || 'C'}
+                        {(c.ownerName || c.owner || c.name)?.charAt(0).toUpperCase() || 'C'}
                       </div>
                       <div className="min-w-0">
-                        <p className="font-semibold text-slate-900 truncate">{c.name}</p>
-                        {(c.ownerName || c.owner) && (
-                          <p className="text-xs text-slate-500 truncate">{c.ownerName || c.owner}</p>
+                        <p className="font-semibold text-slate-900 truncate">{c.ownerName || c.owner || c.name}</p>
+                        {c.name && (
+                          <p className="text-xs text-blue-700 truncate">{c.name}</p>
                         )}
                         <p className="text-xs text-slate-500 truncate">{c.phone}</p>
                       </div>
@@ -273,7 +285,7 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
                   <div className="mt-3 grid grid-cols-2 gap-2 text-center text-xs">
                     <div className="rounded-lg bg-red-50 px-2 py-2">
                       <p className="text-slate-500">Due</p>
-                      <p className="font-bold text-red-600">৳{Number(c.amountDue || 0).toLocaleString()}</p>
+                      <p className="font-bold text-red-600">৳{Math.ceil(Number(c.amountDue || 0)).toLocaleString()}</p>
                     </div>
                     <div className="rounded-lg bg-slate-50 px-2 py-2">
                       <p className="text-slate-500">Crates</p>
@@ -286,15 +298,15 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
 
             {/* Desktop table view */}
             <div className="hidden lg:block overflow-x-auto rounded-lg border border-slate-200 bg-white">
-              <table className="party-table w-full text-sm min-w-[880px]">
+              <table className="party-table w-full min-w-[640px]">
                 <thead>
                   <tr>
-                    <th>Customer</th>
-                    <th>Owner Name</th>
-                    <th>Contact</th>
-                    <th>Location</th>
-                    <th className="text-right">Amount Due</th>
-                    <th className="text-right">Crate Due</th>
+                    <th className="w-[24%]">Customer</th>
+                    <th className="w-[17%]">Business Name</th>
+                    <th className="w-[15%]">Contact</th>
+                    <th className="w-[17%]">Location</th>
+                    <th className="w-[15%] text-right">Amount Due</th>
+                    <th className="w-[12%] text-right">Crate Due</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -306,14 +318,14 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
                     >
                       <td>
                         <div className="party-cell-main">
-                          <span className="party-avatar">{c.name?.charAt(0).toUpperCase() || 'C'}</span>
+                          <span className="party-avatar">{(c.ownerName || c.owner || c.name)?.charAt(0).toUpperCase() || 'C'}</span>
                           <div className="flex flex-wrap items-center gap-2 min-w-0">
-                            <span className="party-name">{c.name}</span>
+                            <span className="party-name">{c.ownerName || c.owner || c.name}</span>
                             {c.status === 'DISABLED' && <span className="badge badge-rose">Disabled</span>}
                           </div>
                         </div>
                       </td>
-                      <td className="font-semibold text-slate-700">{c.ownerName || c.owner || '—'}</td>
+                      <td className="font-semibold text-slate-700">{c.name || '—'}</td>
                       <td>
                         <div className="party-contact">
                           <span>{c.phone || '—'}</span>

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { Fragment, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   Users, Plus, Search, KeyRound,
   Building2, User, Mail, Phone, MapPin, Lock, Database,
@@ -9,6 +9,7 @@ import Navbar from '../../shared/components/Navbar';
 import { TablePager } from '../../shared/components';
 import { apiPaths, postJson } from '../../services/apiClient';
 import { formatNumber, formatDate } from '../../shared/utils/format';
+import { isValidEmail, isValidPhone, normalizePhone, EMAIL_HINT, PHONE_HINT } from '../../shared/utils/validation';
 
 const emptyForm = {
   name: '', email: '', password: '', businessName: '', phone: '', address: '',
@@ -101,6 +102,7 @@ const AdminDashboard = () => {
 
   // Product catalog
   const [showProductModal, setShowProductModal] = useState(false);
+  const [showCatalogModal, setShowCatalogModal] = useState(false);
   const [productForm, setProductForm] = useState({ name: '', categories: [{ name: '' }] });
   const [productError, setProductError] = useState('');
   const [productSaving, setProductSaving] = useState(false);
@@ -297,9 +299,25 @@ const AdminDashboard = () => {
 
   const handleSubmit = async (e) => {
     e.preventDefault();
+    if (!formData.name.trim() || !formData.businessName.trim()) {
+      setFormError('Owner name and business name are required.');
+      return;
+    }
+    if (!isValidEmail(formData.email)) {
+      setFormError(EMAIL_HINT);
+      return;
+    }
+    if (!isValidPhone(formData.phone)) {
+      setFormError(PHONE_HINT);
+      return;
+    }
+    if ((formData.password || '').length < 8) {
+      setFormError('Password must be at least 8 characters.');
+      return;
+    }
     setFormError(''); setIsSaving(true);
     try {
-      await postJson(apiPaths.adminWholesalersCreate, formData);
+      await postJson(apiPaths.adminWholesalersCreate, { ...formData, phone: normalizePhone(formData.phone) });
       showToast('Wholesaler created successfully', 'success');
       closeForm();
       await fetchPage(0, pageSize, phoneSearch);
@@ -348,9 +366,13 @@ const AdminDashboard = () => {
       setEditError('Name, business name and phone are required.');
       return;
     }
+    if (!isValidPhone(editForm.phone)) {
+      setEditError(PHONE_HINT);
+      return;
+    }
     setIsEditSaving(true); setEditError('');
     try {
-      await postJson(apiPaths.adminWholesalerUpdate(editTarget.id), editForm);
+      await postJson(apiPaths.adminWholesalerUpdate(editTarget.id), { ...editForm, phone: normalizePhone(editForm.phone) });
       showToast('Updated {name}'.replace('{name}', editForm.businessName), 'success');
       closeEdit();
       fetchPage(page, pageSize, phoneSearch);
@@ -395,16 +417,52 @@ const AdminDashboard = () => {
           </aside>
 
           {/* RIGHT: active module content */}
-          <main className="workspace-content space-y-4">
-        {/* Admin Support Tab */}
+          <section className="workspace-content admin-dashboard-content space-y-4">
+            {/* Admin Support Tab */}
         {activeTab === 'support' && (
-          <div className="space-y-4">
-            {/* Crate Types — only a handful; chips sit inline on the header row */}
-            <div className="support-panel">
-              <div className="support-panel-header">
-                <div className="support-panel-icon support-panel-icon-teal"><Boxes size={20} /></div>
-                <h3 className="support-panel-title shrink-0">Crate Types</h3>
-                <div className="flex flex-1 flex-wrap items-center gap-2">
+          <div className="profile-workspace admin-two-column">
+            <div className="profile-main-stack">
+            {/* Product Catalog */}
+            <div className="support-panel admin-catalog-summary-panel">
+              <div className="support-panel-header admin-catalog-label-row">
+                <div className="support-panel-icon support-panel-icon-emerald"><Database size={20} /></div>
+                <h3 className="support-panel-title">Product Catalog</h3>
+                <div className="admin-catalog-compact-stats">
+                  <span><strong>{formatNumber(catalog.length)}</strong> Products</span>
+                  <span><strong>{formatNumber(catalog.reduce((sum, p) => sum + (p.categories || []).length, 0))}</strong> Varieties</span>
+                  <span><strong>{formatNumber(catalog.reduce((sum, p) => sum + (p.categories || []).filter((c) => c.usesLots).length, 0))}</strong> Lot varieties</span>
+                </div>
+                <div className="admin-catalog-label-actions">
+                  <button
+                    type="button"
+                    onClick={() => setShowCatalogModal(true)}
+                    className="btn-primary inline-flex items-center gap-2"
+                  >
+                    <Database size={15} /> View Catalog
+                  </button>
+                  <button onClick={openProductModal} className="btn-secondary inline-flex items-center gap-2">
+                    <Plus size={15} /> Add Product
+                  </button>
+                </div>
+              </div>
+            </div>
+            </div>
+
+            <aside className="profile-side-stack">
+              <div className="supplier-panel">
+                <h3>Catalog Actions</h3>
+                <div className="mt-3 space-y-2">
+                  <button
+                    onClick={() => { setCrateTypeForm({ name: '' }); setCrateTypeError(''); setShowCrateTypeModal(true); }}
+                    className="btn-primary flex w-full items-center justify-center gap-2"
+                  >
+                    <Plus size={15} /> Add Crate Type
+                  </button>
+                </div>
+              </div>
+              <div className="supplier-panel">
+                <h3 className="flex items-center gap-2"><Boxes size={17} className="text-teal-600" /> Crate Types</h3>
+                <div className="mt-3 space-y-2">
                   {crateTypesLoading ? (
                     <span className="text-sm text-slate-500">Loading…</span>
                   ) : crateTypes.length === 0 ? (
@@ -412,7 +470,7 @@ const AdminDashboard = () => {
                   ) : (
                     crateTypes.map((ct) => (
                       <div key={ct.id} className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-3 py-1.5">
-                        <span className="font-semibold text-slate-800">{ct.name}</span>
+                        <span className="min-w-0 flex-1 truncate font-semibold text-slate-800">{ct.name}</span>
                         <span className={`badge ${ct.status === 'ACTIVE' ? 'badge-emerald' : 'badge-rose'}`}>
                           {ct.status === 'ACTIVE' ? 'Active' : 'Disabled'}
                         </span>
@@ -428,229 +486,31 @@ const AdminDashboard = () => {
                     ))
                   )}
                 </div>
-                <button
-                  onClick={() => { setCrateTypeForm({ name: '' }); setCrateTypeError(''); setShowCrateTypeModal(true); }}
-                  className="btn-primary flex items-center gap-2 shrink-0"
-                >
-                  <Plus size={15} /> Add Crate Type
-                </button>
               </div>
-            </div>
+            </aside>
 
-            {/* Product Catalog — search sits inline in the header */}
-            <div className="support-panel">
-              <div className="support-panel-header">
-                <div className="support-panel-icon support-panel-icon-emerald"><Database size={20} /></div>
-                <div className="min-w-0 flex-1">
-                  <h3 className="support-panel-title">{'Product Catalog'}</h3>
-                </div>
-                {!catalogLoading && catalog.length > 0 && (
-                  <div className="support-inline-search shrink-0">
-                    <div className="relative">
-                      <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                      <input
-                        type="text"
-                        value={catalogSearch}
-                        onChange={(e) => { setCatalogSearch(e.target.value); setCatalogPage(0); }}
-                        placeholder="Search products or varieties…"
-                        className="input-field !pl-8 !py-2 text-sm"
-                      />
-                    </div>
-                  </div>
-                )}
-                <button onClick={openProductModal} className="btn-primary flex items-center gap-2 shrink-0">
-                  <Plus size={15} /> {'Add Product'}
-                </button>
-              </div>
 
-              {catalogLoading ? (
-                <p className="mt-3 text-sm text-slate-500">Loading catalog…</p>
-              ) : catalog.length === 0 ? (
-                <p className="mt-3 text-sm text-slate-500">No products yet.</p>
-              ) : filteredCatalog.length === 0 ? (
-                <p className="mt-3 text-sm text-slate-500">No products match &ldquo;{catalogSearch.trim()}&rdquo;.</p>
-              ) : (
-                <>
-                  <div className="mt-3 space-y-2">
-                    {pagedCatalog.map((product) => {
-                      const isOpen = !!expanded[product.id];
-                      const varieties = product.categories || [];
-                      return (
-                        <div key={product.id} className="rounded-xl border border-slate-200 bg-white">
-                          <div className="flex items-center justify-between gap-2 p-3">
-                            <button
-                              type="button"
-                              onClick={() => setExpanded((e) => ({ ...e, [product.id]: !e[product.id] }))}
-                              className="flex flex-1 items-center gap-2 text-left min-w-0"
-                            >
-                              {isOpen ? <ChevronDown size={14} className="text-slate-500" /> : <ChevronRight size={14} className="text-slate-500" />}
-                              <span className="font-bold text-slate-900 truncate">{product.name}</span>
-                              <span className="badge badge-teal">{varieties.length} variet{varieties.length === 1 ? 'y' : 'ies'}</span>
-                            </button>
-                            <button
-                              type="button"
-                              onClick={() => setCatEditor({ mode: 'add', productId: product.id, value: '', usesLots: false })}
-                              className="btn-compact"
-                              title="Add variety"
-                            >
-                              <FolderPlus size={12} /> Add variety
-                            </button>
-                          </div>
-                          {isOpen && varieties.length > 0 && (
-                            <div className="border-t border-slate-100 p-3 pt-2">
-                              <ul className="space-y-1">
-                                {varieties.map((v) => (
-                                  <li key={v.id} className="group flex items-center gap-2 py-0.5">
-                                    <Tag size={11} className="text-slate-400 shrink-0" />
-                                    <span className="text-sm text-slate-800 truncate">{v.name}</span>
-                                    {v.usesLots && <span className="badge badge-amber">uses Lot1..200</span>}
-                                    <button
-                                      type="button"
-                                      onClick={() => setCatEditor({ mode: 'rename', productId: product.id, categoryId: v.id, value: v.name, usesLots: v.usesLots })}
-                                      className="icon-btn !w-7 !h-7 ml-auto opacity-0 transition group-hover:opacity-100"
-                                      title="Rename / toggle lots"
-                                    >
-                                      <Pencil size={12} />
-                                    </button>
-                                  </li>
-                                ))}
-                              </ul>
-                            </div>
-                          )}
-                        </div>
-                      );
-                    })}
-                  </div>
-
-                  <div className="mt-3 flex items-center justify-between">
-                    <span className="text-xs font-medium text-slate-500">
-                      {filteredCatalog.length} of {catalog.length}
-                    </span>
-                    {totalCatalogPages > 1 && (
-                      <div className="flex items-center gap-1">
-                        <button
-                          type="button"
-                          onClick={() => setCatalogPage(Math.max(0, safeCatalogPage - 1))}
-                          disabled={safeCatalogPage === 0}
-                          className="page-btn"
-                          aria-label="Previous page"
-                        >
-                          <ChevronLeft size={14} />
-                        </button>
-                        <span className="px-2 text-xs font-semibold text-slate-700">
-                          {formatNumber(safeCatalogPage + 1)} / {formatNumber(totalCatalogPages)}
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setCatalogPage(Math.min(totalCatalogPages - 1, safeCatalogPage + 1))}
-                          disabled={safeCatalogPage >= totalCatalogPages - 1}
-                          className="page-btn"
-                          aria-label="Next page"
-                        >
-                          <ChevronRight size={14} />
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                </>
-              )}
-            </div>
-
-            {/* Category add/rename modal */}
-            {catEditor && (
-              <div className="modal-overlay">
-                <div className="modal-content" style={{ maxWidth: '24rem' }}>
-                  <div className="modal-header">
-                    <div className="flex items-center gap-2.5">
-                      <div className="modal-icon-circle bg-gradient-to-br from-blue-500 to-indigo-600 text-white">
-                        {catEditor.mode === 'add' ? <FolderPlus size={18} /> : <Pencil size={18} />}
-                      </div>
-                      <div>
-                        <h2>{catEditor.mode === 'add' ? 'Add category' : 'Rename category'}</h2>
-                        <p className="text-xs text-slate-500 mt-0.5">
-                          {catEditor.mode === 'add' ? 'New variety under this product' : 'Rename or toggle lot usage'}
-                        </p>
-                      </div>
-                    </div>
-                    <button onClick={() => setCatEditor(null)} className="modal-close-btn">✕</button>
-                  </div>
-                  <div className="modal-body">
-                    <div className="form-field">
-                      <label className="form-label"><Tag size={13} /> Variety name <span className="text-red-500">*</span></label>
-                      <input
-                        type="text"
-                        value={catEditor.value}
-                        onChange={(e) => setCatEditor((c) => ({ ...c, value: e.target.value }))}
-                        className="input-field"
-                        placeholder="e.g. Amrapali"
-                        autoFocus
-                      />
-                    </div>
-                    <label className="mt-3 flex items-start gap-2 cursor-pointer">
-                      <input
-                        type="checkbox"
-                        checked={!!catEditor.usesLots}
-                        onChange={(e) => setCatEditor((c) => ({ ...c, usesLots: e.target.checked }))}
-                        className="mt-0.5"
-                      />
-                      <span>
-                        <span className="block text-sm font-semibold text-slate-800">This variety uses Lot1..Lot200</span>
-                        <span className="block text-xs text-slate-500">Wholesalers will pick one of the 200 lots when receiving a shipment of this variety.</span>
-                      </span>
-                    </label>
-                  </div>
-                  <div className="modal-footer">
-                    <button onClick={() => setCatEditor(null)} className="btn-secondary" disabled={catSaving}>Cancel</button>
-                    <button onClick={handleCategorySave} className="btn-primary flex items-center gap-2" disabled={catSaving}>
-                      {catSaving ? '…' : (catEditor.mode === 'add' ? 'Add' : 'Save')}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
           </div>
         )}
 
         {/* Wholesalers Tab */}
         {activeTab === 'list' && (
-        <div className="data-card">
-          <div className="data-card-header">
-            <div className="flex items-center gap-2">
+        <div className="profile-workspace admin-two-column">
+          <div className="profile-main-stack">
+            <div className="data-card admin-table-card">
+          <div className="data-card-header admin-data-header">
+            <div className="flex min-w-0 items-center gap-2">
               <span className="flex h-8 w-8 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-sm">
                 <Users size={15} />
               </span>
-              <h3 className="data-card-title">{'Wholesalers'}</h3>
+              <h3 className="data-card-title truncate">{'Wholesalers'}</h3>
               <span className="badge badge-teal">{formatNumber(total)}</span>
-            </div>
-            <div className="flex w-full flex-wrap items-center gap-2 sm:w-auto">
-              <div className="relative w-full sm:w-[260px]">
-                <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-                <input
-                  type="tel"
-                  value={phoneSearch}
-                  onChange={(e) => setPhoneSearch(e.target.value)}
-                  className="input-field !pl-9 !pr-8 !py-2 text-sm"
-                  placeholder={'Search by phone number…'}
-                />
-                {phoneSearch && (
-                  <button
-                    onClick={() => setPhoneSearch('')}
-                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-slate-100"
-                    aria-label="Clear"
-                  >
-                    <X size={13} className="text-slate-400" />
-                  </button>
-                )}
-              </div>
-              <button onClick={openForm} className="btn-primary flex shrink-0 items-center gap-2 whitespace-nowrap">
-                <Plus size={16} /> {'Add Wholesaler'}
-              </button>
             </div>
           </div>
 
           {/* Table */}
-          <div className="data-table-wrap">
-            <table className="data-table">
+          <div className="data-table-wrap admin-table-wrap">
+            <table className="data-table admin-wholesaler-table">
               <thead>
                 <tr>
                   <th className="w-[28%]">{'Business'}</th>
@@ -659,7 +519,7 @@ const AdminDashboard = () => {
                   <th className="w-[18%]">{'Email'}</th>
                   <th className="w-[8%]">{'Status'}</th>
                   <th className="w-[10%]">{'Created'}</th>
-                  <th className="w-[4%] text-right pr-3">{'Action'}</th>
+                  <th className="w-[4%] text-right pr-3" aria-label="Actions" />
                 </tr>
               </thead>
               <tbody>
@@ -752,9 +612,48 @@ const AdminDashboard = () => {
               pageSizeOptions={[10, 20, 50, 100]}
             />
           </div>
+            </div>
+          </div>
+
+          <aside className="profile-side-stack">
+          <div className="supplier-panel">
+            <h3>Wholesaler Actions</h3>
+            <button onClick={openForm} className="btn-primary mt-3 flex w-full items-center justify-center gap-2">
+              <Plus size={16} /> {'Add Wholesaler'}
+            </button>
+          </div>
+          <div className="supplier-panel">
+            <h3 className="flex items-center gap-2"><Search size={16} className="text-blue-600" /> Search</h3>
+            <div className="relative mt-3">
+              <Phone size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input
+                type="tel"
+                value={phoneSearch}
+                onChange={(e) => setPhoneSearch(e.target.value)}
+                className="input-field !pl-9 !pr-8 !py-2 text-sm"
+                placeholder={'Search by phone number…'}
+              />
+              {phoneSearch && (
+                <button
+                  onClick={() => setPhoneSearch('')}
+                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1 rounded hover:bg-slate-100"
+                  aria-label="Clear"
+                >
+                  <X size={13} className="text-slate-400" />
+                </button>
+              )}
+            </div>
+          </div>
+          <div className="supplier-panel">
+            <h3>Summary</h3>
+            <div className="mt-3 space-y-2">
+              <div className="box-row total"><span>Total wholesalers</span><strong>{formatNumber(total)}</strong></div>
+            </div>
+          </div>
+          </aside>
         </div>
         )}
-          </main>
+          </section>
         </div>
       </main>
 
@@ -929,6 +828,246 @@ const AdminDashboard = () => {
               </div>
             </form>
           </div>
+        </div>
+      )}
+
+      {/* PRODUCT CATALOG MODAL */}
+      {showCatalogModal && (
+        <div className="modal-overlay" onClick={(e) => e.target === e.currentTarget && setShowCatalogModal(false)}>
+          <div className="modal-content admin-catalog-modal">
+            <div className="modal-header">
+              <div className="flex items-center gap-2.5">
+                <div className="modal-icon-circle bg-gradient-to-br from-emerald-500 to-teal-600 text-white">
+                  <Database size={18} />
+                </div>
+                <div>
+                  <h2>Product Catalog</h2>
+                  <p className="text-xs text-slate-500 mt-0.5">Global product and variety setup</p>
+                </div>
+              </div>
+              <button onClick={() => setShowCatalogModal(false)} className="modal-close-btn">✕</button>
+            </div>
+
+            <div className="modal-body">
+              <div className="admin-catalog-modal-toolbar">
+                <div className="relative min-w-0 flex-1">
+                  <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+                  <input
+                    type="text"
+                    value={catalogSearch}
+                    onChange={(e) => { setCatalogSearch(e.target.value); setCatalogPage(0); }}
+                    placeholder="Search products or varieties…"
+                    className="input-field !pl-8 !py-2 text-sm"
+                  />
+                </div>
+                <button onClick={openProductModal} className="btn-primary inline-flex shrink-0 items-center gap-2">
+                  <Plus size={15} /> Add Product
+                </button>
+              </div>
+
+              {catalogLoading ? (
+                <p className="mt-3 text-sm text-slate-500">Loading catalog…</p>
+              ) : catalog.length === 0 ? (
+                <p className="mt-3 text-sm text-slate-500">No products yet.</p>
+              ) : filteredCatalog.length === 0 ? (
+                <p className="mt-3 text-sm text-slate-500">No products match &ldquo;{catalogSearch.trim()}&rdquo;.</p>
+              ) : (
+                <>
+                  <div className="admin-catalog-table-wrap mt-3">
+                    <table className="admin-catalog-table">
+                      <thead>
+                        <tr>
+                          <th>Product</th>
+                          <th>Varieties</th>
+                          <th>Lots</th>
+                          <th>Preview</th>
+                          <th className="text-right">Action</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {pagedCatalog.map((product) => {
+                          const isOpen = !!expanded[product.id];
+                          const varieties = product.categories || [];
+                          const lotCount = varieties.filter((v) => v.usesLots).length;
+                          const preview = varieties.slice(0, 4);
+                          return (
+                            <Fragment key={product.id}>
+                              <tr className="admin-catalog-row">
+                                <td>
+                                  <div className="admin-catalog-product-cell">
+                                    <button
+                                      type="button"
+                                      onClick={() => setExpanded((e) => ({ ...e, [product.id]: !e[product.id] }))}
+                                      className="admin-catalog-expand-btn"
+                                      title={isOpen ? 'Hide varieties' : 'Show varieties'}
+                                    >
+                                      {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                    </button>
+                                    <button
+                                      type="button"
+                                      onClick={() => setCatEditor({ mode: 'add', productId: product.id, value: '', usesLots: false })}
+                                      className="admin-catalog-product"
+                                      title="Add variety and lot setup"
+                                    >
+                                      <span>{product.name}</span>
+                                    </button>
+                                  </div>
+                                </td>
+                                <td>
+                                  <span className="badge badge-teal">{varieties.length}</span>
+                                </td>
+                                <td>
+                                  <span className={lotCount > 0 ? 'badge badge-amber' : 'badge'}>{lotCount}</span>
+                                </td>
+                                <td>
+                                  <div className="admin-catalog-preview">
+                                    {preview.length === 0 ? (
+                                      <span className="text-xs text-slate-400">No varieties</span>
+                                    ) : (
+                                      preview.map((v) => (
+                                        <span key={v.id} className="admin-catalog-chip">
+                                          {v.name}
+                                          {v.usesLots && <small>Lot</small>}
+                                        </span>
+                                      ))
+                                    )}
+                                    {varieties.length > preview.length && (
+                                      <span className="admin-catalog-more">+{varieties.length - preview.length}</span>
+                                    )}
+                                  </div>
+                                </td>
+                                <td className="text-right">
+                                  <button
+                                    type="button"
+                                    onClick={() => setCatEditor({ mode: 'add', productId: product.id, value: '', usesLots: false })}
+                                    className="btn-compact"
+                                    title="Add variety"
+                                  >
+                                    <FolderPlus size={12} /> Add
+                                  </button>
+                                </td>
+                              </tr>
+                              {isOpen && (
+                                <tr className="admin-catalog-detail-row">
+                                  <td colSpan={5}>
+                                    {varieties.length === 0 ? (
+                                      <div className="admin-catalog-empty-detail">No varieties added for this product.</div>
+                                    ) : (
+                                      <div className="admin-catalog-detail-list">
+                                        {varieties.map((v) => (
+                                          <div key={v.id} className="admin-catalog-detail-item">
+                                            <Tag size={12} className="text-slate-400" />
+                                            <span className="min-w-0 flex-1 truncate font-semibold text-slate-800">{v.name}</span>
+                                            {v.usesLots && <span className="badge badge-amber">Lot1..200</span>}
+                                            <button
+                                              type="button"
+                                              onClick={() => setCatEditor({ mode: 'rename', productId: product.id, categoryId: v.id, value: v.name, usesLots: v.usesLots })}
+                                              className="btn-compact"
+                                              title="Rename / toggle lots"
+                                            >
+                                              <Pencil size={12} /> Edit
+                                            </button>
+                                          </div>
+                                        ))}
+                                      </div>
+                                    )}
+                                  </td>
+                                </tr>
+                              )}
+                            </Fragment>
+                          );
+                        })}
+                      </tbody>
+                    </table>
+                  </div>
+
+                  <div className="mt-3 flex items-center justify-between">
+                    <span className="text-xs font-medium text-slate-500">
+                      {filteredCatalog.length} of {catalog.length}
+                    </span>
+                    {totalCatalogPages > 1 && (
+                      <div className="flex items-center gap-1">
+                        <button
+                          type="button"
+                          onClick={() => setCatalogPage(Math.max(0, safeCatalogPage - 1))}
+                          disabled={safeCatalogPage === 0}
+                          className="page-btn"
+                          aria-label="Previous page"
+                        >
+                          <ChevronLeft size={14} />
+                        </button>
+                        <span className="px-2 text-xs font-semibold text-slate-700">
+                          {formatNumber(safeCatalogPage + 1)} / {formatNumber(totalCatalogPages)}
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => setCatalogPage(Math.min(totalCatalogPages - 1, safeCatalogPage + 1))}
+                          disabled={safeCatalogPage >= totalCatalogPages - 1}
+                          className="page-btn"
+                          aria-label="Next page"
+                        >
+                          <ChevronRight size={14} />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Category add/rename modal */}
+      {catEditor && (
+        <div className="modal-overlay modal-overlay-front">
+                <div className="modal-content" style={{ maxWidth: '24rem' }}>
+                  <div className="modal-header">
+                    <div className="flex items-center gap-2.5">
+                      <div className="modal-icon-circle bg-gradient-to-br from-blue-500 to-indigo-600 text-white">
+                        {catEditor.mode === 'add' ? <FolderPlus size={18} /> : <Pencil size={18} />}
+                      </div>
+                      <div>
+                        <h2>{catEditor.mode === 'add' ? 'Add category' : 'Rename category'}</h2>
+                        <p className="text-xs text-slate-500 mt-0.5">
+                          {catEditor.mode === 'add' ? 'New variety under this product' : 'Rename or toggle lot usage'}
+                        </p>
+                      </div>
+                    </div>
+                    <button onClick={() => setCatEditor(null)} className="modal-close-btn">✕</button>
+                  </div>
+                  <div className="modal-body">
+                    <div className="form-field">
+                      <label className="form-label"><Tag size={13} /> Variety name <span className="text-red-500">*</span></label>
+                      <input
+                        type="text"
+                        value={catEditor.value}
+                        onChange={(e) => setCatEditor((c) => ({ ...c, value: e.target.value }))}
+                        className="input-field"
+                        placeholder="e.g. Amrapali"
+                        autoFocus
+                      />
+                    </div>
+                    <label className="mt-3 flex items-start gap-2 cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!!catEditor.usesLots}
+                        onChange={(e) => setCatEditor((c) => ({ ...c, usesLots: e.target.checked }))}
+                        className="mt-0.5"
+                      />
+                      <span>
+                        <span className="block text-sm font-semibold text-slate-800">This variety uses Lot1..Lot200</span>
+                        <span className="block text-xs text-slate-500">Wholesalers will pick one of the 200 lots when receiving a shipment of this variety.</span>
+                      </span>
+                    </label>
+                  </div>
+                  <div className="modal-footer">
+                    <button onClick={() => setCatEditor(null)} className="btn-secondary" disabled={catSaving}>Cancel</button>
+                    <button onClick={handleCategorySave} className="btn-primary flex items-center gap-2" disabled={catSaving}>
+                      {catSaving ? '…' : (catEditor.mode === 'add' ? 'Add' : 'Save')}
+                    </button>
+                  </div>
+                </div>
         </div>
       )}
 

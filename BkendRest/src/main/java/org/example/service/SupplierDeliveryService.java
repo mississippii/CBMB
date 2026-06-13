@@ -412,8 +412,10 @@ public class SupplierDeliveryService {
                 : money(totalSold.multiply(rate).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP));
         BigDecimal expenseTotal = money(zero(supplierExpenseRepository.sumAmountByDelivery(delivery.getId())));
         BigDecimal expenseDue = money(zero(supplierExpenseRepository.sumDueByDelivery(delivery.getId())));
-        // Net payable to supplier = total sold − commission − expense.
-        BigDecimal netPayable = money(totalSold.subtract(commission).subtract(expenseTotal));
+        // Net payable to supplier = total sold − commission − expense. All terms are whole
+        // taka (commission ceiled), so this is already an integer. SupplierDueService.netDue
+        // sums this exact per-shipment value — keep the two formulas in sync.
+        BigDecimal netPayable = totalSold.subtract(commission).subtract(expenseTotal);
         BigDecimal totalUnitsSold = zero(saleItemRepository.sumQuantityByDelivery(delivery.getId()));
         BigDecimal totalKgSold = zero(saleItemRepository.sumSaleWeightByDelivery(delivery.getId()));
         return new SupplierDeliveryResponse(
@@ -607,7 +609,7 @@ public class SupplierDeliveryService {
     }
 
     private BigDecimal money(BigDecimal value) {
-        return (value == null ? BigDecimal.ZERO : value).setScale(2, RoundingMode.HALF_UP);
+        return (value == null ? BigDecimal.ZERO : value).setScale(0, RoundingMode.CEILING);
     }
 
     private UnitType parseUnit(String value) {
