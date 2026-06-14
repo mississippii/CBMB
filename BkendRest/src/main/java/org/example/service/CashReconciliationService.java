@@ -16,6 +16,7 @@ import org.example.model.Wholesaler;
 import org.example.model.enums.CashDayStatus;
 import org.example.model.enums.SettlementType;
 import org.example.repository.BoxLedgerRepository;
+import org.example.repository.CrateDepositMovementRepository;
 import org.example.repository.CashReconciliationRepository;
 import org.example.repository.PaymentRepository;
 import org.example.repository.SaleRepository;
@@ -49,6 +50,7 @@ public class CashReconciliationService {
     private final ShopExpenseRepository shopExpenseRepository;
     private final SupplierExpenseRepository supplierExpenseRepository;
     private final BoxLedgerRepository boxLedgerRepository;
+    private final CrateDepositMovementRepository crateDepositMovementRepository;
     private final SalesAggregateService salesAggregateService;
 
     public CashReconciliationService(
@@ -60,6 +62,7 @@ public class CashReconciliationService {
             ShopExpenseRepository shopExpenseRepository,
             SupplierExpenseRepository supplierExpenseRepository,
             BoxLedgerRepository boxLedgerRepository,
+            CrateDepositMovementRepository crateDepositMovementRepository,
             SalesAggregateService salesAggregateService
     ) {
         this.wholesalerRepository = wholesalerRepository;
@@ -70,6 +73,7 @@ public class CashReconciliationService {
         this.shopExpenseRepository = shopExpenseRepository;
         this.supplierExpenseRepository = supplierExpenseRepository;
         this.boxLedgerRepository = boxLedgerRepository;
+        this.crateDepositMovementRepository = crateDepositMovementRepository;
         this.salesAggregateService = salesAggregateService;
     }
 
@@ -159,6 +163,9 @@ public class CashReconciliationService {
         // Walk-in crate sales: the gross sale price enters the drawer the same day.
         BigDecimal crateCashSales = money(boxLedgerRepository.sumWalkInCrateCashSales(wholesalerId, from, to));
         BigDecimal customerCollections = money(paymentRepository.sumCashAmountInPeriod(wholesalerId, from, to));
+        // Refundable crate deposits: taken = cash in, refunded = cash out (a liability, not income).
+        BigDecimal crateDepositsTaken = money(crateDepositMovementRepository.sumTakenInPeriod(wholesalerId, from, to));
+        BigDecimal crateDepositRefunds = money(crateDepositMovementRepository.sumRefundedInPeriod(wholesalerId, from, to));
 
         BigDecimal supplierPayments = money(supplierSettlementRepository
                 .sumAmountByTypeInPeriod(wholesalerId, SettlementType.PRODUCT_PAYMENT, from, to));
@@ -174,8 +181,8 @@ public class CashReconciliationService {
             shopExpenses = shopExpenses.add(amount);
         }
 
-        BigDecimal totalIn = money(cashSales.add(crateCashSales).add(customerCollections));
-        BigDecimal totalOut = money(supplierPayments.add(shipmentExpenses).add(shopExpenses));
+        BigDecimal totalIn = money(cashSales.add(crateCashSales).add(customerCollections).add(crateDepositsTaken));
+        BigDecimal totalOut = money(supplierPayments.add(shipmentExpenses).add(shopExpenses).add(crateDepositRefunds));
         BigDecimal netMovement = money(totalIn.subtract(totalOut));
 
         BigDecimal opening = row != null
@@ -192,8 +199,8 @@ public class CashReconciliationService {
                 status,
                 sales,
                 opening,
-                new DailyCashResponse.Inflow(cashSales, crateCashSales, customerCollections),
-                new DailyCashResponse.Outflow(supplierPayments, shipmentExpenses, shopExpenses),
+                new DailyCashResponse.Inflow(cashSales, crateCashSales, customerCollections, crateDepositsTaken),
+                new DailyCashResponse.Outflow(supplierPayments, shipmentExpenses, shopExpenses, crateDepositRefunds),
                 totalIn,
                 totalOut,
                 netMovement,

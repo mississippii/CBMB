@@ -236,6 +236,15 @@ const CustomerDetail = ({ customerId, onBack }) => {
             </div>
           </div>
         </div>
+
+            <div className="supplier-panel">
+          <h3>Crate Deposit</h3>
+          <div className="mt-4 flex flex-col justify-center rounded-xl border border-amber-200 bg-amber-50 px-4 py-4 text-center">
+            <p className="text-[11px] font-bold uppercase tracking-wider text-amber-600">Deposit held (refundable)</p>
+            <strong className="mt-1 text-2xl font-black text-amber-700 tabular-nums">{formatCurrency(customer.crateDepositHeld || 0)}</strong>
+            <p className="mt-1 text-[11px] text-slate-400">Security money against borrowed crates — returned when crates come back.</p>
+          </div>
+        </div>
           </div>
 
         </aside>

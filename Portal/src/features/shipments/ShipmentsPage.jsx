@@ -327,7 +327,7 @@ const ShipmentsPage = () => {
                   <select value={formData.supplierId} onChange={handleField('supplierId')} className="input-field" required autoFocus>
                     <option value="">Choose supplier…</option>
                     {suppliers.map((s) => (
-                      <option key={s.id} value={s.id}>{s.name}{s.businessName ? ` (${s.businessName})` : ''}</option>
+                      <option key={s.id} value={s.id}>{s.businessName || s.name}</option>
                     ))}
                   </select>
                 </div>

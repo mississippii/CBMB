@@ -16,7 +16,7 @@ const titleCase = (s) => {
 };
 
 const Section = ({ n, title }) => (
-  <div className="flex items-center gap-2 mt-5 mb-2 first:mt-0">
+  <div className="flex items-center gap-2 mt-3.5 mb-1.5 first:mt-0">
     <span className="flex h-5 w-5 items-center justify-center rounded-full bg-blue-100 text-[11px] font-bold text-blue-700">{n}</span>
     <span className="text-xs font-bold uppercase tracking-wide text-slate-500">{title}</span>
   </div>
@@ -45,6 +45,8 @@ const SaleForm = ({ onClose }) => {
   // Crate add-on: borrow (permanent customer) or sell (walk-in / cash). One or more types.
   const [showCrate, setShowCrate] = useState(false);
   const [crateLines, setCrateLines] = useState([{ crateType: '', quantity: '', unitPrice: '' }]);
+  // Refundable deposit taken against borrowed crates (permanent customers only).
+  const [crateDeposit, setCrateDeposit] = useState('');
   const [error, setError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [showConfirm, setShowConfirm] = useState(false);
@@ -209,6 +211,7 @@ const SaleForm = ({ onClose }) => {
           form.customerId,
           validCrateLines.map((l) => ({ crateType: l.crateType, quantity: Number(l.quantity) })),
           'Borrowed with sale',
+          Number(crateDeposit) || 0,
         );
         await reloadCustomers();
       }
@@ -275,7 +278,7 @@ const SaleForm = ({ onClose }) => {
               <select value={form.supplierId} onChange={(e) => handleSupplierChange(e.target.value)} className="input-field" required>
                 <option value="">Choose supplier…</option>
                 {suppliers.map((s) => (
-                  <option key={s.id} value={s.id}>{s.name}{s.businessName ? ` (${s.businessName})` : ''}</option>
+                  <option key={s.id} value={s.id}>{s.businessName || s.name}</option>
                 ))}
               </select>
             </div>
@@ -351,10 +354,10 @@ const SaleForm = ({ onClose }) => {
             <p className="text-xs text-slate-400">Choose a customer first.</p>
           ) : (
             <>
-              <label className="flex items-center gap-2 cursor-pointer text-sm font-semibold text-slate-700">
-                <input type="checkbox" checked={showCrate} onChange={(e) => setShowCrate(e.target.checked)} />
-                <Boxes size={14} className="text-blue-600" />
-                {isOneTime ? 'Sell crates with this sale (cash)' : 'Customer borrows crates with this sale'}
+              <label className="inline-flex items-center gap-2 cursor-pointer text-sm font-semibold text-slate-700">
+                <input type="checkbox" className="h-4 w-4 shrink-0" checked={showCrate} onChange={(e) => setShowCrate(e.target.checked)} />
+                <Boxes size={14} className="shrink-0 text-blue-600" />
+                <span>{isOneTime ? 'Sell crates with this sale (cash)' : 'Customer borrows crates with this sale'}</span>
               </label>
               {showCrate && (
                 <div className="mt-3 space-y-2">
@@ -393,6 +396,25 @@ const SaleForm = ({ onClose }) => {
                   <button type="button" onClick={addCrateLine} className="btn-compact">
                     <Boxes size={12} /> Add crate type
                   </button>
+                  {/* Refundable crate deposit — permanent customers only. Returned when crates come back. */}
+                  {!isOneTime && (
+                    <div className="flex items-end gap-3 pt-1">
+                      <div className="form-field" style={{ maxWidth: '12rem' }}>
+                        <label className="form-label"><DollarSign size={13} /> Deposit taken <span className="form-label-hint">refundable</span></label>
+                        <div className="input-with-suffix">
+                          <span className="input-prefix">৳</span>
+                          <input
+                            type="number" min="0" step="1"
+                            value={crateDeposit}
+                            onChange={(e) => setCrateDeposit(e.target.value)}
+                            className="input-field !pl-8"
+                            placeholder="0"
+                          />
+                        </div>
+                      </div>
+                      <p className="mb-2 text-[11px] text-slate-400">Security money — returned when crates come back.</p>
+                    </div>
+                  )}
                   {isOneTime && crateSellTotal > 0 && (
                     <div className="flex justify-end text-sm font-semibold text-slate-700">
                       Total crate price:&nbsp;<span className="text-blue-700">{fmt(crateSellTotal)}</span>
@@ -519,9 +541,12 @@ const SaleForm = ({ onClose }) => {
                 {showCrate && crateBorrowQty > 0 && (
                   <div className="flex justify-between"><span className="text-slate-500">Crates</span><span className="font-semibold text-slate-800">{crateBorrowQty} {isOneTime ? `sold · ${fmt(crateSellTotal)}` : 'borrowed'}</span></div>
                 )}
+                {showCrate && !isOneTime && Number(crateDeposit) > 0 && (
+                  <div className="flex justify-between"><span className="text-slate-500">Crate deposit (refundable)</span><span className="font-semibold text-amber-700">{fmt(Number(crateDeposit))}</span></div>
+                )}
                 <div className="flex justify-between border-t border-slate-200 pt-1.5 mt-1.5">
                   <span className="font-semibold text-slate-600">Total received</span>
-                  <span className="font-bold text-emerald-600">{fmt(paymentReceived + crateSellTotal)}</span>
+                  <span className="font-bold text-emerald-600">{fmt(paymentReceived + crateSellTotal + (!isOneTime ? Number(crateDeposit) || 0 : 0))}</span>
                 </div>
               </div>
             </div>

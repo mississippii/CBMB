@@ -30,6 +30,7 @@ import org.example.repository.AccountLedgerRepository;
 import org.example.repository.BoxBalanceRepository;
 import org.example.repository.BoxInventoryRepository;
 import org.example.repository.BoxLedgerRepository;
+import org.example.repository.CrateDepositMovementRepository;
 import org.example.repository.PaymentRepository;
 import org.example.repository.SupplierSettlementRepository;
 import org.example.repository.TransactionRepository;
@@ -59,6 +60,7 @@ public class PaymentCancellationService {
     private final BoxBalanceRepository boxBalanceRepository;
     private final BoxInventoryRepository boxInventoryRepository;
     private final BoxLedgerRepository boxLedgerRepository;
+    private final CrateDepositMovementRepository crateDepositMovementRepository;
     private final TransactionRepository transactionRepository;
     private final AccountBalanceService accountBalanceService;
 
@@ -73,6 +75,7 @@ public class PaymentCancellationService {
             BoxBalanceRepository boxBalanceRepository,
             BoxInventoryRepository boxInventoryRepository,
             BoxLedgerRepository boxLedgerRepository,
+            CrateDepositMovementRepository crateDepositMovementRepository,
             TransactionRepository transactionRepository,
             AccountBalanceService accountBalanceService
     ) {
@@ -86,6 +89,7 @@ public class PaymentCancellationService {
         this.boxBalanceRepository = boxBalanceRepository;
         this.boxInventoryRepository = boxInventoryRepository;
         this.boxLedgerRepository = boxLedgerRepository;
+        this.crateDepositMovementRepository = crateDepositMovementRepository;
         this.transactionRepository = transactionRepository;
         this.accountBalanceService = accountBalanceService;
     }
@@ -118,6 +122,27 @@ public class PaymentCancellationService {
 
         // 2. Reverse crate returns: each customer-return BoxLedger entry against this payment.
         int cratesReinstated = reverseCrateReturns(wholesaler, customer, payment, cleanReason);
+
+        // 3. Reverse any crate-deposit refund made with this payment: the money comes back in,
+        //    and the held deposit is restored. Record a compensating movement for the audit/cash book.
+        for (org.example.model.CrateDepositMovement refund : crateDepositMovementRepository
+                .findByWholesalerIdAndPaymentId(wholesaler.getId(), payment.getId())) {
+            if (refund.getMovementType() != org.example.model.enums.CrateDepositMovementType.REFUNDED) {
+                continue;
+            }
+            BigDecimal restore = money(refund.getAmount().negate()); // refund amount stored negative → positive
+            org.example.model.CrateDepositMovement reversal = new org.example.model.CrateDepositMovement();
+            reversal.setWholesalerId(wholesaler.getId());
+            reversal.setWholesalerCustomerId(customer.getId());
+            reversal.setAmount(restore);
+            reversal.setMovementType(org.example.model.enums.CrateDepositMovementType.TAKEN);
+            reversal.setPaymentId(payment.getId());
+            reversal.setNote(cleanReason + " — restore crate deposit refund");
+            crateDepositMovementRepository.save(reversal);
+            BigDecimal held = customer.getCrateDepositHeld() == null ? BigDecimal.ZERO : customer.getCrateDepositHeld();
+            customer.setCrateDepositHeld(money(held.add(restore)));
+            wholesalerCustomerRepository.save(customer);
+        }
 
         payment.setStatus(PostStatus.CANCELLED);
         payment.setNote(joinNote(payment.getNote(), cleanReason));

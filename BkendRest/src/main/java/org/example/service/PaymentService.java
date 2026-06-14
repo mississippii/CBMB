@@ -18,6 +18,7 @@ import org.example.exception.BadRequestException;
 import org.example.model.AccountBalance;
 import org.example.model.AccountLedger;
 import org.example.model.BoxBalance;
+import org.example.model.CrateDepositMovement;
 import org.example.model.BoxInventory;
 import org.example.model.BoxLedger;
 import org.example.model.BoxType;
@@ -31,6 +32,7 @@ import org.example.model.enums.AccountReferenceType;
 import org.example.model.enums.BoxLedgerPartyType;
 import org.example.model.enums.BoxMovementType;
 import org.example.model.enums.BoxReferenceType;
+import org.example.model.enums.CrateDepositMovementType;
 import org.example.model.enums.PartyType;
 import org.example.model.enums.PaymentMethod;
 import org.example.model.enums.PaymentType;
@@ -43,6 +45,7 @@ import org.example.repository.BoxBalanceRepository;
 import org.example.repository.BoxInventoryRepository;
 import org.example.repository.BoxLedgerRepository;
 import org.example.repository.BoxTypeRepository;
+import org.example.repository.CrateDepositMovementRepository;
 import org.example.repository.PaymentRepository;
 import org.example.repository.SupplierSettlementRepository;
 import org.example.repository.TransactionRepository;
@@ -68,6 +71,7 @@ public class PaymentService {
     private final BoxInventoryRepository boxInventoryRepository;
     private final BoxBalanceRepository boxBalanceRepository;
     private final BoxLedgerRepository boxLedgerRepository;
+    private final CrateDepositMovementRepository crateDepositMovementRepository;
     private final SupplierDueService supplierDueService;
 
     public PaymentService(
@@ -84,6 +88,7 @@ public class PaymentService {
             BoxInventoryRepository boxInventoryRepository,
             BoxBalanceRepository boxBalanceRepository,
             BoxLedgerRepository boxLedgerRepository,
+            CrateDepositMovementRepository crateDepositMovementRepository,
             SupplierDueService supplierDueService
     ) {
         this.wholesalerRepository = wholesalerRepository;
@@ -99,7 +104,26 @@ public class PaymentService {
         this.boxInventoryRepository = boxInventoryRepository;
         this.boxBalanceRepository = boxBalanceRepository;
         this.boxLedgerRepository = boxLedgerRepository;
+        this.crateDepositMovementRepository = crateDepositMovementRepository;
         this.supplierDueService = supplierDueService;
+    }
+
+    /** Records a signed crate-deposit movement and updates the customer's held balance. */
+    private void recordCrateDeposit(Wholesaler wholesaler, WholesalerCustomer customer,
+            CrateDepositMovementType type, BigDecimal signedAmount, Long saleId, Long paymentId, String note) {
+        CrateDepositMovement movement = new CrateDepositMovement();
+        movement.setWholesalerId(wholesaler.getId());
+        movement.setWholesalerCustomerId(customer.getId());
+        movement.setAmount(signedAmount);
+        movement.setMovementType(type);
+        movement.setSaleId(saleId);
+        movement.setPaymentId(paymentId);
+        movement.setNote(note);
+        crateDepositMovementRepository.save(movement);
+
+        BigDecimal held = customer.getCrateDepositHeld() == null ? BigDecimal.ZERO : customer.getCrateDepositHeld();
+        customer.setCrateDepositHeld(money(held.add(signedAmount)));
+        wholesalerCustomerRepository.save(customer);
     }
 
     @Transactional
@@ -109,9 +133,14 @@ public class PaymentService {
         BigDecimal cashAmount = nonNegative(request.cashAmount(), "Cash amount cannot be negative.");
         Map<String, Integer> returns = normalizeLines(request.crateReturns(), "Returned crate quantity cannot be negative.");
         int boxesReturned = returns.values().stream().mapToInt(Integer::intValue).sum();
+        BigDecimal depositRefund = money(nonNegative(request.depositRefund(), "Crate deposit refund cannot be negative."));
 
-        if (cashAmount.signum() == 0 && boxesReturned == 0) {
-            throw new BadRequestException("Enter cash received or returned crates.");
+        if (cashAmount.signum() == 0 && boxesReturned == 0 && depositRefund.signum() == 0) {
+            throw new BadRequestException("Enter cash received, returned crates, or a deposit refund.");
+        }
+        BigDecimal depositHeld = customerAccount.getCrateDepositHeld() == null ? BigDecimal.ZERO : customerAccount.getCrateDepositHeld();
+        if (depositRefund.compareTo(depositHeld) > 0) {
+            throw new BadRequestException("Deposit refund cannot exceed the ৳" + depositHeld.toPlainString() + " held for this customer.");
         }
 
         BigDecimal previousDue = currentBalance(wholesaler, PartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), customerAccount.getOpeningDue());
@@ -145,7 +174,14 @@ public class PaymentService {
             applyCustomerCrateReturn(wholesaler, customerAccount, line.getKey(), line.getValue(), payment.getId(), request.note());
             crateLines.add(new CrateTypeQuantity(line.getKey(), line.getValue()));
         }
-        String description = buildCustomerPaymentDescription(payment.getId(), cashAmount, crateLines);
+
+        // Refund crate-deposit money back to the customer (cash out, not an expense).
+        if (depositRefund.signum() > 0) {
+            recordCrateDeposit(wholesaler, customerAccount, CrateDepositMovementType.REFUNDED,
+                    depositRefund.negate(), null, payment.getId(), "Crate deposit refund");
+        }
+        String description = buildCustomerPaymentDescription(payment.getId(), cashAmount, crateLines)
+                + (depositRefund.signum() > 0 ? " · deposit refund " + depositRefund.toPlainString() : "");
         Transaction transaction = savePaymentTransaction(
                 wholesaler.getId(), payment.getId(), null, customerAccount.getId(), null, cashAmount, dueAfter,
                 description
@@ -174,8 +210,16 @@ public class PaymentService {
             crateLines.add(new CrateTypeQuantity(line.getKey(), line.getValue()));
         }
 
+        // Optional refundable deposit taken against the borrowed crates (cash in, not income).
+        BigDecimal deposit = money(nonNegative(request.depositAmount(), "Crate deposit cannot be negative."));
+        if (deposit.signum() > 0) {
+            recordCrateDeposit(wholesaler, customerAccount, CrateDepositMovementType.TAKEN, deposit, null, null,
+                    "Crate deposit taken — " + describeLines(crateLines));
+        }
+
         BigDecimal currentDue = currentBalance(wholesaler, PartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), customerAccount.getOpeningDue());
-        String description = "Customer crate borrow — " + describeLines(crateLines);
+        String description = "Customer crate borrow — " + describeLines(crateLines)
+                + (deposit.signum() > 0 ? " (deposit " + deposit.toPlainString() + ")" : "");
         Transaction transaction = savePaymentTransaction(
                 wholesaler.getId(), null, null, customerAccount.getId(), null, BigDecimal.ZERO, currentDue, description
         );

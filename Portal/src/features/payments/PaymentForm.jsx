@@ -171,7 +171,7 @@ const PaymentForm = ({ onClose }) => {
                 <option value="">Choose {config.party}…</option>
                 {parties.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.name} · due {fmt(p.amountDue || 0)}
+                    {isCustomer ? p.name : (p.businessName || p.name)} · due {fmt(p.amountDue || 0)}
                   </option>
                 ))}
               </select>

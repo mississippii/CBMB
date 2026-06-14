@@ -381,6 +381,7 @@ public class WholesalerService {
                 salePaid.add(laterPaid),
                 crateDues,
                 crateTotal(crateDues),
+                account.getCrateDepositHeld(),
                 account.getStatus().name(),
                 account.getCreatedAt()
         );

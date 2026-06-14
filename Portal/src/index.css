@@ -225,13 +225,18 @@ select.input-field {
   padding-right: 2.2rem;
 }
 
-label {
-  display: block;
-  margin-bottom: 0.4rem;
-  font-size: 0.79rem;
-  font-weight: 700;
-  letter-spacing: 0.02em;
-  color: #334155;
+/* Base label styling lives in @layer base so Tailwind utility classes
+   (e.g. `inline-flex` on a <label>) still win — unlayered rules would
+   override every layered utility and silently collapse flex labels. */
+@layer base {
+  label {
+    display: block;
+    margin-bottom: 0.4rem;
+    font-size: 0.79rem;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: #334155;
+  }
 }
 
 .status-success,
@@ -2575,7 +2580,7 @@ tbody tr:hover {
 .form-grid {
   display: grid;
   grid-template-columns: 1fr 1fr;
-  gap: 1rem;
+  gap: 0.8rem;
 }
 
 .form-field-full {

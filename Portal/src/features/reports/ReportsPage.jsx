@@ -638,7 +638,7 @@ const SalesBreakdown = () => {
             <FilterSelect label="Lot" value={subCategoryId} disabled={!lots.length} onChange={setSubCategoryId}
               options={[{ value: '', label: 'All lots' }, ...lots.map((s) => ({ value: s.id, label: s.name }))]} />
             <FilterSelect label="Supplier" value={supplierAccountId} onChange={setSupplierAccountId}
-              options={[{ value: '', label: 'All suppliers' }, ...suppliers.map((s) => ({ value: s.id, label: s.name }))]} />
+              options={[{ value: '', label: 'All suppliers' }, ...suppliers.map((s) => ({ value: s.id, label: s.businessName || s.name }))]} />
             <FilterSelect label="Group by" value={groupBy} onChange={setGroupBy} options={GROUP_BY} />
           </div>
         </section>

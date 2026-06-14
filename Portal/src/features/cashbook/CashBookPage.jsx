@@ -27,11 +27,13 @@ const INFLOW_ROWS = [
   { key: 'cashSales',           label: 'Cash sales' },
   { key: 'crateCashSales',      label: 'Crate sales (walk-in)' },
   { key: 'customerCollections', label: 'Customer collections' },
+  { key: 'crateDepositsTaken',  label: 'Crate deposits taken' },
 ];
 const OUTFLOW_ROWS = [
-  { key: 'supplierPayments',  label: 'Supplier payments' },
-  { key: 'shipmentExpenses',  label: 'Shipment expenses' },
-  { key: 'shopExpenses',      label: 'Shop expenses' },
+  { key: 'supplierPayments',     label: 'Supplier payments' },
+  { key: 'shipmentExpenses',     label: 'Shipment expenses' },
+  { key: 'shopExpenses',         label: 'Shop expenses' },
+  { key: 'crateDepositRefunds',  label: 'Crate deposit refunds' },
 ];
 
 const TONES = {

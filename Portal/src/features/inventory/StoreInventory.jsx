@@ -153,7 +153,7 @@ const StoreInventory = () => {
           return {
             ...product,
             quantity,
-            supplierName: supplier?.name || 'Unknown supplier',
+            supplierName: supplier?.businessName || supplier?.name || 'Unknown supplier',
             supplierPhone: supplier?.contact || supplier?.phone || '',
             stockStatus: quantity <= 0 ? 'Stock out' : quantity <= 10 ? 'Low stock' : 'Available',
           };

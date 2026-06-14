@@ -3,7 +3,7 @@ import { useQuery } from '@tanstack/react-query';
 import {
   Boxes, Plus, AlertTriangle, ArrowRightLeft, Store, Users, UserCheck, Package,
   TrendingDown, Hash, ArrowUpRight, ArrowDownLeft, FileText, Wallet, BarChart3, Zap,
-  ShoppingCart, ChevronDown, ChevronUp,
+  ShoppingCart, ChevronDown, ChevronUp, DollarSign,
 } from 'lucide-react';
 import { useData } from '../../data/DataContext';
 import { useToast } from '../../shared/components/Toast';
@@ -54,7 +54,7 @@ const EMPTY_SELL = { crateType: '', quantity: '', unitSalePrice: '', buyerKind: 
 const EMPTY_LOSS = { crateType: '', quantity: '', reason: 'lost' };
 // One crate type per transaction — borrow/return/give/receive are each recorded separately.
 const EMPTY_SUPPLIER = { supplierId: '', direction: 'give', crateType: '', quantity: '', note: '' };
-const EMPTY_CUSTOMER = { customerId: '', direction: 'borrow', crateType: '', quantity: '', note: '' };
+const EMPTY_CUSTOMER = { customerId: '', direction: 'borrow', crateType: '', quantity: '', deposit: '', note: '' };
 
 // Line colors for the N-type loss chart, cycled per crate type.
 const LOSS_COLORS = ['#1d63ed', '#f43f5e', '#059669', '#d97706', '#7c3aed', '#0891b2', '#db2777', '#65a30d'];
@@ -297,19 +297,27 @@ const BoxDashboard = () => {
     const lines = [{ crateType: customerForm.crateType, quantity: qty }];
     setIsSavingCustomer(true); setCustomerError('');
     try {
+      const deposit = Math.max(0, Number(customerForm.deposit) || 0);
       if (customerForm.direction === 'borrow') {
         await postJson(apiPaths.paymentsCustomerCrateBorrow(admin.wholesalerId), {
           wholesalerCustomerId: Number(customerForm.customerId),
           crates: lines,
+          depositAmount: deposit,
           note: customerForm.note,
         });
         showToast(`${qty} ${customerForm.crateType} crates borrowed`, 'success');
       } else {
-        // Return — use customer/settle (cash=0, crates only)
+        // Return — use customer/settle (cash=0, crates only), optionally refunding deposit.
+        if (deposit > Number(selectedCustomer?.crateDepositHeld || 0)) {
+          setCustomerError(`Refund cannot exceed the ৳${Number(selectedCustomer?.crateDepositHeld || 0).toLocaleString()} deposit held.`);
+          setIsSavingCustomer(false);
+          return;
+        }
         await postJson(apiPaths.paymentsCustomerSettle(admin.wholesalerId), {
           wholesalerCustomerId: Number(customerForm.customerId),
           cashAmount: 0,
           crateReturns: lines,
+          depositRefund: deposit,
           paymentMethod: 'CASH',
           note: customerForm.note,
         });
@@ -845,6 +853,28 @@ const BoxDashboard = () => {
                   One crate type per entry — record each type separately.
                 </p>
 
+                {/* Refundable crate deposit: taken on borrow, refunded on return. */}
+                <div className="form-field">
+                  <label className="form-label">
+                    <DollarSign size={13} />
+                    {customerForm.direction === 'borrow' ? 'Crate deposit taken' : 'Deposit to refund'}
+                    <span className="form-label-hint">optional</span>
+                  </label>
+                  <div className="input-with-suffix">
+                    <span className="input-prefix">৳</span>
+                    <input
+                      type="number" min="0" step="1" value={customerForm.deposit}
+                      onChange={(e) => setCustomerForm((p) => ({ ...p, deposit: e.target.value }))}
+                      className="input-field !pl-8" placeholder="0"
+                    />
+                  </div>
+                  {customerForm.direction === 'return' && Number(selectedCustomer?.crateDepositHeld || 0) > 0 && (
+                    <p className="mt-1 text-[11px] text-slate-400">
+                      Deposit held: ৳{Number(selectedCustomer.crateDepositHeld).toLocaleString()}
+                    </p>
+                  )}
+                </div>
+
                 <div className="form-field">
                   <label className="form-label"><FileText size={13} /> Note <span className="form-label-hint">optional</span></label>
                   <input
@@ -894,7 +924,7 @@ const BoxDashboard = () => {
                     <option value="">Choose supplier…</option>
                     {suppliers.map((s) => (
                       <option key={s.id} value={s.id}>
-                        {s.name} (holds {s.totalCratesHolding || 0})
+                        {s.businessName || s.name} (holds {s.totalCratesHolding || 0})
                       </option>
                     ))}
                   </select>

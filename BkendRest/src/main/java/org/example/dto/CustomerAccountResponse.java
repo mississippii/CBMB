@@ -18,6 +18,7 @@ public record CustomerAccountResponse(
         BigDecimal totalPaid,
         List<CrateTypeQuantity> crateDues,
         Integer totalCratesDue,
+        BigDecimal crateDepositHeld,
         String status,
         LocalDateTime createdAt
 ) {

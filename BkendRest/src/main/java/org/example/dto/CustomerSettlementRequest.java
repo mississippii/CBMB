@@ -8,6 +8,8 @@ public record CustomerSettlementRequest(
         Long wholesalerCustomerId,
         BigDecimal cashAmount,
         List<CrateLineRequest> crateReturns,
+        /** Optional crate-deposit money to refund with this return (cash out, capped at held). */
+        BigDecimal depositRefund,
         PaymentMethod paymentMethod,
         String note
 ) {

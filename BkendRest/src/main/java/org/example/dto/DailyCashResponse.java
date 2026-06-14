@@ -50,7 +50,8 @@ public record DailyCashResponse(
     public record Inflow(
             BigDecimal cashSales,
             BigDecimal crateCashSales,
-            BigDecimal customerCollections
+            BigDecimal customerCollections,
+            BigDecimal crateDepositsTaken
     ) {
     }
 
@@ -58,7 +59,8 @@ public record DailyCashResponse(
     public record Outflow(
             BigDecimal supplierPayments,
             BigDecimal shipmentExpenses,
-            BigDecimal shopExpenses
+            BigDecimal shopExpenses,
+            BigDecimal crateDepositRefunds
     ) {
     }
 

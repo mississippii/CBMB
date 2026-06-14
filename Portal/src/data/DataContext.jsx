@@ -145,6 +145,7 @@ const mapCustomerAccount = (account) => ({
   amountDue: roundMoney(Number(account.currentDue ?? account.openingDue) || 0),
   crateHoldings: mapCrateDues(account.crateDues),
   totalCratesHolding: Number(account.totalCratesDue) || 0,
+  crateDepositHeld: roundMoney(Number(account.crateDepositHeld) || 0),
   status: account.status || 'ACTIVE',
 });
 
@@ -981,8 +982,8 @@ export const DataProvider = ({ children }) => {
   };
 
   // Permanent customer borrows one or more crate types in a single record.
-  // lines: [{ crateType, quantity }]
-  const borrowCustomerCrates = async (customerId, lines, note) => {
+  // lines: [{ crateType, quantity }]; depositAmount = optional refundable security money.
+  const borrowCustomerCrates = async (customerId, lines, note, depositAmount = 0) => {
     if (!admin?.wholesalerId) {
       throw new Error('Wholesaler profile not found for this user.');
     }
@@ -993,6 +994,7 @@ export const DataProvider = ({ children }) => {
     await postJson(apiPaths.paymentsCustomerCrateBorrow(admin.wholesalerId), {
       wholesalerCustomerId: Number(customerId),
       crates,
+      depositAmount: Math.max(0, Number(depositAmount) || 0),
       note: note || null,
     });
     invalidate.crates();
