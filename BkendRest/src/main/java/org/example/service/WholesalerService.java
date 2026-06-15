@@ -24,7 +24,9 @@ import org.example.model.enums.PartyType;
 import org.example.model.enums.RecordStatus;
 import org.example.repository.AccountBalanceRepository;
 import org.example.repository.BoxBalanceRepository;
+import org.example.repository.CustomerCrateHoldingRepository;
 import org.example.repository.CustomerRepository;
+import org.example.repository.SupplierCrateHoldingRepository;
 import org.example.repository.PaymentRepository;
 import org.example.repository.SaleItemRepository;
 import org.example.repository.SaleRepository;
@@ -46,6 +48,8 @@ public class WholesalerService {
     private final WholesalerCustomerRepository wholesalerCustomerRepository;
     private final AccountBalanceRepository accountBalanceRepository;
     private final BoxBalanceRepository boxBalanceRepository;
+    private final SupplierCrateHoldingRepository supplierCrateHoldingRepository;
+    private final CustomerCrateHoldingRepository customerCrateHoldingRepository;
     private final SaleItemRepository saleItemRepository;
     private final SaleRepository saleRepository;
     private final PaymentRepository paymentRepository;
@@ -62,6 +66,8 @@ public class WholesalerService {
             WholesalerCustomerRepository wholesalerCustomerRepository,
             AccountBalanceRepository accountBalanceRepository,
             BoxBalanceRepository boxBalanceRepository,
+            SupplierCrateHoldingRepository supplierCrateHoldingRepository,
+            CustomerCrateHoldingRepository customerCrateHoldingRepository,
             SaleItemRepository saleItemRepository,
             SaleRepository saleRepository,
             PaymentRepository paymentRepository,
@@ -77,6 +83,8 @@ public class WholesalerService {
         this.wholesalerCustomerRepository = wholesalerCustomerRepository;
         this.accountBalanceRepository = accountBalanceRepository;
         this.boxBalanceRepository = boxBalanceRepository;
+        this.supplierCrateHoldingRepository = supplierCrateHoldingRepository;
+        this.customerCrateHoldingRepository = customerCrateHoldingRepository;
         this.saleItemRepository = saleItemRepository;
         this.saleRepository = saleRepository;
         this.paymentRepository = paymentRepository;
@@ -341,6 +349,7 @@ public class WholesalerService {
         Long wholesalerId = account.getWholesaler().getId();
         BigDecimal currentDue = computeSupplierDue(wholesalerId, account);
         List<CrateTypeQuantity> crateDues = crateDues(wholesalerId, PartyType.WHOLESALER_SUPPLIER, account.getId());
+        List<CrateTypeQuantity> crateHoldings = supplierCrateHoldings(wholesalerId, account.getId());
         return new SupplierAccountResponse(
                 account.getId(),
                 wholesalerId,
@@ -356,9 +365,27 @@ public class WholesalerService {
                 saleItemRepository.sumCommissionBySupplier(wholesalerId, account.getId()),
                 crateDues,
                 crateTotal(crateDues),
+                crateHoldings,
+                crateTotal(crateHoldings),
                 account.getStatus().name(),
                 account.getCreatedAt()
         );
+    }
+
+    /** Leg 2 — the supplier's own crates the wholesaler is currently holding, per type (non-zero). */
+    private List<CrateTypeQuantity> supplierCrateHoldings(Long wholesalerId, Long supplierAccountId) {
+        java.util.Map<String, Long> byType = new java.util.LinkedHashMap<>();
+        for (var holding : supplierCrateHoldingRepository.findByWholesaler_IdAndWholesalerSupplierId(wholesalerId, supplierAccountId)) {
+            int qty = holding.getQuantity() == null ? 0 : holding.getQuantity();
+            if (qty == 0) {
+                continue;
+            }
+            String typeName = holding.getBoxType().getName() == null ? "" : holding.getBoxType().getName().toUpperCase(Locale.ROOT);
+            byType.merge(typeName, (long) qty, Long::sum);
+        }
+        return byType.entrySet().stream()
+                .map(e -> new CrateTypeQuantity(e.getKey(), e.getValue()))
+                .toList();
     }
 
     private CustomerAccountResponse toCustomerResponse(WholesalerCustomer account) {
@@ -367,6 +394,7 @@ public class WholesalerService {
         BigDecimal salePaid = saleRepository.sumPaidAmountByCustomer(wholesalerId, account.getId());
         BigDecimal laterPaid = paymentRepository.sumCashAmountByCustomer(wholesalerId, account.getId());
         List<CrateTypeQuantity> crateDues = crateDues(wholesalerId, PartyType.WHOLESALER_CUSTOMER, account.getId());
+        List<CrateTypeQuantity> crateHoldings = customerCrateHoldings(wholesalerId, account.getId());
         return new CustomerAccountResponse(
                 account.getId(),
                 wholesalerId,
@@ -381,10 +409,28 @@ public class WholesalerService {
                 salePaid.add(laterPaid),
                 crateDues,
                 crateTotal(crateDues),
+                crateHoldings,
+                crateTotal(crateHoldings),
                 account.getCrateDepositHeld(),
                 account.getStatus().name(),
                 account.getCreatedAt()
         );
+    }
+
+    /** Leg 2 — the customer's own crates the wholesaler is currently holding, per type (non-zero). */
+    private List<CrateTypeQuantity> customerCrateHoldings(Long wholesalerId, Long customerAccountId) {
+        java.util.Map<String, Long> byType = new java.util.LinkedHashMap<>();
+        for (var holding : customerCrateHoldingRepository.findByWholesaler_IdAndWholesalerCustomerId(wholesalerId, customerAccountId)) {
+            int qty = holding.getQuantity() == null ? 0 : holding.getQuantity();
+            if (qty == 0) {
+                continue;
+            }
+            String typeName = holding.getBoxType().getName() == null ? "" : holding.getBoxType().getName().toUpperCase(Locale.ROOT);
+            byType.merge(typeName, (long) qty, Long::sum);
+        }
+        return byType.entrySet().stream()
+                .map(e -> new CrateTypeQuantity(e.getKey(), e.getValue()))
+                .toList();
     }
 
     private BigDecimal currentBalance(Long wholesalerId, PartyType partyType, Long partyAccountId, BigDecimal openingDue) {

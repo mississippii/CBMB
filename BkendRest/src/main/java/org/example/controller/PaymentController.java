@@ -46,6 +46,24 @@ public class PaymentController {
         return paymentService.borrowCustomerCrates(wholesalerId, request);
     }
 
+    @PostMapping("/customer/crate-receive")
+    @ResponseStatus(HttpStatus.CREATED)
+    public PaymentOperationResponse receiveCustomerCrates(
+            @PathVariable Long wholesalerId,
+            @RequestBody CustomerCrateBorrowRequest request
+    ) {
+        return paymentService.receiveCustomerCrates(wholesalerId, request);
+    }
+
+    @PostMapping("/customer/crate-handback")
+    @ResponseStatus(HttpStatus.CREATED)
+    public PaymentOperationResponse handBackCustomerCrates(
+            @PathVariable Long wholesalerId,
+            @RequestBody CustomerCrateBorrowRequest request
+    ) {
+        return paymentService.handBackCustomerCrates(wholesalerId, request);
+    }
+
     @PostMapping("/supplier/product-pay")
     @ResponseStatus(HttpStatus.CREATED)
     public PaymentOperationResponse paySupplierProduct(
@@ -71,6 +89,24 @@ public class PaymentController {
             @RequestBody SupplierCrateRequest request
     ) {
         return paymentService.returnSupplierCrates(wholesalerId, request);
+    }
+
+    @PostMapping("/supplier/crate-receive")
+    @ResponseStatus(HttpStatus.CREATED)
+    public PaymentOperationResponse receiveSupplierCrates(
+            @PathVariable Long wholesalerId,
+            @RequestBody SupplierCrateRequest request
+    ) {
+        return paymentService.receiveSupplierCrates(wholesalerId, request);
+    }
+
+    @PostMapping("/supplier/crate-handback")
+    @ResponseStatus(HttpStatus.CREATED)
+    public PaymentOperationResponse handBackSupplierCrates(
+            @PathVariable Long wholesalerId,
+            @RequestBody SupplierCrateRequest request
+    ) {
+        return paymentService.handBackSupplierCrates(wholesalerId, request);
     }
 
     @PostMapping("/customer/{paymentId}/cancel")

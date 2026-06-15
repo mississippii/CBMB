@@ -34,6 +34,7 @@ const OUTFLOW_ROWS = [
   { key: 'shipmentExpenses',     label: 'Shipment expenses' },
   { key: 'shopExpenses',         label: 'Shop expenses' },
   { key: 'crateDepositRefunds',  label: 'Crate deposit refunds' },
+  { key: 'cratePurchases',       label: 'Crate purchases (cash)' },
 ];
 
 const TONES = {

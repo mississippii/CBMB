@@ -60,7 +60,8 @@ public record DailyCashResponse(
             BigDecimal supplierPayments,
             BigDecimal shipmentExpenses,
             BigDecimal shopExpenses,
-            BigDecimal crateDepositRefunds
+            BigDecimal crateDepositRefunds,
+            BigDecimal cratePurchases
     ) {
     }
 

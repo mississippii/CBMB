@@ -171,6 +171,9 @@ public class CashReconciliationService {
                 .sumAmountByTypeInPeriod(wholesalerId, SettlementType.PRODUCT_PAYMENT, from, to));
         BigDecimal shipmentExpenses = money(supplierExpenseRepository
                 .sumWholesalerFrontedInPeriod(wholesalerId, from, to));
+        // Crate purchases paid in CASH leave the drawer (a capital outlay, not a P&L expense).
+        // Purchases paid by bank/bKash/etc. don't touch cash, so they're excluded by the query.
+        BigDecimal cratePurchases = money(boxLedgerRepository.sumPurchaseCashInPeriod(wholesalerId, from, to));
 
         List<DailyCashResponse.CategoryLine> breakdown = new ArrayList<>();
         BigDecimal shopExpenses = BigDecimal.ZERO;
@@ -182,7 +185,8 @@ public class CashReconciliationService {
         }
 
         BigDecimal totalIn = money(cashSales.add(crateCashSales).add(customerCollections).add(crateDepositsTaken));
-        BigDecimal totalOut = money(supplierPayments.add(shipmentExpenses).add(shopExpenses).add(crateDepositRefunds));
+        BigDecimal totalOut = money(supplierPayments.add(shipmentExpenses).add(shopExpenses)
+                .add(crateDepositRefunds).add(cratePurchases));
         BigDecimal netMovement = money(totalIn.subtract(totalOut));
 
         BigDecimal opening = row != null
@@ -200,7 +204,7 @@ public class CashReconciliationService {
                 sales,
                 opening,
                 new DailyCashResponse.Inflow(cashSales, crateCashSales, customerCollections, crateDepositsTaken),
-                new DailyCashResponse.Outflow(supplierPayments, shipmentExpenses, shopExpenses, crateDepositRefunds),
+                new DailyCashResponse.Outflow(supplierPayments, shipmentExpenses, shopExpenses, crateDepositRefunds, cratePurchases),
                 totalIn,
                 totalOut,
                 netMovement,

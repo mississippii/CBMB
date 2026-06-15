@@ -75,6 +75,7 @@ const mapCrateDashboard = (dashboard) => {
     cratesWithSuppliers: Number(dashboard?.cratesWithSuppliers) || 0,
     cratesWithCustomers: Number(dashboard?.cratesWithCustomers) || 0,
     cratesLostDamaged: Number(dashboard?.cratesLostDamaged) || 0,
+    totalCrateValue: Number(dashboard?.totalCrateValue) || 0,
     byType,
   };
 };
@@ -128,6 +129,9 @@ const mapSupplierAccount = (account) => ({
   balance: -roundMoney(Number(account.currentDue ?? account.openingDue) || 0),
   crateHoldings: mapCrateDues(account.crateDues),
   totalCratesHolding: Number(account.totalCratesDue) || 0,
+  // Leg 2 — the supplier's own crates the wholesaler is holding (owes back).
+  supplierCrateHoldings: mapCrateDues(account.crateHoldings),
+  totalCratesHeld: Number(account.totalCratesHeld) || 0,
   status: account.status || 'ACTIVE',
 });
 
@@ -145,6 +149,9 @@ const mapCustomerAccount = (account) => ({
   amountDue: roundMoney(Number(account.currentDue ?? account.openingDue) || 0),
   crateHoldings: mapCrateDues(account.crateDues),
   totalCratesHolding: Number(account.totalCratesDue) || 0,
+  // Leg 2 — the customer's own crates the wholesaler is holding (owes back).
+  customerCrateHoldings: mapCrateDues(account.crateHoldings),
+  totalCratesHeld: Number(account.totalCratesHeld) || 0,
   crateDepositHeld: roundMoney(Number(account.crateDepositHeld) || 0),
   status: account.status || 'ACTIVE',
 });
@@ -921,24 +928,33 @@ export const DataProvider = ({ children }) => {
     return asArray(data).map(mapInventoryItem);
   };
 
-  const addCrates = async (crateType, quantityInput, unitPriceInput) => {
+  // Single batch: addCrates(type, qty, price). Multi-type: addCrates(null, null, null, [{crateType, quantity, unitPrice}], paymentMethod).
+  const addCrates = async (crateType, quantityInput, unitPriceInput, lines = null, paymentMethod = 'CASH') => {
     if (!admin?.wholesalerId) {
       throw new Error('Wholesaler profile not found for this user.');
     }
-    const quantity = Math.max(0, Math.floor(Number(quantityInput) || 0));
-    if (!quantity) return mapCrateDashboard(null);
-
-    const unitPrice = Number(unitPriceInput);
-    if (unitPriceInput === '' || unitPriceInput == null || !Number.isFinite(unitPrice) || unitPrice <= 0) {
-      throw new Error('Cost per crate is required.');
+    const method = String(paymentMethod || 'CASH').toUpperCase();
+    let payload;
+    if (Array.isArray(lines) && lines.length) {
+      payload = {
+        lines: lines.map((l) => ({
+          crateType: String(l.crateType || '').toUpperCase(),
+          quantity: Math.max(0, Math.floor(Number(l.quantity) || 0)),
+          unitPrice: Number(l.unitPrice),
+        })),
+        paymentMethod: method,
+        note: 'Manual crate purchase',
+      };
+    } else {
+      const quantity = Math.max(0, Math.floor(Number(quantityInput) || 0));
+      if (!quantity) return mapCrateDashboard(null);
+      const unitPrice = Number(unitPriceInput);
+      if (unitPriceInput === '' || unitPriceInput == null || !Number.isFinite(unitPrice) || unitPrice <= 0) {
+        throw new Error('Cost per crate is required.');
+      }
+      payload = { crateType: String(crateType || '').toUpperCase(), quantity, unitPrice, paymentMethod: method, note: 'Manual crate purchase' };
     }
-
-    const dashboard = await postJson(apiPaths.cratesPurchaseCreate(admin.wholesalerId), {
-      crateType: String(crateType || '').toUpperCase(),
-      quantity,
-      unitPrice,
-      note: 'Manual crate purchase',
-    });
+    const dashboard = await postJson(apiPaths.cratesPurchaseCreate(admin.wholesalerId), payload);
     const mapped = mapCrateDashboard(dashboard);
     setCrateInventory(mapped);
     refreshTransactions();
@@ -952,21 +968,30 @@ export const DataProvider = ({ children }) => {
    * account is debited (receivable). If null/empty, treated as a walk-in cash sale — no
    * account ledger entry, but the SOLD movement still posts and P&L picks up the profit.
    */
-  const sellCrates = async ({ crateType, quantity, unitSalePrice, customerAccountId, note }) => {
+  const sellCrates = async ({ crateType, quantity, unitSalePrice, customerAccountId, note, paymentMethod = 'CASH', lines = null }) => {
     if (!admin?.wholesalerId) {
       throw new Error('Wholesaler profile not found for this user.');
     }
-    const qty = Math.max(0, Math.floor(Number(quantity) || 0));
-    if (!qty) throw new Error('Quantity must be greater than zero.');
-    const price = Number(unitSalePrice);
-    if (!Number.isFinite(price) || price <= 0) throw new Error('Sale price per crate is required.');
-
-    const payload = {
-      crateType: String(crateType || '').toUpperCase(),
-      quantity: qty,
-      unitSalePrice: price,
-      note: note || null,
-    };
+    const payload = { note: note || null };
+    // Walk-in sales (no customer account) carry a payment method; on-account sales ignore it.
+    if (!customerAccountId) {
+      payload.paymentMethod = String(paymentMethod || 'CASH').toUpperCase();
+    }
+    if (Array.isArray(lines) && lines.length) {
+      payload.lines = lines.map((l) => ({
+        crateType: String(l.crateType || '').toUpperCase(),
+        quantity: Math.max(0, Math.floor(Number(l.quantity) || 0)),
+        unitSalePrice: Number(l.unitSalePrice),
+      }));
+    } else {
+      const qty = Math.max(0, Math.floor(Number(quantity) || 0));
+      if (!qty) throw new Error('Quantity must be greater than zero.');
+      const price = Number(unitSalePrice);
+      if (!Number.isFinite(price) || price <= 0) throw new Error('Sale price per crate is required.');
+      payload.crateType = String(crateType || '').toUpperCase();
+      payload.quantity = qty;
+      payload.unitSalePrice = price;
+    }
     if (customerAccountId) {
       payload.customerAccountId = Number(customerAccountId);
     }
@@ -1003,19 +1028,26 @@ export const DataProvider = ({ children }) => {
   };
 
   /** Mark crates lost/damaged. Loss is always absorbed against crate capital at WAC. */
-  const markCratesLost = async (crateType, quantityInput, reason = 'lost') => {
+  const markCratesLost = async (crateType, quantityInput, reason = 'lost', lines = null) => {
     if (!admin?.wholesalerId) {
       throw new Error('Wholesaler profile not found for this user.');
     }
-    const quantity = Math.max(0, Math.floor(Number(quantityInput) || 0));
-    if (!quantity) return mapCrateDashboard(null);
-
-    const dashboard = await postJson(apiPaths.cratesLostDamagedCreate(admin.wholesalerId), {
-      crateType: String(crateType || '').toUpperCase(),
-      quantity,
-      reason,
-      note: 'Manual crate loss/damage update',
-    });
+    let payload;
+    if (Array.isArray(lines) && lines.length) {
+      payload = {
+        reason,
+        note: 'Manual crate loss/damage update',
+        lines: lines.map((l) => ({
+          crateType: String(l.crateType || '').toUpperCase(),
+          quantity: Math.max(0, Math.floor(Number(l.quantity) || 0)),
+        })),
+      };
+    } else {
+      const quantity = Math.max(0, Math.floor(Number(quantityInput) || 0));
+      if (!quantity) return mapCrateDashboard(null);
+      payload = { crateType: String(crateType || '').toUpperCase(), quantity, reason, note: 'Manual crate loss/damage update' };
+    }
+    const dashboard = await postJson(apiPaths.cratesLostDamagedCreate(admin.wholesalerId), payload);
     const mapped = mapCrateDashboard(dashboard);
     setCrateInventory(mapped);
     refreshTransactions();

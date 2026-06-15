@@ -603,15 +603,31 @@ const SupplierDetail = ({ supplierId, onBack }) => {
 
             <div className="supplier-panel">
           <h3 className="flex items-center gap-2"><Boxes size={17} className="text-blue-600" /> Crates</h3>
-          <div className="mt-3 space-y-2">
+
+          {/* Leg 1 — my crates the supplier is holding (they owe me back) */}
+          <p className="mt-3 text-[11px] font-bold uppercase tracking-wide text-slate-400">My crates with supplier</p>
+          <div className="mt-1.5 space-y-2">
             {(supplier.crateHoldings || []).length === 0 ? (
-              <div className="box-row"><span>No crates due</span><strong>0</strong></div>
+              <div className="box-row"><span>None</span><strong>0</strong></div>
             ) : (
               (supplier.crateHoldings || []).map((c) => (
                 <div key={c.crateType} className="box-row"><span>{c.crateType}</span><strong>{c.quantity || 0}</strong></div>
               ))
             )}
-            <div className="box-row total"><span>Total Due</span><strong>{supplier.totalCratesHolding || 0}</strong></div>
+            <div className="box-row total"><span>Supplier owes me</span><strong className="text-blue-700">{supplier.totalCratesHolding || 0}</strong></div>
+          </div>
+
+          {/* Leg 2 — the supplier's own crates I'm holding (I owe them back) */}
+          <p className="mt-4 text-[11px] font-bold uppercase tracking-wide text-slate-400">Supplier's crates I hold</p>
+          <div className="mt-1.5 space-y-2">
+            {(supplier.supplierCrateHoldings || []).length === 0 ? (
+              <div className="box-row"><span>None</span><strong>0</strong></div>
+            ) : (
+              (supplier.supplierCrateHoldings || []).map((c) => (
+                <div key={c.crateType} className="box-row"><span>{c.crateType}</span><strong>{c.quantity || 0}</strong></div>
+              ))
+            )}
+            <div className="box-row total"><span>I owe supplier</span><strong className="text-amber-700">{supplier.totalCratesHeld || 0}</strong></div>
           </div>
         </div>
           </div>

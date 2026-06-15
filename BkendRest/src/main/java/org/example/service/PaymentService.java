@@ -22,7 +22,9 @@ import org.example.model.CrateDepositMovement;
 import org.example.model.BoxInventory;
 import org.example.model.BoxLedger;
 import org.example.model.BoxType;
+import org.example.model.CustomerCrateHolding;
 import org.example.model.Payment;
+import org.example.model.SupplierCrateHolding;
 import org.example.model.SupplierSettlement;
 import org.example.model.Transaction;
 import org.example.model.Wholesaler;
@@ -46,7 +48,9 @@ import org.example.repository.BoxInventoryRepository;
 import org.example.repository.BoxLedgerRepository;
 import org.example.repository.BoxTypeRepository;
 import org.example.repository.CrateDepositMovementRepository;
+import org.example.repository.CustomerCrateHoldingRepository;
 import org.example.repository.PaymentRepository;
+import org.example.repository.SupplierCrateHoldingRepository;
 import org.example.repository.SupplierSettlementRepository;
 import org.example.repository.TransactionRepository;
 import org.example.repository.WholesalerCustomerRepository;
@@ -72,6 +76,8 @@ public class PaymentService {
     private final BoxBalanceRepository boxBalanceRepository;
     private final BoxLedgerRepository boxLedgerRepository;
     private final CrateDepositMovementRepository crateDepositMovementRepository;
+    private final SupplierCrateHoldingRepository supplierCrateHoldingRepository;
+    private final CustomerCrateHoldingRepository customerCrateHoldingRepository;
     private final SupplierDueService supplierDueService;
 
     public PaymentService(
@@ -89,6 +95,8 @@ public class PaymentService {
             BoxBalanceRepository boxBalanceRepository,
             BoxLedgerRepository boxLedgerRepository,
             CrateDepositMovementRepository crateDepositMovementRepository,
+            SupplierCrateHoldingRepository supplierCrateHoldingRepository,
+            CustomerCrateHoldingRepository customerCrateHoldingRepository,
             SupplierDueService supplierDueService
     ) {
         this.wholesalerRepository = wholesalerRepository;
@@ -105,6 +113,8 @@ public class PaymentService {
         this.boxBalanceRepository = boxBalanceRepository;
         this.boxLedgerRepository = boxLedgerRepository;
         this.crateDepositMovementRepository = crateDepositMovementRepository;
+        this.supplierCrateHoldingRepository = supplierCrateHoldingRepository;
+        this.customerCrateHoldingRepository = customerCrateHoldingRepository;
         this.supplierDueService = supplierDueService;
     }
 
@@ -234,6 +244,30 @@ public class PaymentService {
     @Transactional
     public PaymentOperationResponse returnSupplierCrates(Long wholesalerId, SupplierCrateRequest request) {
         return moveSupplierCrates(wholesalerId, request, false);
+    }
+
+    /** Leg 2: record the supplier's own crates arriving into the wholesaler's custody (you now owe them). */
+    @Transactional
+    public PaymentOperationResponse receiveSupplierCrates(Long wholesalerId, SupplierCrateRequest request) {
+        return moveSupplierHeldCrates(wholesalerId, request, true);
+    }
+
+    /** Leg 2: hand the supplier's own crates back to them (clears what you owe). */
+    @Transactional
+    public PaymentOperationResponse handBackSupplierCrates(Long wholesalerId, SupplierCrateRequest request) {
+        return moveSupplierHeldCrates(wholesalerId, request, false);
+    }
+
+    /** Customer leg 2: record the customer's own crates arriving into the wholesaler's custody. */
+    @Transactional
+    public PaymentOperationResponse receiveCustomerCrates(Long wholesalerId, org.example.dto.CustomerCrateBorrowRequest request) {
+        return moveCustomerHeldCrates(wholesalerId, request, true);
+    }
+
+    /** Customer leg 2: hand the customer's own crates back to them. */
+    @Transactional
+    public PaymentOperationResponse handBackCustomerCrates(Long wholesalerId, org.example.dto.CustomerCrateBorrowRequest request) {
+        return moveCustomerHeldCrates(wholesalerId, request, false);
     }
 
     private PaymentOperationResponse settleSupplierMoney(Long wholesalerId, SupplierSettlementRequest request, SettlementType type, boolean reduceDue, String label) {
@@ -419,6 +453,129 @@ public class PaymentService {
         }
         boxInventoryRepository.save(inventory);
         boxBalanceRepository.save(balance);
+    }
+
+    /**
+     * Leg 2: move the SUPPLIER's own crates in/out of the wholesaler's custody.
+     * receive=true → crates arrive (wholesaler now owes the supplier more); receive=false →
+     * crates handed back. These crates are not the wholesaler's, so this touches ONLY
+     * supplier_crate_holdings + box_ledger — never box_inventory, never any money.
+     */
+    private PaymentOperationResponse moveSupplierHeldCrates(Long wholesalerId, SupplierCrateRequest request, boolean receive) {
+        Wholesaler wholesaler = findWholesaler(wholesalerId);
+        WholesalerSupplier supplierAccount = findSupplierAccount(wholesalerId, request.wholesalerSupplierId());
+        Map<String, Integer> lines = normalizeLines(request.crates(), "Crate quantity cannot be negative.");
+        int total = lines.values().stream().mapToInt(Integer::intValue).sum();
+        if (total == 0) {
+            throw new BadRequestException("Enter crate quantity.");
+        }
+
+        List<CrateTypeQuantity> crateLines = new ArrayList<>();
+        for (Map.Entry<String, Integer> line : lines.entrySet()) {
+            applySupplierHeldCrateMovement(wholesaler, supplierAccount, line.getKey(), line.getValue(), receive, request.note());
+            crateLines.add(new CrateTypeQuantity(line.getKey(), line.getValue()));
+        }
+
+        BigDecimal currentDue = supplierDueService.netDue(wholesalerId, supplierAccount);
+        String operationType = receive ? "SUPPLIER_CRATE_RECEIVE" : "SUPPLIER_CRATE_HANDBACK";
+        String verb = receive ? "Supplier's crates received" : "Supplier's crates handed back";
+        String description = verb + " — " + describeLines(crateLines);
+        Transaction transaction = savePaymentTransaction(
+                wholesaler.getId(), null, null, null, supplierAccount.getId(), BigDecimal.ZERO, currentDue, description
+        );
+        return response(transaction, null, null, null, supplierAccount.getId(), currentDue, currentDue, BigDecimal.ZERO, total, crateLines, operationType);
+    }
+
+    private void applySupplierHeldCrateMovement(Wholesaler wholesaler, WholesalerSupplier supplierAccount, String crateTypeValue, int quantity, boolean receive, String note) {
+        BoxType boxType = findBoxType(wholesaler.getId(), crateTypeValue);
+        var existing = supplierCrateHoldingRepository
+                .findByWholesaler_IdAndWholesalerSupplierIdAndBoxType_Id(wholesaler.getId(), supplierAccount.getId(), boxType.getId());
+
+        if (!receive && existing.isEmpty()) {
+            throw new BadRequestException("You are not holding any " + crateTypeValue + " crates from this supplier.");
+        }
+
+        SupplierCrateHolding holding = existing.orElseGet(() -> {
+            SupplierCrateHolding newHolding = new SupplierCrateHolding();
+            newHolding.setWholesaler(wholesaler);
+            newHolding.setBoxType(boxType);
+            newHolding.setWholesalerSupplierId(supplierAccount.getId());
+            newHolding.setQuantity(0);
+            return newHolding;
+        });
+
+        if (receive) {
+            holding.setQuantity(holding.getQuantity() + quantity);
+            saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), BoxMovementType.RECEIVED_FROM_SUPPLIER, quantity, null, note);
+        } else {
+            if (holding.getQuantity() < quantity) {
+                throw new BadRequestException("Handed-back " + crateTypeValue + " crates cannot exceed the " + holding.getQuantity() + " held from this supplier.");
+            }
+            holding.setQuantity(holding.getQuantity() - quantity);
+            saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), BoxMovementType.RETURNED_TO_SUPPLIER, quantity, null, note);
+        }
+        supplierCrateHoldingRepository.save(holding);
+    }
+
+    /**
+     * Customer leg 2: move the CUSTOMER's own crates in/out of the wholesaler's custody.
+     * receive=true → crates arrive (wholesaler owes the customer); receive=false → handed back.
+     * Touches ONLY customer_crate_holdings + box_ledger — never box_inventory, never money.
+     */
+    private PaymentOperationResponse moveCustomerHeldCrates(Long wholesalerId, org.example.dto.CustomerCrateBorrowRequest request, boolean receive) {
+        Wholesaler wholesaler = findWholesaler(wholesalerId);
+        WholesalerCustomer customerAccount = findCustomerAccount(wholesalerId, request.wholesalerCustomerId());
+        Map<String, Integer> lines = normalizeLines(request.crates(), "Crate quantity cannot be negative.");
+        int total = lines.values().stream().mapToInt(Integer::intValue).sum();
+        if (total == 0) {
+            throw new BadRequestException("Enter crate quantity.");
+        }
+
+        List<CrateTypeQuantity> crateLines = new ArrayList<>();
+        for (Map.Entry<String, Integer> line : lines.entrySet()) {
+            applyCustomerHeldCrateMovement(wholesaler, customerAccount, line.getKey(), line.getValue(), receive, request.note());
+            crateLines.add(new CrateTypeQuantity(line.getKey(), line.getValue()));
+        }
+
+        BigDecimal currentDue = currentBalance(wholesaler, PartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), customerAccount.getOpeningDue());
+        String operationType = receive ? "CUSTOMER_CRATE_RECEIVE" : "CUSTOMER_CRATE_HANDBACK";
+        String verb = receive ? "Customer's crates received" : "Customer's crates handed back";
+        String description = verb + " — " + describeLines(crateLines);
+        Transaction transaction = savePaymentTransaction(
+                wholesaler.getId(), null, null, customerAccount.getId(), null, BigDecimal.ZERO, currentDue, description
+        );
+        return response(transaction, null, null, customerAccount.getId(), null, currentDue, currentDue, BigDecimal.ZERO, total, crateLines, operationType);
+    }
+
+    private void applyCustomerHeldCrateMovement(Wholesaler wholesaler, WholesalerCustomer customerAccount, String crateTypeValue, int quantity, boolean receive, String note) {
+        BoxType boxType = findBoxType(wholesaler.getId(), crateTypeValue);
+        var existing = customerCrateHoldingRepository
+                .findByWholesaler_IdAndWholesalerCustomerIdAndBoxType_Id(wholesaler.getId(), customerAccount.getId(), boxType.getId());
+
+        if (!receive && existing.isEmpty()) {
+            throw new BadRequestException("You are not holding any " + crateTypeValue + " crates from this customer.");
+        }
+
+        CustomerCrateHolding holding = existing.orElseGet(() -> {
+            CustomerCrateHolding newHolding = new CustomerCrateHolding();
+            newHolding.setWholesaler(wholesaler);
+            newHolding.setBoxType(boxType);
+            newHolding.setWholesalerCustomerId(customerAccount.getId());
+            newHolding.setQuantity(0);
+            return newHolding;
+        });
+
+        if (receive) {
+            holding.setQuantity(holding.getQuantity() + quantity);
+            saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), BoxMovementType.RECEIVED_FROM_CUSTOMER, quantity, null, note);
+        } else {
+            if (holding.getQuantity() < quantity) {
+                throw new BadRequestException("Handed-back " + crateTypeValue + " crates cannot exceed the " + holding.getQuantity() + " held from this customer.");
+            }
+            holding.setQuantity(holding.getQuantity() - quantity);
+            saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), BoxMovementType.RETURNED_TO_CUSTOMER, quantity, null, note);
+        }
+        customerCrateHoldingRepository.save(holding);
     }
 
     private Transaction savePaymentTransaction(Long wholesalerId, Long paymentId, Long settlementId, Long customerAccountId, Long supplierAccountId, BigDecimal amount, BigDecimal dueAfter, String description) {

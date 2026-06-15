@@ -42,8 +42,10 @@ const SaleForm = ({ onClose }) => {
   const [oneTime, setOneTime] = useState({ name: '', phone: '' });
   const [showDiscount, setShowDiscount] = useState(false);
   const [method, setMethod] = useState('CASH');
-  // Crate add-on: borrow (permanent customer) or sell (walk-in / cash). One or more types.
+  // Crate add-on: borrow (permanent customer) or sell (walk-in). One or more types.
+  // Walk-in crate sale carries its own payment method, independent of the product payment.
   const [showCrate, setShowCrate] = useState(false);
+  const [crateMethod, setCrateMethod] = useState('CASH');
   const [crateLines, setCrateLines] = useState([{ crateType: '', quantity: '', unitPrice: '' }]);
   // Refundable deposit taken against borrowed crates (permanent customers only).
   const [crateDeposit, setCrateDeposit] = useState('');
@@ -223,6 +225,7 @@ const SaleForm = ({ onClose }) => {
             quantity: Number(l.quantity),
             unitSalePrice: Number(l.unitPrice),
             customerAccountId: null,
+            paymentMethod: crateMethod,
             note: 'Sold with sale',
           });
         }
@@ -357,7 +360,7 @@ const SaleForm = ({ onClose }) => {
               <label className="inline-flex items-center gap-2 cursor-pointer text-sm font-semibold text-slate-700">
                 <input type="checkbox" className="h-4 w-4 shrink-0" checked={showCrate} onChange={(e) => setShowCrate(e.target.checked)} />
                 <Boxes size={14} className="shrink-0 text-blue-600" />
-                <span>{isOneTime ? 'Sell crates with this sale (cash)' : 'Customer borrows crates with this sale'}</span>
+                <span>{isOneTime ? 'Sell crates with this sale' : 'Customer borrows crates with this sale'}</span>
               </label>
               {showCrate && (
                 <div className="mt-3 space-y-2">
@@ -413,6 +416,19 @@ const SaleForm = ({ onClose }) => {
                         </div>
                       </div>
                       <p className="mb-2 text-[11px] text-slate-400">Security money — returned when crates come back.</p>
+                    </div>
+                  )}
+                  {isOneTime && (
+                    <div className="form-field pt-1" style={{ maxWidth: '14rem' }}>
+                      <label className="form-label"><Wallet size={13} /> Crate paid with</label>
+                      <select value={crateMethod} onChange={(e) => setCrateMethod(e.target.value)} className="input-field">
+                        {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{titleCase(m)}</option>)}
+                      </select>
+                      <p className="mt-1 text-[11px] text-slate-400">
+                        {crateMethod === 'CASH'
+                          ? 'Cash — enters the drawer / Cash Book.'
+                          : 'Non-cash — P&L profit only, not the cash drawer.'}
+                      </p>
                     </div>
                   )}
                   {isOneTime && crateSellTotal > 0 && (

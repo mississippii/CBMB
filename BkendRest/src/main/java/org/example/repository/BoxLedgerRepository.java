@@ -92,6 +92,28 @@ public interface BoxLedgerRepository extends JpaRepository<BoxLedger, BoxLedgerI
     );
 
     /**
+     * CASH paid to buy crates in a period: sum(quantity × unit_cost_snapshot) over PURCHASE rows
+     * settled in CASH. Crates are a capital asset (not a P&L expense), but the cash leaves the
+     * drawer, so the Cash Book counts CASH purchases as an outflow. Purchases paid by bank/bKash/etc.
+     * do not touch the drawer. Returns 0 if no rows match.
+     */
+    @Query("""
+        SELECT COALESCE(SUM(l.quantity * l.unitCostSnapshot), 0)
+        FROM BoxLedger l
+        WHERE l.wholesaler.id = :wholesalerId
+          AND l.movementType = org.example.model.enums.BoxMovementType.PURCHASE
+          AND l.paymentMethod = org.example.model.enums.PaymentMethod.CASH
+          AND l.unitCostSnapshot IS NOT NULL
+          AND (:from IS NULL OR l.createdAt >= :from)
+          AND (:to   IS NULL OR l.createdAt <  :to)
+        """)
+    java.math.BigDecimal sumPurchaseCashInPeriod(
+            @Param("wholesalerId") Long wholesalerId,
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to
+    );
+
+    /**
      * Net profit from crate sales in a period: sum(qty × (unitSalePrice − unitCostSnapshot)).
      * Crates are a capital asset so only the gain/loss flows to P&L, never the gross sale.
      */
@@ -112,11 +134,14 @@ public interface BoxLedgerRepository extends JpaRepository<BoxLedger, BoxLedgerI
     );
 
     /**
-     * Gross cash from walk-in crate sales in a period: sum(qty × unitSalePrice) for
-     * SOLD rows with no party account (partyType = WHOLESALER). The full sale price
-     * enters the drawer immediately, so the cash book counts the gross — not the
-     * P&L profit. On-account crate sales (partyType = WHOLESALER_CUSTOMER) are
-     * excluded: they raise a receivable and arrive later as a customer collection.
+     * Gross CASH from walk-in crate sales in a period: sum(qty × unitSalePrice) for
+     * SOLD rows with no party account (partyType = WHOLESALER) settled in CASH. The full
+     * sale price enters the drawer immediately, so the cash book counts the gross — not the
+     * P&L profit. Walk-in sales paid by bank/bKash/etc. don't touch the drawer. A null
+     * payment method (sales recorded before the method existed) is treated as CASH, since
+     * walk-in sales were always cash then — keeps historical reconciliations stable.
+     * On-account crate sales (partyType = WHOLESALER_CUSTOMER) are excluded: they raise a
+     * receivable and arrive later as a customer collection.
      */
     @Query("""
         SELECT COALESCE(SUM(l.quantity * l.unitSalePrice), 0)
@@ -124,6 +149,7 @@ public interface BoxLedgerRepository extends JpaRepository<BoxLedger, BoxLedgerI
         WHERE l.wholesaler.id = :wholesalerId
           AND l.movementType = org.example.model.enums.BoxMovementType.SOLD
           AND l.partyType = org.example.model.enums.BoxLedgerPartyType.WHOLESALER
+          AND (l.paymentMethod IS NULL OR l.paymentMethod = org.example.model.enums.PaymentMethod.CASH)
           AND l.unitSalePrice IS NOT NULL
           AND (:from IS NULL OR l.createdAt >= :from)
           AND (:to   IS NULL OR l.createdAt <  :to)

@@ -20,6 +20,13 @@ public record CrateQuantityRequest(
         Integer quantity,
         BigDecimal unitPrice,
         String reason,
-        String note
+        String note,
+        /**
+         * Add-crates only: how the purchase was paid. "CASH" reduces the Cash Book drawer;
+         * bank/bKash/etc. do not. Defaults to CASH when omitted.
+         */
+        String paymentMethod,
+        /** Optional multi-type lines. When non-empty, processed instead of the single fields above. */
+        java.util.List<CrateOpLine> lines
 ) {
 }

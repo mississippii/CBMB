@@ -1,5 +1,6 @@
 package org.example.dto;
 
+import java.math.BigDecimal;
 import java.util.List;
 
 public record CrateDashboardResponse(
@@ -9,6 +10,8 @@ public record CrateDashboardResponse(
         Integer cratesWithCustomers,
         Integer cratesWithSuppliers,
         Integer cratesLostDamaged,
+        /** Capital tied up in live crates: Σ (inHand + withCustomers + withSuppliers) × weighted-avg cost. */
+        BigDecimal totalCrateValue,
         List<CrateInventoryTypeResponse> crateTypes
 ) {
 }

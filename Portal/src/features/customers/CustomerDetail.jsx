@@ -219,9 +219,12 @@ const CustomerDetail = ({ customerId, onBack }) => {
 
             <div className="supplier-panel">
           <h3>Crate Accountability</h3>
-          <div className="mt-4 space-y-3">
+
+          {/* Leg 1 — my crates the customer is holding (they owe me back) */}
+          <p className="mt-3 text-[11px] font-bold uppercase tracking-wide text-slate-400">My crates with customer</p>
+          <div className="mt-1.5 space-y-2">
             {(customer.crateHoldings || []).length === 0 ? (
-              <div className="box-row"><span>No crates due</span><strong>0</strong></div>
+              <div className="box-row"><span>None</span><strong>0</strong></div>
             ) : (
               (customer.crateHoldings || []).map((c) => (
                 <div key={c.crateType} className="box-row">
@@ -231,8 +234,27 @@ const CustomerDetail = ({ customerId, onBack }) => {
               ))
             )}
             <div className="box-row total">
-              <span>Total Crates Due</span>
-              <strong>{customer.totalCratesHolding || 0}</strong>
+              <span>Customer owes me</span>
+              <strong className="text-blue-700">{customer.totalCratesHolding || 0}</strong>
+            </div>
+          </div>
+
+          {/* Leg 2 — the customer's own crates I'm holding (I owe them back) */}
+          <p className="mt-4 text-[11px] font-bold uppercase tracking-wide text-slate-400">Customer's crates I hold</p>
+          <div className="mt-1.5 space-y-2">
+            {(customer.customerCrateHoldings || []).length === 0 ? (
+              <div className="box-row"><span>None</span><strong>0</strong></div>
+            ) : (
+              (customer.customerCrateHoldings || []).map((c) => (
+                <div key={c.crateType} className="box-row">
+                  <span>{c.crateType}</span>
+                  <strong>{c.quantity || 0}</strong>
+                </div>
+              ))
+            )}
+            <div className="box-row total">
+              <span>I owe customer</span>
+              <strong className="text-amber-700">{customer.totalCratesHeld || 0}</strong>
             </div>
           </div>
         </div>
