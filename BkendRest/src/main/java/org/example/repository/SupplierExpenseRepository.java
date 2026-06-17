@@ -32,6 +32,15 @@ public interface SupplierExpenseRepository extends JpaRepository<SupplierExpense
     java.math.BigDecimal sumOutstandingBySupplier(@Param("wholesalerId") Long wholesalerId,
                                                    @Param("supplierId") Long supplierId);
 
+    /** Total expense amount booked against a supplier (deducted from net payable). */
+    @Query("""
+        SELECT COALESCE(SUM(e.amount), 0) FROM SupplierExpense e
+        WHERE e.wholesaler.id = :wholesalerId
+          AND e.wholesalerSupplier.id = :supplierId
+        """)
+    java.math.BigDecimal sumAmountBySupplier(@Param("wholesalerId") Long wholesalerId,
+                                             @Param("supplierId") Long supplierId);
+
     @Query("""
         SELECT COALESCE(SUM(e.amount), 0) FROM SupplierExpense e
         WHERE e.wholesaler.id = :wholesalerId
@@ -42,6 +51,21 @@ public interface SupplierExpenseRepository extends JpaRepository<SupplierExpense
                                           @Param("supplierId") Long supplierId,
                                           @Param("from") LocalDateTime from,
                                           @Param("to") LocalDateTime to);
+
+    /**
+     * Cash the wholesaler fronted on supplier/shipment expenses in [from, to) — the
+     * wholesaler-funded slice (amount − supplier-funded) = dueAmount. This is a drawer
+     * outflow for the cash book; the expense is a deduction from the supplier's net due.
+     */
+    @Query("""
+        SELECT COALESCE(SUM(e.dueAmount), 0) FROM SupplierExpense e
+        WHERE e.wholesaler.id = :wholesalerId
+          AND (:from IS NULL OR e.expenseDate >= :from)
+          AND (:to IS NULL OR e.expenseDate < :to)
+        """)
+    java.math.BigDecimal sumWholesalerFrontedInPeriod(@Param("wholesalerId") Long wholesalerId,
+                                                      @Param("from") LocalDateTime from,
+                                                      @Param("to") LocalDateTime to);
 
     // Shipment-wise expense rollups.
     @Query("SELECT COALESCE(SUM(e.amount), 0) FROM SupplierExpense e WHERE e.delivery.id = :deliveryId")

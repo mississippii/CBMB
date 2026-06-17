@@ -5,10 +5,7 @@
 
 const CURRENCY_SYMBOL = '৳';
 
-export const roundMoney = (value) => {
-  const n = Number(value) || 0;
-  return Math.round(n * 100) / 100;
-};
+export const roundMoney = (value) => Math.ceil(Number(value) || 0);
 
 /**
  * Money formatter.
@@ -24,8 +21,9 @@ export const roundMoney = (value) => {
 export const formatMoney = (value, { decimals = 0 } = {}) => {
   const num = Number(value);
   if (!Number.isFinite(num)) return `${CURRENCY_SYMBOL} 0`;
-  const sign = num < 0 ? '− ' : '';
-  const abs = Math.abs(num);
+  const rounded = decimals === 0 ? Math.ceil(num) : num;
+  const sign = rounded < 0 ? '− ' : '';
+  const abs = Math.abs(rounded);
   const formatted = abs.toLocaleString(undefined, {
     minimumFractionDigits: decimals,
     maximumFractionDigits: decimals,
@@ -48,25 +46,33 @@ export const formatQuantity = (value, { decimals = 3 } = {}) => {
 
 export const formatNumber = (value) => (Number(value) || 0).toLocaleString();
 
+const parseDateValue = (value) => {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  if (typeof value === 'string' && /^\d{4}-\d{2}-\d{2}$/.test(value)) {
+    const [year, month, day] = value.split('-').map(Number);
+    return new Date(year, month - 1, day);
+  }
+  return new Date(value);
+};
+
 /**
- * Date formatter — short locale date ("26/05/2026" in en-GB).
- *   formatDate('2026-05-26T08:00:00') → "26/05/2026"
+ * Date formatter — fixed app display format: "11 Jun 2026".
+ *   formatDate('2026-06-11T08:00:00') → "11 Jun 2026"
  *   formatDate(null) → "—"
  */
 export const formatDate = (value) => {
-  if (!value) return '—';
-  const d = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(d.getTime())) return '—';
-  return d.toLocaleDateString('en-GB', { day: '2-digit', month: '2-digit', year: 'numeric' });
+  const d = parseDateValue(value);
+  if (!d || Number.isNaN(d.getTime())) return '—';
+  return d.toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' });
 };
 
-/** "26/05/2026, 08:15" */
+/** "11 Jun 2026, 08:15" */
 export const formatDateTime = (value) => {
-  if (!value) return '—';
-  const d = value instanceof Date ? value : new Date(value);
-  if (Number.isNaN(d.getTime())) return '—';
+  const d = parseDateValue(value);
+  if (!d || Number.isNaN(d.getTime())) return '—';
   return d.toLocaleString('en-GB', {
-    day: '2-digit', month: '2-digit', year: 'numeric',
+    day: '2-digit', month: 'short', year: 'numeric',
     hour: '2-digit', minute: '2-digit', hour12: false,
   });
 };
@@ -79,8 +85,13 @@ export const formatTime = (value) => {
   return d.toLocaleTimeString('en-GB', { hour: '2-digit', minute: '2-digit', hour12: false });
 };
 
-/** ISO yyyy-mm-dd string (e.g. for storing in date pickers). */
-export const dateOnly = (value) => {
-  if (!value) return new Date().toISOString().split('T')[0];
-  return new Date(value).toISOString().split('T')[0];
+/** Local calendar date as yyyy-mm-dd. Unlike toISOString(), it never shifts the day
+ *  across the UTC boundary — use this for "today" in date pickers and day filters. */
+export const localDateIso = (value) => {
+  const d = value == null ? new Date() : (value instanceof Date ? value : new Date(value));
+  if (Number.isNaN(d.getTime())) return '';
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 };
+
+/** ISO yyyy-mm-dd string (e.g. for storing in date pickers). */
+export const dateOnly = (value) => (value ? localDateIso(value) : localDateIso());

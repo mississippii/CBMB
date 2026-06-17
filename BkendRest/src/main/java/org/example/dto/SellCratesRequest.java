@@ -19,6 +19,14 @@ public record SellCratesRequest(
         Integer quantity,
         BigDecimal unitSalePrice,
         Long customerAccountId,
-        String note
+        String note,
+        /**
+         * Walk-in sales only: how the buyer paid. "CASH" lands in the Cash Book drawer;
+         * bank/bKash/etc. do not. Ignored for on-account (permanent customer) sales, which
+         * raise a receivable instead of taking cash. Defaults to CASH when omitted.
+         */
+        String paymentMethod,
+        /** Optional multi-type lines (each with its own unitSalePrice). When non-empty, used instead of the single fields. */
+        java.util.List<CrateOpLine> lines
 ) {
 }

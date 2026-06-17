@@ -30,6 +30,7 @@ import org.example.repository.AccountLedgerRepository;
 import org.example.repository.BoxBalanceRepository;
 import org.example.repository.BoxInventoryRepository;
 import org.example.repository.BoxLedgerRepository;
+import org.example.repository.CrateDepositMovementRepository;
 import org.example.repository.PaymentRepository;
 import org.example.repository.SupplierSettlementRepository;
 import org.example.repository.TransactionRepository;
@@ -43,10 +44,8 @@ import org.springframework.transaction.annotation.Transactional;
  * Cancels a POSTED customer Payment or supplier SupplierSettlement by writing reversing
  * entries — the original rows stay (status flips to CANCELLED).
  *
- * Supported supplier settlement types: PRODUCT_PAYMENT, ADVANCE_PAYMENT, COMMISSION_RECEIVE.
- * EXPENSE_RECEIVE is NOT cancellable here — the wholesaler should add a corrective
- * expense entry instead, because we don't track which specific SupplierExpense rows
- * the original EXPENSE_RECEIVE paid down.
+ * Cancellable supplier settlement type: PRODUCT_PAYMENT (restores the supplier payable).
+ * Manual ADJUSTMENT settlements are not cancellable — post an opposite ADJUSTMENT instead.
  */
 @Service
 public class PaymentCancellationService {
@@ -61,6 +60,7 @@ public class PaymentCancellationService {
     private final BoxBalanceRepository boxBalanceRepository;
     private final BoxInventoryRepository boxInventoryRepository;
     private final BoxLedgerRepository boxLedgerRepository;
+    private final CrateDepositMovementRepository crateDepositMovementRepository;
     private final TransactionRepository transactionRepository;
     private final AccountBalanceService accountBalanceService;
 
@@ -75,6 +75,7 @@ public class PaymentCancellationService {
             BoxBalanceRepository boxBalanceRepository,
             BoxInventoryRepository boxInventoryRepository,
             BoxLedgerRepository boxLedgerRepository,
+            CrateDepositMovementRepository crateDepositMovementRepository,
             TransactionRepository transactionRepository,
             AccountBalanceService accountBalanceService
     ) {
@@ -88,6 +89,7 @@ public class PaymentCancellationService {
         this.boxBalanceRepository = boxBalanceRepository;
         this.boxInventoryRepository = boxInventoryRepository;
         this.boxLedgerRepository = boxLedgerRepository;
+        this.crateDepositMovementRepository = crateDepositMovementRepository;
         this.transactionRepository = transactionRepository;
         this.accountBalanceService = accountBalanceService;
     }
@@ -121,6 +123,27 @@ public class PaymentCancellationService {
         // 2. Reverse crate returns: each customer-return BoxLedger entry against this payment.
         int cratesReinstated = reverseCrateReturns(wholesaler, customer, payment, cleanReason);
 
+        // 3. Reverse any crate-deposit refund made with this payment: the money comes back in,
+        //    and the held deposit is restored. Record a compensating movement for the audit/cash book.
+        for (org.example.model.CrateDepositMovement refund : crateDepositMovementRepository
+                .findByWholesalerIdAndPaymentId(wholesaler.getId(), payment.getId())) {
+            if (refund.getMovementType() != org.example.model.enums.CrateDepositMovementType.REFUNDED) {
+                continue;
+            }
+            BigDecimal restore = money(refund.getAmount().negate()); // refund amount stored negative → positive
+            org.example.model.CrateDepositMovement reversal = new org.example.model.CrateDepositMovement();
+            reversal.setWholesalerId(wholesaler.getId());
+            reversal.setWholesalerCustomerId(customer.getId());
+            reversal.setAmount(restore);
+            reversal.setMovementType(org.example.model.enums.CrateDepositMovementType.TAKEN);
+            reversal.setPaymentId(payment.getId());
+            reversal.setNote(cleanReason + " — restore crate deposit refund");
+            crateDepositMovementRepository.save(reversal);
+            BigDecimal held = customer.getCrateDepositHeld() == null ? BigDecimal.ZERO : customer.getCrateDepositHeld();
+            customer.setCrateDepositHeld(money(held.add(restore)));
+            wholesalerCustomerRepository.save(customer);
+        }
+
         payment.setStatus(PostStatus.CANCELLED);
         payment.setNote(joinNote(payment.getNote(), cleanReason));
         paymentRepository.save(payment);
@@ -145,9 +168,6 @@ public class PaymentCancellationService {
             throw new BadRequestException("Settlement is already " + settlement.getStatus().name() + ".");
         }
         SettlementType type = settlement.getSettlementType();
-        if (type == SettlementType.EXPENSE_RECEIVE) {
-            throw new BadRequestException("EXPENSE_RECEIVE cancellation is not supported. Record a corrective supplier-expense entry instead so the expense due is restored explicitly.");
-        }
         if (type == SettlementType.ADJUSTMENT) {
             throw new BadRequestException("Manual ADJUSTMENT settlements cannot be cancelled. Post an opposite ADJUSTMENT entry.");
         }
@@ -157,7 +177,7 @@ public class PaymentCancellationService {
         BigDecimal amount = money(settlement.getAmount());
         BigDecimal supplierBalanceAfter = null;
 
-        boolean reducesPayable = type == SettlementType.PRODUCT_PAYMENT || type == SettlementType.ADVANCE_PAYMENT;
+        boolean reducesPayable = type == SettlementType.PRODUCT_PAYMENT;
         if (reducesPayable) {
             AccountBalance balance = accountBalanceService.getOrCreate(
                     wholesaler, PartyType.WHOLESALER_SUPPLIER, supplier.getId(), supplier.getOpeningDue());
@@ -168,7 +188,6 @@ public class PaymentCancellationService {
                     settlementId, BigDecimal.ZERO, amount, cleanReason + " — reverse " + type.name());
             supplierBalanceAfter = money(balance.getBalance());
         }
-        // COMMISSION_RECEIVE didn't touch balance — nothing to reverse there. Just status flip.
 
         settlement.setStatus(PostStatus.CANCELLED);
         settlement.setNote(joinNote(settlement.getNote(), cleanReason));
@@ -285,6 +304,6 @@ public class PaymentCancellationService {
     }
 
     private static BigDecimal money(BigDecimal value) {
-        return (value == null ? BigDecimal.ZERO : value).setScale(2, RoundingMode.HALF_UP);
+        return (value == null ? BigDecimal.ZERO : value).setScale(0, RoundingMode.CEILING);
     }
 }

@@ -33,7 +33,7 @@ import org.springframework.transaction.annotation.Transactional;
 public class ShopExpenseService {
 
     private static final List<String> DEFAULT_SHOP_CATEGORIES = List.of(
-            "Shop Rent", "Employee Cost", "Lunch Bill", "Snacks Bill", "Other"
+            "Lunch Bill", "Snacks", "Utility Bill", "Shop Rent", "Employee Salary", "Tax", "Other"
     );
 
     private final WholesalerRepository wholesalerRepository;
@@ -178,7 +178,7 @@ public class ShopExpenseService {
     }
 
     private static BigDecimal money(BigDecimal value) {
-        return (value == null ? BigDecimal.ZERO : value).setScale(2, RoundingMode.HALF_UP);
+        return (value == null ? BigDecimal.ZERO : value).setScale(0, RoundingMode.CEILING);
     }
 
     private static String clean(String value) {

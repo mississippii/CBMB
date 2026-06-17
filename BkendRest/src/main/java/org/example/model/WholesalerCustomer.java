@@ -39,6 +39,10 @@ public class WholesalerCustomer {
     @Column(name = "opening_due", nullable = false, precision = 14, scale = 2)
     private BigDecimal openingDue = BigDecimal.ZERO;
 
+    /** Refundable crate-deposit money currently held for this customer (liability, not income). */
+    @Column(name = "crate_deposit_held", nullable = false, precision = 14, scale = 2)
+    private BigDecimal crateDepositHeld = BigDecimal.ZERO;
+
     @Enumerated(EnumType.STRING)
     @Column(nullable = false)
     private RecordStatus status = RecordStatus.ACTIVE;
@@ -79,6 +83,14 @@ public class WholesalerCustomer {
 
     public void setOpeningDue(BigDecimal openingDue) {
         this.openingDue = openingDue;
+    }
+
+    public BigDecimal getCrateDepositHeld() {
+        return crateDepositHeld;
+    }
+
+    public void setCrateDepositHeld(BigDecimal crateDepositHeld) {
+        this.crateDepositHeld = crateDepositHeld;
     }
 
     public RecordStatus getStatus() {

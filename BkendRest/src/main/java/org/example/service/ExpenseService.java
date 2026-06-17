@@ -1,9 +1,11 @@
 package org.example.service;
 
 import java.math.BigDecimal;
+import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import org.example.dto.CreateExpenseBatchRequest;
 import org.example.dto.CreateExpenseRequest;
 import org.example.dto.ExpenseCategoryResponse;
 import org.example.dto.ExpenseResponse;
@@ -15,6 +17,7 @@ import org.example.model.SupplierExpense;
 import org.example.model.Transaction;
 import org.example.model.Wholesaler;
 import org.example.model.WholesalerSupplier;
+import org.example.model.enums.ExpenseCategoryKind;
 import org.example.model.enums.RecordStatus;
 import org.example.model.enums.SettlementType;
 import org.example.model.enums.TransactionType;
@@ -32,7 +35,7 @@ import org.springframework.transaction.annotation.Transactional;
 @Service
 public class ExpenseService {
 
-    private static final List<String> DEFAULT_CATEGORIES = List.of("Transport", "Labour", "Other");
+    private static final List<String> DEFAULT_CATEGORIES = List.of("Labour", "Transport", "Others");
 
     private final WholesalerRepository wholesalerRepository;
     private final WholesalerSupplierRepository wholesalerSupplierRepository;
@@ -69,17 +72,19 @@ public class ExpenseService {
     @Transactional
     public List<ExpenseCategoryResponse> listCategories(Long wholesalerId) {
         Wholesaler wholesaler = findWholesaler(wholesalerId);
+        // Shipment/supplier expenses only — SHOP-only categories are excluded (BOTH still counts).
         List<ExpenseCategory> existing = expenseCategoryRepository
-                .findByWholesaler_IdAndStatusOrderByNameAsc(wholesalerId, RecordStatus.ACTIVE);
+                .findActiveForKind(wholesalerId, ExpenseCategoryKind.SUPPLIER);
         if (existing.isEmpty()) {
             for (String name : DEFAULT_CATEGORIES) {
                 ExpenseCategory cat = new ExpenseCategory();
                 cat.setWholesaler(wholesaler);
                 cat.setName(name);
+                cat.setKind(ExpenseCategoryKind.SUPPLIER);
                 cat.setStatus(RecordStatus.ACTIVE);
                 expenseCategoryRepository.save(cat);
             }
-            existing = expenseCategoryRepository.findByWholesaler_IdAndStatusOrderByNameAsc(wholesalerId, RecordStatus.ACTIVE);
+            existing = expenseCategoryRepository.findActiveForKind(wholesalerId, ExpenseCategoryKind.SUPPLIER);
         }
         return existing.stream().map(c -> new ExpenseCategoryResponse(c.getId(), c.getName())).toList();
     }
@@ -90,31 +95,77 @@ public class ExpenseService {
         if (request == null || request.wholesalerSupplierId() == null) {
             throw new BadRequestException("Supplier account is required.");
         }
-        WholesalerSupplier supplierAccount = wholesalerSupplierRepository
-                .findByWholesaler_IdAndId(wholesalerId, request.wholesalerSupplierId())
-                .orElseThrow(() -> new BadRequestException("Supplier account not found."));
+        WholesalerSupplier supplierAccount = resolveSupplier(wholesalerId, request.wholesalerSupplierId());
+        org.example.model.SupplierDelivery delivery = resolveDelivery(wholesalerId, supplierAccount, request.deliveryId());
 
-        org.example.model.SupplierDelivery delivery = null;
-        if (request.deliveryId() != null) {
-            delivery = supplierDeliveryRepository.findById(request.deliveryId())
-                    .orElseThrow(() -> new BadRequestException("Shipment not found."));
-            if (!delivery.getWholesaler().getId().equals(wholesalerId)
-                    || !delivery.getWholesalerSupplier().getId().equals(supplierAccount.getId())) {
-                throw new BadRequestException("Shipment does not belong to this supplier.");
-            }
+        return recordExpense(wholesaler, supplierAccount, delivery,
+                request.categoryId(), request.categoryName(),
+                request.amount(), request.paidAmount(), request.note());
+    }
+
+    /**
+     * Records several expenses for one shipment in a single transaction —
+     * either all lines persist or none do.
+     */
+    @Transactional
+    public List<ExpenseResponse> createExpenses(Long wholesalerId, CreateExpenseBatchRequest request) {
+        if (request == null || request.wholesalerSupplierId() == null) {
+            throw new BadRequestException("Supplier account is required.");
         }
+        if (request.lines() == null || request.lines().isEmpty()) {
+            throw new BadRequestException("At least one expense line is required.");
+        }
+        Wholesaler wholesaler = findWholesaler(wholesalerId);
+        WholesalerSupplier supplierAccount = resolveSupplier(wholesalerId, request.wholesalerSupplierId());
+        org.example.model.SupplierDelivery delivery = resolveDelivery(wholesalerId, supplierAccount, request.deliveryId());
 
-        BigDecimal amount = nonNegative(request.amount(), "Expense amount cannot be negative.");
+        List<ExpenseResponse> results = new java.util.ArrayList<>(request.lines().size());
+        for (CreateExpenseBatchRequest.Line line : request.lines()) {
+            results.add(recordExpense(wholesaler, supplierAccount, delivery,
+                    line.categoryId(), line.categoryName(),
+                    line.amount(), line.paidAmount(), line.note()));
+        }
+        return results;
+    }
+
+    private WholesalerSupplier resolveSupplier(Long wholesalerId, Long supplierAccountId) {
+        return wholesalerSupplierRepository
+                .findByWholesaler_IdAndId(wholesalerId, supplierAccountId)
+                .orElseThrow(() -> new BadRequestException("Supplier account not found."));
+    }
+
+    private org.example.model.SupplierDelivery resolveDelivery(
+            Long wholesalerId, WholesalerSupplier supplierAccount, Long deliveryId) {
+        if (deliveryId == null) {
+            return null;
+        }
+        org.example.model.SupplierDelivery delivery = supplierDeliveryRepository.findById(deliveryId)
+                .orElseThrow(() -> new BadRequestException("Shipment not found."));
+        if (!delivery.getWholesaler().getId().equals(wholesalerId)
+                || !delivery.getWholesalerSupplier().getId().equals(supplierAccount.getId())) {
+            throw new BadRequestException("Shipment does not belong to this supplier.");
+        }
+        return delivery;
+    }
+
+    private ExpenseResponse recordExpense(
+            Wholesaler wholesaler, WholesalerSupplier supplierAccount,
+            org.example.model.SupplierDelivery delivery,
+            Long categoryId, String categoryName,
+            BigDecimal amountRaw, BigDecimal paidRaw, String note) {
+        Long wholesalerId = wholesaler.getId();
+
+        BigDecimal amount = nonNegative(amountRaw, "Expense amount cannot be negative.");
         if (amount.signum() == 0) {
             throw new BadRequestException("Expense amount must be greater than zero.");
         }
-        BigDecimal paid = nonNegative(request.paidAmount(), "Paid amount cannot be negative.");
+        BigDecimal paid = nonNegative(paidRaw, "Paid amount cannot be negative.");
         if (paid.compareTo(amount) > 0) {
             throw new BadRequestException("Supplier-funded amount cannot exceed the expense amount.");
         }
-        BigDecimal due = amount.subtract(paid);
+        BigDecimal due = money(amount.subtract(paid));
 
-        ExpenseCategory category = resolveCategory(wholesaler, request.categoryId(), request.categoryName());
+        ExpenseCategory category = resolveCategory(wholesaler, categoryId, categoryName);
 
         SupplierExpense expense = new SupplierExpense();
         expense.setWholesaler(wholesaler);
@@ -124,7 +175,7 @@ public class ExpenseService {
         expense.setAmount(amount);
         expense.setPaidAmount(paid);
         expense.setDueAmount(due);
-        expense.setNote(clean(request.note()));
+        expense.setNote(clean(note));
         expense.setExpenseDate(LocalDateTime.now());
         SupplierExpense saved = supplierExpenseRepository.save(expense);
 
@@ -140,7 +191,7 @@ public class ExpenseService {
                         b.setDueAmount(BigDecimal.ZERO);
                         return b;
                     });
-            balance.setDueAmount(balance.getDueAmount().add(due));
+            balance.setDueAmount(money(balance.getDueAmount().add(due)));
             otherDueBalanceRepository.save(balance);
         }
 
@@ -197,34 +248,23 @@ public class ExpenseService {
                     : zero(saleItemRepository.sumLineTotalByDelivery(lot.getId()));
             commissionGross = commissionGross.add(soldInPeriod.multiply(rate).divide(BigDecimal.valueOf(100), 2, java.math.RoundingMode.HALF_UP));
         }
-        // Subtract commission already collected (via Payments commission-receive or Settle).
-        BigDecimal commissionReceived = zero(supplierSettlementRepository
-                .sumAmountBySupplierAndType(wholesalerId, account.getId(), SettlementType.COMMISSION_RECEIVE));
-        BigDecimal commission = commissionGross.subtract(commissionReceived);
-        if (commission.signum() < 0) {
-            commission = BigDecimal.ZERO;
-        }
+        // Commission is the full per-lot deduction from the supplier's due.
+        BigDecimal commission = commissionGross;
 
         BigDecimal productPaid = zero(supplierSettlementRepository
                 .sumAmountBySupplierAndType(wholesalerId, account.getId(), SettlementType.PRODUCT_PAYMENT));
 
-        // Net payable is the sale-side balance only. Other expenses are a separate
-        // receivable from the supplier and are NOT deducted here.
+        // Net payable is the sale-side balance only. Fronted expenses are shown
+        // separately as the outstanding expenseDue below.
         BigDecimal netPayable = totalSale.subtract(commission).subtract(productPaid);
 
-        // Other expense: what the wholesaler fronted (expenseTotal) minus what the
-        // supplier has paid back (expenseReceived) leaves the outstanding expenseDue.
+        // Expense the wholesaler fronted on the supplier's behalf, still outstanding.
         BigDecimal expenseTotal = zero(otherDueBalanceRepository.sumDueBySupplier(wholesalerId, account.getId()));
-        BigDecimal expenseReceived = zero(supplierSettlementRepository
-                .sumAmountBySupplierAndType(wholesalerId, account.getId(), SettlementType.EXPENSE_RECEIVE));
-        BigDecimal expenseDue = expenseTotal.subtract(expenseReceived);
-        if (expenseDue.signum() < 0) {
-            expenseDue = BigDecimal.ZERO;
-        }
+        BigDecimal expenseDue = expenseTotal;
 
         return new SupplierStatementResponse(
                 normalized, totalSale, commission, productPaid, netPayable,
-                expenseTotal, expenseReceived, expenseDue
+                expenseTotal, expenseDue
         );
     }
 
@@ -270,11 +310,15 @@ public class ExpenseService {
     private BigDecimal nonNegative(BigDecimal value, String message) {
         BigDecimal v = value == null ? BigDecimal.ZERO : value;
         if (v.signum() < 0) throw new BadRequestException(message);
-        return v;
+        return money(v);
     }
 
     private BigDecimal zero(BigDecimal v) {
         return v == null ? BigDecimal.ZERO : v;
+    }
+
+    private BigDecimal money(BigDecimal value) {
+        return (value == null ? BigDecimal.ZERO : value).setScale(0, RoundingMode.CEILING);
     }
 
     private String clean(String value) {

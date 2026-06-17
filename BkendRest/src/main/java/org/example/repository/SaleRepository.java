@@ -16,6 +16,23 @@ public interface SaleRepository extends JpaRepository<Sale, Long> {
     BigDecimal sumPaidAmountByCustomer(@Param("wholesalerId") Long wholesalerId, @Param("customerAccountId") Long customerAccountId);
 
     /**
+     * Cash physically taken at the point of sale in [from, to) — i.e. paid_amount
+     * of POSTED sales whose at-sale method is CASH. Bank/bKash receipts never hit
+     * the drawer, so the cash book excludes them.
+     */
+    @Query("""
+        select coalesce(sum(s.paidAmount), 0) from Sale s
+        where s.wholesaler.id = :wholesalerId
+          and s.status = org.example.model.enums.PostStatus.POSTED
+          and s.paymentMethod = org.example.model.enums.PaymentMethod.CASH
+          and (:from is null or s.saleDate >= :from)
+          and (:to is null or s.saleDate < :to)
+        """)
+    BigDecimal sumCashPaidInPeriod(@Param("wholesalerId") Long wholesalerId,
+                                   @Param("from") LocalDateTime from,
+                                   @Param("to") LocalDateTime to);
+
+    /**
      * Sale-level money rollup with EXISTS-subquery filters on SaleItem so multi-item
      * sales aren't double-counted. Returns { totalCash, totalDue }. Used by the
      * aggregate endpoint summary to surface paid-vs-due splits without duplicating

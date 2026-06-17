@@ -10,6 +10,7 @@ public record CrateInventoryTypeResponse(
         Integer withCustomers,
         Integer withSuppliers,
         Integer lostDamaged,
-        BigDecimal purchasePrice
+        BigDecimal purchasePrice,
+        BigDecimal weightedAvgCost
 ) {
 }

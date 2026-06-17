@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
 import {
-  Search, Plus, Users, Phone, User, MapPin, Wallet, Boxes, ArrowUpDown,
+  Search, Plus, Users, Phone, User, MapPin, Wallet, ArrowUpDown, Filter,
 } from 'lucide-react';
 import { useData } from '../../data/DataContext';
 import { useToast } from '../../shared/components/Toast';
+import { TablePager, usePagination, ConfirmDialog } from '../../shared/components';
+import { formatMoney } from '../../shared/utils/format';
+import { isValidPhone, numberInRange, PHONE_HINT } from '../../shared/utils/validation';
 import CustomerDetail from './CustomerDetail';
 
 const EMPTY_FORM = {
@@ -41,16 +44,37 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
   const [formError, setFormError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [formData, setFormData] = useState(EMPTY_FORM);
+  const [confirm, setConfirm] = useState(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const runConfirm = async () => {
+    if (!confirm?.run) return;
+    setConfirmBusy(true);
+    try { await confirm.run(); } finally { setConfirmBusy(false); setConfirm(null); }
+  };
 
   const handleField = (key) => (e) => setFormData((p) => ({ ...p, [key]: e.target.value }));
 
-  const handleAddCustomer = async () => {
+  const requestAddCustomer = () => {
     const name = formData.name.trim();
-    const phone = formData.phone.trim();
+    const phone = normalizePhone(formData.phone);
     if (!name || !phone) {
       setFormError('Customer name and phone are required.');
       return;
     }
+    if (!isValidPhone(phone)) {
+      setFormError(PHONE_HINT);
+      return;
+    }
+    if (formData.openingDue !== '' && !numberInRange(formData.openingDue, 0)) {
+      setFormError('Opening due must be zero or a positive amount.');
+      return;
+    }
+    setConfirm({ title: 'Add customer', label: 'Confirm & Add', message: `Add "${name}" as a new customer?`, run: handleAddCustomer });
+  };
+
+  const handleAddCustomer = async () => {
+    const name = formData.name.trim();
+    const phone = normalizePhone(formData.phone);
     setIsSaving(true);
     setFormError('');
     try {
@@ -95,9 +119,12 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
       return true;
     })
     .sort((a, b) => {
+      // The table title is the owner (person) name, so name sorting follows it.
+      const titleA = a.ownerName || a.owner || a.name;
+      const titleB = b.ownerName || b.owner || b.name;
       switch (sortBy) {
-        case 'name-asc':       return a.name.localeCompare(b.name);
-        case 'name-desc':      return b.name.localeCompare(a.name);
+        case 'name-asc':       return titleA.localeCompare(titleB);
+        case 'name-desc':      return titleB.localeCompare(titleA);
         case 'due-desc':       return Number(b.amountDue || 0) - Number(a.amountDue || 0);
         case 'due-asc':        return Number(a.amountDue || 0) - Number(b.amountDue || 0);
         case 'crates-desc':    return Number(b.totalCratesHolding || 0) - Number(a.totalCratesHolding || 0);
@@ -105,65 +132,27 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
       }
     });
 
+  const { pageItems: pagedCustomers, ...customerPager } = usePagination(
+    filteredCustomers, 15, [search, sortBy, filterDue, showDisabled],
+  );
+
   if (selectedCustomerId) {
     return <CustomerDetail customerId={selectedCustomerId} onBack={() => setSelectedCustomerId(null)} />;
   }
 
-  return (
-    <div className="space-y-4">
-      <div className="suppliers-toolbar">
-        <button onClick={() => setShowForm(true)} className="btn-primary flex items-center gap-2">
-          <Plus size={16} />
-          Add Customer
-        </button>
-        <div className="suppliers-toolbar-controls">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="input-field !pl-9"
-              placeholder="Search name, owner or phone…"
-            />
-          </div>
-          <div className="suppliers-toolbar-select">
-            <Wallet size={14} className="suppliers-toolbar-select-icon" />
-            <select value={filterDue} onChange={(e) => setFilterDue(e.target.value)} className="input-field !pl-8">
-              <option value="all">All customers</option>
-              <option value="with-due">With due</option>
-              <option value="no-due">No due</option>
-              <option value="holding-crates">Holding crates</option>
-            </select>
-          </div>
-          <label className="toggle-pill" title="Show disabled">
-            <input
-              type="checkbox"
-              checked={showDisabled}
-              onChange={(e) => setShowDisabled(e.target.checked)}
-            />
-            <span>Show disabled</span>
-          </label>
-          <div className="suppliers-toolbar-select">
-            <ArrowUpDown size={14} className="suppliers-toolbar-select-icon" />
-            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="input-field !pl-8">
-              <option value="name-asc">Name A → Z</option>
-              <option value="name-desc">Name Z → A</option>
-              <option value="due-desc">Due (high → low)</option>
-              <option value="due-asc">Due (low → high)</option>
-              <option value="crates-desc">Crates held (high → low)</option>
-            </select>
-          </div>
-        </div>
-      </div>
+  const totalDue = customers.reduce((sum, c) => sum + Math.max(0, Number(c.amountDue) || 0), 0);
+  const withDueCount = customers.filter((c) => Number(c.amountDue) > 0).length;
+  const totalCratesHeld = customers.reduce((sum, c) => sum + (Number(c.totalCratesHolding) || 0), 0);
 
+  return (
+    <div className="profile-workspace">
+      <main className="profile-main-stack">
       {showForm && (
         <div className="modal-overlay">
           <div className="modal-content supplier-form-modal">
             <div className="modal-header">
               <div>
                 <h2>Add New Customer</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Only permanent customers can borrow crates</p>
               </div>
               <button onClick={closeForm} className="modal-close-btn">✕</button>
             </div>
@@ -252,7 +241,7 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
             </div>
             <div className="modal-footer">
               <button onClick={closeForm} className="btn-secondary" disabled={isSaving}>Cancel</button>
-              <button onClick={handleAddCustomer} disabled={isSaving} className="btn-primary flex items-center gap-2">
+              <button onClick={requestAddCustomer} disabled={isSaving} className="btn-primary flex items-center gap-2">
                 {isSaving ? 'Saving…' : (<><Plus size={15} /> Add Customer</>)}
               </button>
             </div>
@@ -273,7 +262,6 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
           <div className="empty-state">
             <Users size={36} className="empty-state-icon" />
             <p className="empty-state-title">No customers yet</p>
-            <p className="empty-state-sub">Add your first customer to start tracking sales and crates.</p>
             <button onClick={() => setShowForm(true)} className="btn-primary mt-3 flex items-center gap-2 mx-auto">
               <Plus size={15} /> Add Customer
             </button>
@@ -282,38 +270,35 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
           <div className="empty-state">
             <Search size={32} className="empty-state-icon" />
             <p className="empty-state-title">No results found</p>
-            <p className="empty-state-sub">Try a different name, owner or phone.</p>
           </div>
         ) : (
           <>
             {/* Mobile card view */}
             <div className="space-y-3 lg:hidden">
-              {filteredCustomers.map((c) => (
-                <div key={c.id} className="supplier-card">
+              {pagedCustomers.map((c) => (
+                <div
+                  key={c.id}
+                  onClick={() => setSelectedCustomerId(c.id)}
+                  className="supplier-card cursor-pointer"
+                >
                   <div className="flex items-start justify-between gap-3">
                     <div className="flex items-center gap-3 min-w-0">
                       <div className="supplier-card-avatar">
-                        {c.name?.charAt(0).toUpperCase() || 'C'}
+                        {(c.ownerName || c.owner || c.name)?.charAt(0).toUpperCase() || 'C'}
                       </div>
                       <div className="min-w-0">
-                        <p className="font-semibold text-slate-900 truncate">{c.name}</p>
-                        {(c.ownerName || c.owner) && (
-                          <p className="text-xs text-slate-500 truncate">{c.ownerName || c.owner}</p>
+                        <p className="font-semibold text-slate-900 truncate">{c.ownerName || c.owner || c.name}</p>
+                        {c.name && (
+                          <p className="text-xs text-blue-700 truncate">{c.name}</p>
                         )}
                         <p className="text-xs text-slate-500 truncate">{c.phone}</p>
                       </div>
                     </div>
-                    <button
-                      onClick={() => setSelectedCustomerId(c.id)}
-                      className="btn-secondary !py-1.5 !px-3 text-xs shrink-0"
-                    >
-                      Profile
-                    </button>
                   </div>
                   <div className="mt-3 grid grid-cols-2 gap-2 text-center text-xs">
                     <div className="rounded-lg bg-red-50 px-2 py-2">
                       <p className="text-slate-500">Due</p>
-                      <p className="font-bold text-red-600">৳{Number(c.amountDue || 0).toLocaleString()}</p>
+                      <p className="font-bold text-red-600">৳{Math.ceil(Number(c.amountDue || 0)).toLocaleString()}</p>
                     </div>
                     <div className="rounded-lg bg-slate-50 px-2 py-2">
                       <p className="text-slate-500">Crates</p>
@@ -325,58 +310,132 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
             </div>
 
             {/* Desktop table view */}
-            <div className="hidden lg:block overflow-x-auto rounded-xl border border-slate-200">
-              <table className="w-full text-sm min-w-[860px]">
+            <div className="hidden lg:block overflow-x-auto rounded-lg border border-slate-200 bg-white">
+              <table className="party-table w-full min-w-[640px]">
                 <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200">
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">Customer</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">Owner</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">Phone</th>
-                    <th className="px-4 py-3 text-center font-semibold text-slate-700">Crates Held</th>
-                    <th className="px-4 py-3 text-right font-semibold text-slate-700">Payment Due</th>
-                    <th className="px-4 py-3 text-center font-semibold text-slate-700">Action</th>
+                  <tr>
+                    <th className="w-[24%]">Customer</th>
+                    <th className="w-[17%]">Business Name</th>
+                    <th className="w-[15%]">Contact</th>
+                    <th className="w-[17%]">Location</th>
+                    <th className="w-[15%] text-right">Amount Due</th>
+                    <th className="w-[12%] text-right">Crate Due</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredCustomers.map((c) => (
-                    <tr key={c.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2.5">
-                          <div className="supplier-card-avatar !w-8 !h-8 !text-xs">
-                            {c.name?.charAt(0).toUpperCase() || 'C'}
+                <tbody>
+                  {pagedCustomers.map((c) => (
+                    <tr
+                      key={c.id}
+                      onClick={() => setSelectedCustomerId(c.id)}
+                      className="cursor-pointer"
+                    >
+                      <td>
+                        <div className="party-cell-main">
+                          <span className="party-avatar">{(c.ownerName || c.owner || c.name)?.charAt(0).toUpperCase() || 'C'}</span>
+                          <div className="flex flex-wrap items-center gap-2 min-w-0">
+                            <span className="party-name">{c.ownerName || c.owner || c.name}</span>
+                            {c.status === 'DISABLED' && <span className="badge badge-rose">Disabled</span>}
                           </div>
-                          <p className="font-semibold text-slate-900">{c.name}</p>
-                          {c.status === 'DISABLED' && (
-                            <span className="badge badge-rose">Disabled</span>
-                          )}
                         </div>
                       </td>
-                      <td className="px-4 py-3 text-slate-700">
-                        {c.ownerName || c.owner || <span className="text-slate-400">—</span>}
+                      <td className="font-semibold text-slate-700">{c.name || '—'}</td>
+                      <td>
+                        <div className="party-contact">
+                          <span>{c.phone || '—'}</span>
+                        </div>
                       </td>
-                      <td className="px-4 py-3 text-slate-700">{c.phone}</td>
-                      <td className="px-4 py-3 text-center font-semibold text-slate-700">
-                        {c.totalCratesHolding || 0}
+                      <td className="text-slate-600">{c.address || '—'}</td>
+                      <td className={`text-right font-bold tabular-nums ${Number(c.amountDue) > 0 ? 'text-red-600' : 'text-slate-400'}`}>
+                        {Number(c.amountDue) > 0 ? formatMoney(c.amountDue) : '—'}
                       </td>
-                      <td className="px-4 py-3 text-right font-bold text-red-600">
-                        ৳{Number(c.amountDue || 0).toLocaleString()}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <button
-                          onClick={() => setSelectedCustomerId(c.id)}
-                          className="btn-secondary !py-1 !px-3 text-xs"
-                        >
-                          Profile
-                        </button>
+                      <td className={`text-right font-semibold tabular-nums ${Number(c.totalCratesHolding) > 0 ? 'text-slate-700' : 'text-slate-400'}`}>
+                        {Number(c.totalCratesHolding) > 0 ? c.totalCratesHolding : '—'}
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
             </div>
+
+            <TablePager {...customerPager} />
           </>
         )}
       </div>
+      </main>
+
+      <aside className="profile-side-stack">
+        <div className="supplier-panel">
+          <h3>Customer Actions</h3>
+          <button
+            type="button"
+            onClick={() => setShowForm(true)}
+            className="btn-primary mt-3 inline-flex w-full items-center justify-center gap-2"
+          >
+            <Plus size={16} /> Add Customer
+          </button>
+        </div>
+        <div className="supplier-panel">
+          <h3 className="flex items-center gap-2"><Filter size={16} className="text-blue-600" /> Filters</h3>
+          <div className="mt-3 space-y-2.5">
+            <div className="relative">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="input-field !pl-9"
+                placeholder="Search name, owner or phone…"
+              />
+            </div>
+            <div className="suppliers-toolbar-select">
+              <Wallet size={14} className="suppliers-toolbar-select-icon" />
+              <select value={filterDue} onChange={(e) => setFilterDue(e.target.value)} className="input-field !pl-8 w-full">
+                <option value="all">All customers</option>
+                <option value="with-due">With due</option>
+                <option value="no-due">No due</option>
+                <option value="holding-crates">Holding crates</option>
+              </select>
+            </div>
+            <div className="suppliers-toolbar-select">
+              <ArrowUpDown size={14} className="suppliers-toolbar-select-icon" />
+              <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="input-field !pl-8 w-full">
+                <option value="name-asc">Name A → Z</option>
+                <option value="name-desc">Name Z → A</option>
+                <option value="due-desc">Due (high → low)</option>
+                <option value="due-asc">Due (low → high)</option>
+                <option value="crates-desc">Crates held (high → low)</option>
+              </select>
+            </div>
+            <label className="toggle-pill w-full justify-center" title="Show disabled">
+              <input
+                type="checkbox"
+                checked={showDisabled}
+                onChange={(e) => setShowDisabled(e.target.checked)}
+              />
+              <span>Show disabled</span>
+            </label>
+          </div>
+        </div>
+        <div className="supplier-panel">
+          <h3>Customers Summary</h3>
+          <div className="mt-3 space-y-2">
+            <div className="box-row"><span>Total customers</span><strong>{customers.length}</strong></div>
+            <div className="box-row"><span>With due</span><strong>{withDueCount}</strong></div>
+            <div className="box-row"><span>Total due</span><strong className="text-rose-700">{formatMoney(totalDue)}</strong></div>
+            <div className="box-row total"><span>Crates held</span><strong>{totalCratesHeld}</strong></div>
+          </div>
+        </div>
+      </aside>
+
+      <ConfirmDialog
+        open={!!confirm}
+        title={confirm?.title}
+        message={confirm?.message}
+        confirmLabel={confirm?.label}
+        busy={confirmBusy}
+        onCancel={() => setConfirm(null)}
+        onConfirm={runConfirm}
+      />
     </div>
   );
 };

@@ -22,10 +22,11 @@ import org.example.model.WholesalerCustomer;
 import org.example.model.WholesalerSupplier;
 import org.example.model.enums.PartyType;
 import org.example.model.enums.RecordStatus;
-import org.example.model.enums.SettlementType;
 import org.example.repository.AccountBalanceRepository;
 import org.example.repository.BoxBalanceRepository;
+import org.example.repository.CustomerCrateHoldingRepository;
 import org.example.repository.CustomerRepository;
+import org.example.repository.SupplierCrateHoldingRepository;
 import org.example.repository.PaymentRepository;
 import org.example.repository.SaleItemRepository;
 import org.example.repository.SaleRepository;
@@ -47,11 +48,15 @@ public class WholesalerService {
     private final WholesalerCustomerRepository wholesalerCustomerRepository;
     private final AccountBalanceRepository accountBalanceRepository;
     private final BoxBalanceRepository boxBalanceRepository;
+    private final SupplierCrateHoldingRepository supplierCrateHoldingRepository;
+    private final CustomerCrateHoldingRepository customerCrateHoldingRepository;
     private final SaleItemRepository saleItemRepository;
     private final SaleRepository saleRepository;
     private final PaymentRepository paymentRepository;
     private final SupplierSettlementRepository supplierSettlementRepository;
+    private final SupplierDueService supplierDueService;
     private final TransactionService transactionService;
+    private final SupplierLoginService supplierLoginService;
 
     public WholesalerService(
             WholesalerRepository wholesalerRepository,
@@ -61,11 +66,15 @@ public class WholesalerService {
             WholesalerCustomerRepository wholesalerCustomerRepository,
             AccountBalanceRepository accountBalanceRepository,
             BoxBalanceRepository boxBalanceRepository,
+            SupplierCrateHoldingRepository supplierCrateHoldingRepository,
+            CustomerCrateHoldingRepository customerCrateHoldingRepository,
             SaleItemRepository saleItemRepository,
             SaleRepository saleRepository,
             PaymentRepository paymentRepository,
             SupplierSettlementRepository supplierSettlementRepository,
-            TransactionService transactionService
+            SupplierDueService supplierDueService,
+            TransactionService transactionService,
+            SupplierLoginService supplierLoginService
     ) {
         this.wholesalerRepository = wholesalerRepository;
         this.supplierRepository = supplierRepository;
@@ -74,11 +83,26 @@ public class WholesalerService {
         this.wholesalerCustomerRepository = wholesalerCustomerRepository;
         this.accountBalanceRepository = accountBalanceRepository;
         this.boxBalanceRepository = boxBalanceRepository;
+        this.supplierCrateHoldingRepository = supplierCrateHoldingRepository;
+        this.customerCrateHoldingRepository = customerCrateHoldingRepository;
         this.saleItemRepository = saleItemRepository;
         this.saleRepository = saleRepository;
         this.paymentRepository = paymentRepository;
         this.supplierSettlementRepository = supplierSettlementRepository;
+        this.supplierDueService = supplierDueService;
         this.transactionService = transactionService;
+        this.supplierLoginService = supplierLoginService;
+    }
+
+    /**
+     * Supplier net due (consignment model):
+     *   opening + total sold − commission − expense − payments to supplier.
+     * Commission is per-lot (sold × rate); expense is a deduction; payments are
+     * PRODUCT_PAYMENT settlements. A negative result means the wholesaler has overpaid
+     * (advance / supplier holds credit). Settle never affects this.
+     */
+    private BigDecimal computeSupplierDue(Long wholesalerId, WholesalerSupplier account) {
+        return supplierDueService.netDue(wholesalerId, account);
     }
 
     @Transactional
@@ -112,6 +136,9 @@ public class WholesalerService {
         if (changed) {
             supplierRepository.save(supplier);
         }
+
+        // Every supplier gets a portal identity automatically (phone-only sign-in).
+        supplierLoginService.ensureSupplierUser(supplier);
 
         if (wholesalerSupplierRepository.existsByWholesaler_IdAndSupplier_Id(wholesalerId, supplier.getId())) {
             throw new BadRequestException("Supplier is already connected to this wholesaler.");
@@ -167,7 +194,7 @@ public class WholesalerService {
             throw new BadRequestException("Supplier is already disabled.");
         }
 
-        BigDecimal due = currentBalance(wholesaler.getId(), PartyType.WHOLESALER_SUPPLIER, account.getId(), account.getOpeningDue());
+        BigDecimal due = computeSupplierDue(wholesaler.getId(), account);
         int crateTotal = crateDueTotal(wholesaler.getId(), PartyType.WHOLESALER_SUPPLIER, account.getId());
         if (due.signum() > 0) {
             throw new BadRequestException("Cannot disable — outstanding due ৳" + due.toPlainString() + ". Settle first.");
@@ -296,8 +323,6 @@ public class WholesalerService {
         LocalDateTime tomorrowStart = todayStart.plusDays(1);
         BigDecimal todaySale = saleItemRepository.sumLineTotalBySupplierBetween(wholesalerId, wholesalerSupplierId, todayStart, tomorrowStart);
         BigDecimal todayCommission = saleItemRepository.sumCommissionBySupplierBetween(wholesalerId, wholesalerSupplierId, todayStart, tomorrowStart);
-        BigDecimal commissionReceived = supplierSettlementRepository.sumAmountBySupplierAndType(wholesalerId, wholesalerSupplierId, SettlementType.COMMISSION_RECEIVE);
-        BigDecimal otherExpense = supplierSettlementRepository.sumAmountBySupplierAndType(wholesalerId, wholesalerSupplierId, SettlementType.EXPENSE_RECEIVE);
         BigDecimal totalCommission = zeroIfNull(supplier.totalCommissionEarned());
 
         return new SupplierProfileResponse(
@@ -306,9 +331,7 @@ public class WholesalerService {
                 zeroIfNull(todayCommission),
                 zeroIfNull(supplier.totalSales()),
                 totalCommission,
-                positive(totalCommission.subtract(zeroIfNull(commissionReceived))),
                 zeroIfNull(supplier.currentDue()),
-                zeroIfNull(otherExpense),
                 transactionService.listSupplierTransactions(wholesalerId, wholesalerSupplierId)
         );
     }
@@ -324,8 +347,9 @@ public class WholesalerService {
     private SupplierAccountResponse toSupplierResponse(WholesalerSupplier account) {
         Supplier supplier = account.getSupplier();
         Long wholesalerId = account.getWholesaler().getId();
-        BigDecimal currentDue = currentBalance(wholesalerId, PartyType.WHOLESALER_SUPPLIER, account.getId(), account.getOpeningDue());
+        BigDecimal currentDue = computeSupplierDue(wholesalerId, account);
         List<CrateTypeQuantity> crateDues = crateDues(wholesalerId, PartyType.WHOLESALER_SUPPLIER, account.getId());
+        List<CrateTypeQuantity> crateHoldings = supplierCrateHoldings(wholesalerId, account.getId());
         return new SupplierAccountResponse(
                 account.getId(),
                 wholesalerId,
@@ -341,9 +365,27 @@ public class WholesalerService {
                 saleItemRepository.sumCommissionBySupplier(wholesalerId, account.getId()),
                 crateDues,
                 crateTotal(crateDues),
+                crateHoldings,
+                crateTotal(crateHoldings),
                 account.getStatus().name(),
                 account.getCreatedAt()
         );
+    }
+
+    /** Leg 2 — the supplier's own crates the wholesaler is currently holding, per type (non-zero). */
+    private List<CrateTypeQuantity> supplierCrateHoldings(Long wholesalerId, Long supplierAccountId) {
+        java.util.Map<String, Long> byType = new java.util.LinkedHashMap<>();
+        for (var holding : supplierCrateHoldingRepository.findByWholesaler_IdAndWholesalerSupplierId(wholesalerId, supplierAccountId)) {
+            int qty = holding.getQuantity() == null ? 0 : holding.getQuantity();
+            if (qty == 0) {
+                continue;
+            }
+            String typeName = holding.getBoxType().getName() == null ? "" : holding.getBoxType().getName().toUpperCase(Locale.ROOT);
+            byType.merge(typeName, (long) qty, Long::sum);
+        }
+        return byType.entrySet().stream()
+                .map(e -> new CrateTypeQuantity(e.getKey(), e.getValue()))
+                .toList();
     }
 
     private CustomerAccountResponse toCustomerResponse(WholesalerCustomer account) {
@@ -352,6 +394,7 @@ public class WholesalerService {
         BigDecimal salePaid = saleRepository.sumPaidAmountByCustomer(wholesalerId, account.getId());
         BigDecimal laterPaid = paymentRepository.sumCashAmountByCustomer(wholesalerId, account.getId());
         List<CrateTypeQuantity> crateDues = crateDues(wholesalerId, PartyType.WHOLESALER_CUSTOMER, account.getId());
+        List<CrateTypeQuantity> crateHoldings = customerCrateHoldings(wholesalerId, account.getId());
         return new CustomerAccountResponse(
                 account.getId(),
                 wholesalerId,
@@ -366,9 +409,28 @@ public class WholesalerService {
                 salePaid.add(laterPaid),
                 crateDues,
                 crateTotal(crateDues),
+                crateHoldings,
+                crateTotal(crateHoldings),
+                account.getCrateDepositHeld(),
                 account.getStatus().name(),
                 account.getCreatedAt()
         );
+    }
+
+    /** Leg 2 — the customer's own crates the wholesaler is currently holding, per type (non-zero). */
+    private List<CrateTypeQuantity> customerCrateHoldings(Long wholesalerId, Long customerAccountId) {
+        java.util.Map<String, Long> byType = new java.util.LinkedHashMap<>();
+        for (var holding : customerCrateHoldingRepository.findByWholesaler_IdAndWholesalerCustomerId(wholesalerId, customerAccountId)) {
+            int qty = holding.getQuantity() == null ? 0 : holding.getQuantity();
+            if (qty == 0) {
+                continue;
+            }
+            String typeName = holding.getBoxType().getName() == null ? "" : holding.getBoxType().getName().toUpperCase(Locale.ROOT);
+            byType.merge(typeName, (long) qty, Long::sum);
+        }
+        return byType.entrySet().stream()
+                .map(e -> new CrateTypeQuantity(e.getKey(), e.getValue()))
+                .toList();
     }
 
     private BigDecimal currentBalance(Long wholesalerId, PartyType partyType, Long partyAccountId, BigDecimal openingDue) {
@@ -402,10 +464,6 @@ public class WholesalerService {
         return (int) dues.stream().mapToLong(CrateTypeQuantity::quantity).sum();
     }
 
-    private BigDecimal positive(BigDecimal value) {
-        BigDecimal normalized = zeroIfNull(value);
-        return normalized.signum() < 0 ? BigDecimal.ZERO : normalized;
-    }
 
     private BigDecimal zeroIfNull(BigDecimal value) {
         return value == null ? BigDecimal.ZERO : value;

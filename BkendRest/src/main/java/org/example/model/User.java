@@ -14,7 +14,10 @@ import org.example.model.enums.UserRole;
 
 @Entity
 @Table(name = "users",
-        uniqueConstraints = @jakarta.persistence.UniqueConstraint(name = "uk_users_email", columnNames = "email"),
+        uniqueConstraints = {
+                @jakarta.persistence.UniqueConstraint(name = "uk_users_email", columnNames = "email"),
+                @jakarta.persistence.UniqueConstraint(name = "uk_users_phone", columnNames = "phone")
+        },
         indexes = @jakarta.persistence.Index(name = "idx_users_role_status", columnList = "role,status"))
 public class User {
 
@@ -25,8 +28,13 @@ public class User {
     @Column(nullable = false, length = 120)
     private String name;
 
-    @Column(nullable = false, length = 190)
+    // Nullable: supplier accounts sign in with phone and may have no email.
+    @Column(length = 190)
     private String email;
+
+    // Login phone for SUPPLIER accounts; null for admin/wholesaler users.
+    @Column(length = 30)
+    private String phone;
 
     @Column(name = "password_hash", nullable = false)
     private String passwordHash;
@@ -63,6 +71,14 @@ public class User {
 
     public void setEmail(String email) {
         this.email = email;
+    }
+
+    public String getPhone() {
+        return phone;
+    }
+
+    public void setPhone(String phone) {
+        this.phone = phone;
     }
 
     public String getPasswordHash() {

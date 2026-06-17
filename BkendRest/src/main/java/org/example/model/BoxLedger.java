@@ -79,6 +79,11 @@ public class BoxLedger {
     @Column(name = "unit_sale_price", precision = 14, scale = 2)
     private BigDecimal unitSalePrice;
 
+    /** Cash-bearing rows (crate PURCHASE) only: how the money moved. CASH reduces the drawer. */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "payment_method", length = 20)
+    private org.example.model.enums.PaymentMethod paymentMethod;
+
     @Enumerated(EnumType.STRING)
     @Column(name = "reference_type", nullable = false)
     private BoxReferenceType referenceType = BoxReferenceType.MANUAL;

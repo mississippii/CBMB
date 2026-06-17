@@ -12,6 +12,8 @@ public interface WholesalerRepository extends JpaRepository<Wholesaler, Long> {
 
     Optional<Wholesaler> findByUser_Id(Long userId);
 
+    Optional<Wholesaler> findByPhone(String phone);
+
     Page<Wholesaler> findByPhoneContainingOrderByCreatedAtDesc(String phone, Pageable pageable);
 
     Page<Wholesaler> findAllByOrderByCreatedAtDesc(Pageable pageable);

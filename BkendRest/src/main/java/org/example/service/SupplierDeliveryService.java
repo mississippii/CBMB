@@ -135,6 +135,27 @@ public class SupplierDeliveryService {
     }
 
     @Transactional
+    public SupplierDeliveryResponse updateShipment(Long wholesalerId, org.example.dto.UpdateShipmentRequest request) {
+        findWholesaler(wholesalerId);
+        if (request == null || request.deliveryId() == null) {
+            throw new BadRequestException("Shipment is required.");
+        }
+        SupplierDelivery delivery = supplierDeliveryRepository.findById(request.deliveryId())
+                .orElseThrow(() -> new BadRequestException("Shipment not found."));
+        if (!delivery.getWholesaler().getId().equals(wholesalerId)) {
+            throw new BadRequestException("Shipment does not belong to this wholesaler.");
+        }
+        String name = clean(request.name());
+        if (name == null || name.isBlank()) {
+            throw new BadRequestException("Shipment name is required.");
+        }
+        delivery.setName(name);
+        delivery.setNote(clean(request.note()));
+        delivery = supplierDeliveryRepository.save(delivery);
+        return toDeliveryResponse(delivery);
+    }
+
+    @Transactional
     public SupplierDeliveryResponse setCommissionRate(Long wholesalerId, SetShipmentCommissionRequest request) {
         findWholesaler(wholesalerId);
         if (request == null || request.deliveryId() == null) {
@@ -155,11 +176,9 @@ public class SupplierDeliveryService {
     }
 
     /**
-     * Settle = real financial close. Records three settlements at once:
-     *   1) PRODUCT_PAYMENT  for the lot's payable (totalSold − advancePaid)  → reduces supplier balance
-     *   2) COMMISSION_RECEIVE for the lot's commission                       → income, no balance change
-     *   3) EXPENSE_RECEIVE  for the lot's outstanding expense due             → also zeros the SupplierExpense dues
-     * Then flips status to SETTLED. Settle is one-way: re-open is refused (history preserved).
+     * Settle = status close only. It does NOT move money or touch the supplier balance —
+     * the balance is the live net of (sold − commission − expense) minus payments. Settle
+     * just marks a fully-sold lot as done. One-way: re-open is refused.
      */
     @Transactional
     public SupplierDeliveryResponse setSettlementStatus(Long wholesalerId, org.example.dto.SettleShipmentRequest request) {
@@ -186,34 +205,9 @@ public class SupplierDeliveryService {
             throw new BadRequestException("Cannot settle: this shipment still has unsold stock.");
         }
 
-        Wholesaler wholesaler = delivery.getWholesaler();
-        WholesalerSupplier supplierAccount = delivery.getWholesalerSupplier();
-
-        BigDecimal totalSold   = money(zero(saleItemRepository.sumLineTotalByDelivery(delivery.getId())));
-        BigDecimal advance     = money(zero(delivery.getAdvancePaid()));
-        BigDecimal rate        = delivery.getCommissionRate();
-        BigDecimal commission  = money(totalSold.multiply(rate).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP));
-        BigDecimal expenseDue  = money(zero(supplierExpenseRepository.sumDueByDelivery(delivery.getId())));
-        BigDecimal payable     = totalSold.subtract(advance);
-        if (payable.signum() < 0) payable = BigDecimal.ZERO;
-
-        if (payable.signum() > 0) {
-            recordShipmentSettlement(wholesaler, supplierAccount, delivery, SettlementType.PRODUCT_PAYMENT, payable, true,
-                    "Shipment #" + delivery.getId() + " settlement — product payable");
-        }
-        if (commission.signum() > 0) {
-            recordShipmentSettlement(wholesaler, supplierAccount, delivery, SettlementType.COMMISSION_RECEIVE, commission, false,
-                    "Shipment #" + delivery.getId() + " settlement — commission received");
-        }
-        if (expenseDue.signum() > 0) {
-            recordShipmentSettlement(wholesaler, supplierAccount, delivery, SettlementType.EXPENSE_RECEIVE, expenseDue, false,
-                    "Shipment #" + delivery.getId() + " settlement — expense received");
-            // Pay down this lot's outstanding expenses (decrements SupplierExpense.dueAmount
-            // and other_due_balances.due_amount). Replaces the previous inline loop which
-            // missed other_due_balances and left it overstated.
-            expensePaydownService.payDownForDelivery(delivery.getId(), expenseDue);
-        }
-
+        // Settle is a status close only — it does NOT move money. The supplier balance is
+        // the live net of (sold − commission − expense) minus payments, computed in
+        // WholesalerService; settling just marks the lot done.
         delivery.setSettlementStatus(SettlementStatus.SETTLED);
         delivery = supplierDeliveryRepository.save(delivery);
         return toDeliveryResponse(delivery);
@@ -386,11 +380,28 @@ public class SupplierDeliveryService {
 
 
     private SupplierDeliveryResponse toDeliveryResponse(SupplierDelivery delivery) {
+        // Map each line to its inventory row (one query) so on-hand / sold reflect reality.
+        java.util.Map<String, Inventory> inventoryByKey = new java.util.HashMap<>();
+        for (Inventory inv : inventoryRepository.findByDelivery_Id(delivery.getId())) {
+            inventoryByKey.put(inventoryKey(
+                    inv.getProduct() == null ? null : inv.getProduct().getId(),
+                    inv.getCategory() == null ? null : inv.getCategory().getId(),
+                    inv.getSubCategory() == null ? null : inv.getSubCategory().getId(),
+                    inv.getUnit()), inv);
+        }
         List<SupplierDeliveryItemResponse> itemResponses = supplierDeliveryItemRepository.findByDelivery_IdOrderByIdAsc(delivery.getId())
                 .stream()
-                .map((item) -> toDeliveryItemResponse(item, null))
+                .map((item) -> toDeliveryItemResponse(item, inventoryByKey.get(inventoryKey(
+                        item.getProduct() == null ? null : item.getProduct().getId(),
+                        item.getCategory() == null ? null : item.getCategory().getId(),
+                        item.getSubCategory() == null ? null : item.getSubCategory().getId(),
+                        item.getUnit()))))
                 .toList();
         return toDeliveryResponse(delivery, itemResponses);
+    }
+
+    private String inventoryKey(Long productId, Long categoryId, Long subCategoryId, UnitType unit) {
+        return productId + "|" + categoryId + "|" + subCategoryId + "|" + (unit == null ? "" : unit.name());
     }
 
     private SupplierDeliveryResponse toDeliveryResponse(SupplierDelivery delivery, List<SupplierDeliveryItemResponse> itemResponses) {
@@ -399,9 +410,14 @@ public class SupplierDeliveryService {
         BigDecimal rate = delivery.getCommissionRate();
         BigDecimal commission = rate == null ? BigDecimal.ZERO
                 : money(totalSold.multiply(rate).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP));
-        BigDecimal netPayable = money(totalSold.subtract(commission).subtract(advancePaid));
         BigDecimal expenseTotal = money(zero(supplierExpenseRepository.sumAmountByDelivery(delivery.getId())));
         BigDecimal expenseDue = money(zero(supplierExpenseRepository.sumDueByDelivery(delivery.getId())));
+        // Net payable to supplier = total sold − commission − expense. All terms are whole
+        // taka (commission ceiled), so this is already an integer. SupplierDueService.netDue
+        // sums this exact per-shipment value — keep the two formulas in sync.
+        BigDecimal netPayable = totalSold.subtract(commission).subtract(expenseTotal);
+        BigDecimal totalUnitsSold = zero(saleItemRepository.sumQuantityByDelivery(delivery.getId()));
+        BigDecimal totalKgSold = zero(saleItemRepository.sumSaleWeightByDelivery(delivery.getId()));
         return new SupplierDeliveryResponse(
                 delivery.getId(),
                 delivery.getWholesaler().getId(),
@@ -420,6 +436,8 @@ public class SupplierDeliveryService {
                 netPayable,
                 expenseTotal,
                 expenseDue,
+                totalUnitsSold,
+                totalKgSold,
                 itemResponses
         );
     }
@@ -591,7 +609,7 @@ public class SupplierDeliveryService {
     }
 
     private BigDecimal money(BigDecimal value) {
-        return (value == null ? BigDecimal.ZERO : value).setScale(2, RoundingMode.HALF_UP);
+        return (value == null ? BigDecimal.ZERO : value).setScale(0, RoundingMode.CEILING);
     }
 
     private UnitType parseUnit(String value) {

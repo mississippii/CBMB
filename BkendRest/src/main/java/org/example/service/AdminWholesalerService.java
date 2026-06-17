@@ -77,6 +77,32 @@ public class AdminWholesalerService {
     }
 
     @Transactional
+    public WholesalerResponse updateWholesaler(Long wholesalerId, org.example.dto.UpdateWholesalerRequest request) {
+        Wholesaler wholesaler = wholesalerRepository.findById(wholesalerId)
+                .orElseThrow(() -> new BadRequestException("Wholesaler not found."));
+
+        String name = requireText(request.name(), "Wholesaler user name is required.");
+        String businessName = requireText(request.businessName(), "Business name is required.");
+        String phone = requireText(request.phone(), "Wholesaler phone is required.");
+        String address = clean(request.address());
+
+        if (!phone.equals(wholesaler.getPhone()) && wholesalerRepository.existsByPhone(phone)) {
+            throw new BadRequestException("A wholesaler with this phone already exists.");
+        }
+
+        User user = wholesaler.getUser();
+        user.setName(name);
+        userRepository.save(user);
+
+        wholesaler.setBusinessName(businessName);
+        wholesaler.setPhone(phone);
+        wholesaler.setAddress(address);
+        Wholesaler saved = wholesalerRepository.save(wholesaler);
+
+        return toResponse(saved);
+    }
+
+    @Transactional
     public void resetWholesalerPassword(Long wholesalerId, String newPassword) {
         if (newPassword == null || newPassword.trim().length() < 8) {
             throw new BadRequestException("New password must be at least 8 characters.");

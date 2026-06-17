@@ -17,8 +17,12 @@ public record SupplierAccountResponse(
         BigDecimal currentDue,
         BigDecimal totalSales,
         BigDecimal totalCommissionEarned,
+        // Leg 1 — the wholesaler's crates this supplier is holding (supplier owes them back).
         List<CrateTypeQuantity> crateDues,
         Integer totalCratesDue,
+        // Leg 2 — the supplier's own crates the wholesaler is holding (wholesaler owes them back).
+        List<CrateTypeQuantity> crateHoldings,
+        Integer totalCratesHeld,
         String status,
         LocalDateTime createdAt
 ) {

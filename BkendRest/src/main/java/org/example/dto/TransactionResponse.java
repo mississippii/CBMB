@@ -23,6 +23,7 @@ public record TransactionResponse(
         String subCategoryName,
         BigDecimal quantity,
         String unit,
+        BigDecimal saleWeightKg,
         BigDecimal unitPrice,
         BigDecimal saleAmount,
         BigDecimal grossAmount,
@@ -31,6 +32,7 @@ public record TransactionResponse(
         BigDecimal dueAmount,
         Integer cratesReturned,
         String paymentType,
+        String paymentMethod,
         String description,
         LocalDateTime createdAt
 ) {

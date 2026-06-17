@@ -8,10 +8,9 @@ import java.math.BigDecimal;
  * Net payable is the sale-side balance only:
  *   netPayable = totalSale - commission - productPaid
  *
- * Other expenses the wholesaler fronted are tracked as a SEPARATE receivable from
- * the supplier. They are NOT deducted from the net payable up front; the outstanding
- * amount (expenseDue) only goes down as the supplier pays it back (expense-receive):
- *   expenseDue = expenseTotal - expenseReceived
+ * Expenses the wholesaler fronted on the supplier's behalf are shown separately as
+ * the outstanding {@code expenseDue} (= {@code expenseTotal}). Commission and these
+ * expenses are deductions from the supplier's net due — never cash received back.
  */
 public record SupplierStatementResponse(
         String period,
@@ -20,7 +19,6 @@ public record SupplierStatementResponse(
         BigDecimal productPaid,
         BigDecimal netPayable,
         BigDecimal expenseTotal,
-        BigDecimal expenseReceived,
         BigDecimal expenseDue
 ) {
 }

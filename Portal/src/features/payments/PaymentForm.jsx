@@ -1,13 +1,13 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
-  CreditCard, User, UserCheck, DollarSign, FileText, Save, ArrowDownRight, ArrowUpRight, Wallet,
+  AlertTriangle, CreditCard, User, UserCheck, DollarSign, FileText, Save, ArrowDownRight, ArrowUpRight, Wallet,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { useData } from '../../data/DataContext';
 import { useToast } from '../../shared/components/Toast';
 import { postJson, apiPaths } from '../../services/apiClient';
 
-const fmt = (value) => `৳ ${Math.round(Number(value) || 0).toLocaleString()}`;
+const fmt = (value) => `৳ ${Math.ceil(Number(value) || 0).toLocaleString()}`;
 
 // Backend PaymentMethod enum (CASH / BANK / BKASH / NAGAD / OTHER). NONE is for crate-only
 // movements, so it isn't offered for a money payment.
@@ -37,27 +37,15 @@ const DIRECTIONS = {
     endpoint: apiPaths.paymentsSupplierProductPay,
     reducesPartyDue: true,
   },
-  SUPPLIER_COMMISSION_RECEIVE: {
-    party: 'supplier',
-    label: 'Receive commission',
-    desc: 'Supplier pays you commission',
-    icon: ArrowDownRight,
-    endpoint: apiPaths.paymentsSupplierCommissionReceive,
-    reducesPartyDue: false,
-  },
-  SUPPLIER_EXPENSE_RECEIVE: {
-    party: 'supplier',
-    label: 'Receive expense',
-    desc: 'Supplier pays back the expense you fronted',
-    icon: ArrowDownRight,
-    endpoint: apiPaths.paymentsSupplierExpenseReceive,
-    reducesPartyDue: false,
-  },
 };
 
 const PaymentForm = ({ onClose }) => {
   const { admin } = useAuth();
   const { suppliers, customers, reloadSuppliers, reloadCustomers, refreshTransactions } = useData();
+
+  // Open with the latest party balances/dues, not the copy cached since login.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { reloadSuppliers(); reloadCustomers(); }, []);
   const showToast = useToast();
 
   const [direction, setDirection] = useState('CUSTOMER_PAY');
@@ -67,6 +55,7 @@ const PaymentForm = ({ onClose }) => {
   const [note, setNote] = useState('');
   const [error, setError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
+  const [showConfirm, setShowConfirm] = useState(false);
 
   const config = DIRECTIONS[direction];
   const isCustomer = config.party === 'customer';
@@ -87,18 +76,26 @@ const PaymentForm = ({ onClose }) => {
     setError('');
   };
 
-  const handleSubmit = async (event) => {
+  // Step 1 — validate, then ask for confirmation. Payments are final once saved.
+  const handleSubmit = (event) => {
     event.preventDefault();
     setError('');
 
     const amt = Number(amount);
     if (!partyId) { setError(`Choose a ${config.party}.`); return; }
     if (!amt || amt <= 0) { setError('Enter an amount greater than zero.'); return; }
-    if (config.reducesPartyDue && amt > currentDue) {
-      setError(`Amount cannot exceed the current ${config.party} due (${fmt(currentDue)}).`);
+    // Suppliers may be overpaid — the excess becomes an advance. Customers cannot.
+    if (config.party === 'customer' && config.reducesPartyDue && amt > currentDue) {
+      setError(`Amount cannot exceed the current customer due (${fmt(currentDue)}).`);
       return;
     }
 
+    setShowConfirm(true);
+  };
+
+  // Step 2 — actually save after the user confirms the warning.
+  const handleConfirmSave = async () => {
+    const amt = Number(amount);
     setIsSaving(true);
     try {
       const body = isCustomer
@@ -125,6 +122,7 @@ const PaymentForm = ({ onClose }) => {
       ]);
       onClose?.();
     } catch (err) {
+      setShowConfirm(false);
       setError(err instanceof Error ? err.message : 'Failed to record payment.');
     } finally {
       setIsSaving(false);
@@ -139,7 +137,6 @@ const PaymentForm = ({ onClose }) => {
             <div className="modal-icon-circle bg-blue-100 text-blue-700"><CreditCard size={18} /></div>
             <div>
               <h2>Record Payment</h2>
-              <p className="text-xs text-slate-500 mt-0.5">Pay or receive money — the party's due adjusts automatically</p>
             </div>
           </div>
           <button type="button" onClick={() => onClose?.()} className="modal-close-btn">✕</button>
@@ -178,7 +175,7 @@ const PaymentForm = ({ onClose }) => {
                 <option value="">Choose {config.party}…</option>
                 {parties.map((p) => (
                   <option key={p.id} value={p.id}>
-                    {p.name} · due {fmt(p.amountDue || 0)}
+                    {isCustomer ? p.name : (p.businessName || p.name)} · due {fmt(p.amountDue || 0)}
                   </option>
                 ))}
               </select>
@@ -231,7 +228,11 @@ const PaymentForm = ({ onClose }) => {
               {' · '}This payment <strong className="text-amber-700">{fmt(amount)}</strong>
               {' · '}
               {config.reducesPartyDue ? (
-                <>Due after <strong className="text-rose-700">{fmt(dueAfter)}</strong></>
+                dueAfter < 0 ? (
+                  <>Advance after <strong className="text-amber-700">{fmt(-dueAfter)}</strong></>
+                ) : (
+                  <>Due after <strong className="text-rose-700">{fmt(dueAfter)}</strong></>
+                )
               ) : (
                 <span className="text-slate-500">Income to you — party's product due is unchanged</span>
               )}
@@ -244,12 +245,43 @@ const PaymentForm = ({ onClose }) => {
         </div>
 
         <div className="modal-footer">
-          <button type="button" onClick={() => onClose?.()} className="btn-secondary" disabled={isSaving}>Cancel</button>
           <button type="submit" className="btn-primary flex items-center gap-2" disabled={isSaving}>
             <Save size={15} /> {isSaving ? 'Saving…' : 'Record Payment'}
           </button>
         </div>
       </form>
+
+      {showConfirm && (
+        <div className="modal-overlay" style={{ zIndex: 60 }}>
+          <div className="modal-content" style={{ maxWidth: '26rem' }}>
+            <div className="modal-header">
+              <div className="flex items-center gap-2.5">
+                <div className="modal-icon-circle bg-amber-100 text-amber-700"><AlertTriangle size={18} /></div>
+                <div><h2>Confirm payment</h2></div>
+              </div>
+            </div>
+            <div className="px-1 py-1 space-y-3">
+              <p className="text-sm text-slate-600">
+                A recorded payment <span className="font-semibold text-slate-800">cannot be undone</span>. Please review before saving.
+              </p>
+              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm space-y-1.5">
+                <div className="flex justify-between"><span className="text-slate-500">{config.label}</span><span className="font-semibold text-slate-800">{selectedParty?.name || '—'}</span></div>
+                <div className="flex justify-between"><span className="text-slate-500">Amount</span><span className="font-semibold text-slate-900">{fmt(amount)} · {PAYMENT_METHODS.find((m) => m.value === method)?.label || method}</span></div>
+                <div className="flex justify-between border-t border-slate-200 pt-1.5 mt-1.5">
+                  <span className="font-semibold text-slate-600">{dueAfter < 0 ? 'Advance after' : 'Due after'}</span>
+                  <span className={`font-bold ${dueAfter < 0 ? 'text-amber-700' : 'text-rose-600'}`}>{fmt(Math.abs(dueAfter))}</span>
+                </div>
+              </div>
+            </div>
+            <div className="modal-footer">
+              <button type="button" onClick={() => setShowConfirm(false)} className="btn-secondary" disabled={isSaving}>Back</button>
+              <button type="button" onClick={handleConfirmSave} className="btn-primary flex items-center gap-2" disabled={isSaving}>
+                <Save size={15} /> {isSaving ? 'Saving…' : 'Confirm & Save'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 };

@@ -1,12 +1,14 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { Ban, Plus, Wallet, Calendar } from 'lucide-react';
+import { AlertTriangle, Filter, Plus, Wallet } from 'lucide-react';
 import { useData } from '../../data/DataContext';
 import { useAuth } from '../auth/AuthContext';
 import { queryKeys } from '../../services/queryKeys';
 import Modal from '../../shared/components/Modal';
+import { TablePager, usePagination, DateRangeFilter } from '../../shared/components';
+import { formatDate } from '../../shared/utils/format';
 
-const formatMoney = (value) => '৳ ' + (Number(value) || 0).toLocaleString();
+const fmt = (value) => '৳ ' + Math.ceil(Number(value) || 0).toLocaleString();
 
 const PAYMENT_METHODS = [
   { value: 'CASH',  label: 'Cash' },
@@ -16,37 +18,17 @@ const PAYMENT_METHODS = [
   { value: 'OTHER', label: 'Other' },
 ];
 
-const todayIso = () => new Date().toISOString().split('T')[0];
-const isoDaysAgo = (n) => {
-  const d = new Date();
-  d.setDate(d.getDate() - n);
-  return d.toISOString().split('T')[0];
-};
-const isoStartOfMonth = () => {
-  const d = new Date();
-  d.setDate(1);
-  return d.toISOString().split('T')[0];
-};
-const isoStartOfYear = () => {
-  const d = new Date();
-  d.setMonth(0, 1);
-  return d.toISOString().split('T')[0];
-};
-const toStartOfDay = (dateString) => new Date(`${dateString}T00:00:00`).toISOString();
-const toEndOfDay = (dateString) => new Date(`${dateString}T23:59:59.999`).toISOString();
-
-const PERIOD_PRESETS = [
-  { value: 'today', label: 'Today' },
-  { value: 'week',  label: '7 days' },
-  { value: 'month', label: 'Month' },
-  { value: 'year',  label: 'Year' },
-];
+// Local calendar date (yyyy-mm-dd) — avoids the UTC day-shift of toISOString().
+const isoLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+const todayIso = () => isoLocal(new Date());
+const toStartOfDay = (s) => new Date(`${s}T00:00:00`).toISOString();
+const toEndOfDay = (s) => new Date(`${s}T23:59:59.999`).toISOString();
 
 const ShopExpensesPage = () => {
   const { admin } = useAuth();
   const queryClient = useQueryClient();
-  const { fetchShopExpenseCategories, fetchShopExpenses, createShopExpense, cancelShopExpense } = useData();
-  const [startDate, setStartDate] = useState(isoStartOfMonth());
+  const { fetchShopExpenseCategories, fetchShopExpenses, createShopExpense } = useData();
+  const [startDate, setStartDate] = useState(todayIso());
   const [endDate, setEndDate] = useState(todayIso());
 
   const [showForm, setShowForm] = useState(false);
@@ -57,9 +39,7 @@ const ShopExpensesPage = () => {
   const [formNote, setFormNote] = useState('');
   const [formError, setFormError] = useState('');
 
-  const [cancelTargetId, setCancelTargetId] = useState(null);
-  const [cancelReason, setCancelReason] = useState('');
-  const [cancelError, setCancelError] = useState('');
+  const [showSaveWarning, setShowSaveWarning] = useState(false);
 
   const fromIso = startDate ? toStartOfDay(startDate) : null;
   const toIso = endDate ? toEndOfDay(endDate) : null;
@@ -81,18 +61,11 @@ const ShopExpensesPage = () => {
   const invalidateShopExpenses = () => {
     queryClient.invalidateQueries({ queryKey: queryKeys.shopExpenses.root(admin?.wholesalerId) });
     queryClient.invalidateQueries({ queryKey: ['dashboardSummary', admin?.wholesalerId] });
+    queryClient.invalidateQueries({ queryKey: ['cash', admin?.wholesalerId] });
   };
 
-  const createMutation = useMutation({
-    mutationFn: (payload) => createShopExpense(payload),
-    onSuccess: invalidateShopExpenses,
-  });
-  const cancelMutation = useMutation({
-    mutationFn: ({ id, reason }) => cancelShopExpense(id, reason),
-    onSuccess: invalidateShopExpenses,
-  });
+  const createMutation = useMutation({ mutationFn: (p) => createShopExpense(p), onSuccess: invalidateShopExpenses });
   const formBusy = createMutation.isPending;
-  const cancelBusy = cancelMutation.isPending;
 
   const totals = useMemo(() => {
     const active = expenses.filter((e) => e.status !== 'CANCELLED');
@@ -105,213 +78,161 @@ const ShopExpensesPage = () => {
     return {
       total,
       count: active.length,
-      topCategories: Array.from(byCategory.entries())
-        .sort((a, b) => b[1] - a[1])
-        .slice(0, 3),
+      byCategory: Array.from(byCategory.entries()).sort((a, b) => b[1] - a[1]),
     };
   }, [expenses]);
 
-  const applyPreset = (preset) => {
-    if (preset === 'today') { setStartDate(todayIso()); setEndDate(todayIso()); return; }
-    if (preset === 'week')  { setStartDate(isoDaysAgo(6)); setEndDate(todayIso()); return; }
-    if (preset === 'month') { setStartDate(isoStartOfMonth()); setEndDate(todayIso()); return; }
-    if (preset === 'year')  { setStartDate(isoStartOfYear()); setEndDate(todayIso()); return; }
-  };
-  const isPresetActive = (preset) => {
-    if (preset === 'today') return startDate === todayIso() && endDate === todayIso();
-    if (preset === 'week')  return startDate === isoDaysAgo(6) && endDate === todayIso();
-    if (preset === 'month') return startDate === isoStartOfMonth() && endDate === todayIso();
-    if (preset === 'year')  return startDate === isoStartOfYear() && endDate === todayIso();
-    return false;
-  };
+  const { pageItems: pagedExpenses, ...expensePager } = usePagination(expenses, 15, [startDate, endDate]);
 
   const resetForm = () => {
-    setFormCategoryId('');
-    setFormAmount('');
-    setFormPaymentMethod('CASH');
-    setFormDate(todayIso());
-    setFormNote('');
-    setFormError('');
+    setFormCategoryId(''); setFormAmount(''); setFormPaymentMethod('CASH');
+    setFormDate(todayIso()); setFormNote(''); setFormError('');
   };
 
-  const handleSubmit = async (e) => {
+  // Step 1 — validate, then ask for confirmation. Expenses are final once saved.
+  const handleSubmit = (e) => {
     e.preventDefault();
     setFormError('');
     const amount = Number(formAmount);
     if (!amount || amount <= 0) { setFormError('Amount must be greater than zero.'); return; }
     if (!formCategoryId) { setFormError('Pick a category.'); return; }
+    setShowSaveWarning(true);
+  };
+
+  // Step 2 — actually save after the user confirms the warning.
+  const handleConfirmSave = async () => {
+    setFormError('');
     try {
       await createMutation.mutateAsync({
         categoryId: Number(formCategoryId),
-        amount,
+        amount: Number(formAmount),
         paymentMethod: formPaymentMethod,
         expenseDate: new Date(`${formDate}T${new Date().toTimeString().slice(0, 8)}`).toISOString(),
         note: formNote.trim() || null,
       });
+      setShowSaveWarning(false);
       resetForm();
       setShowForm(false);
     } catch (err) {
+      setShowSaveWarning(false);
       setFormError(err.message || 'Failed to save.');
     }
   };
 
-  const handleCancel = async () => {
-    if (!cancelTargetId) return;
-    setCancelError('');
-    try {
-      await cancelMutation.mutateAsync({ id: cancelTargetId, reason: cancelReason });
-      setCancelTargetId(null);
-      setCancelReason('');
-    } catch (err) {
-      setCancelError(err.message || 'Failed to cancel.');
-    }
-  };
-
   return (
-    <div className="space-y-4">
-      {/* Summary header */}
-      <section className="rounded-2xl border border-slate-200 bg-gradient-to-br from-white via-white to-slate-50 p-3 shadow-sm">
-        <div className="flex flex-col gap-3 lg:flex-row lg:items-stretch">
-          <div className="shrink-0 lg:w-56 flex flex-col justify-between gap-2">
-            <div className="flex items-center gap-2.5">
-              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-xl bg-rose-100 text-rose-700">
+    <div className="space-y-5">
+      <div className="profile-workspace">
+        <main className="profile-main-stack">
+          {/* Header */}
+          <section className="inventory-hero" style={{ padding: '0.75rem 1rem' }}>
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-rose-100 text-rose-600">
                 <Wallet size={18} />
               </div>
-              <div className="min-w-0">
-                <h3 className="text-[15px] font-extrabold leading-tight text-slate-900">Shop Expenses</h3>
-                <p className="text-[11px] text-slate-500 leading-tight">Wholesaler-borne overhead — no reimbursement</p>
+              <div className="leading-tight">
+                <h3>Shop Overhead</h3>
+                <span className="text-xs text-slate-500">Shop expense</span>
               </div>
             </div>
-            <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white p-0.5 text-[11px] font-semibold">
-              {PERIOD_PRESETS.map(({ value, label }) => (
-                <button
-                  key={value}
-                  type="button"
-                  onClick={() => applyPreset(value)}
-                  className={`px-2.5 py-1 rounded-full transition ${
-                    isPresetActive(value)
-                      ? 'bg-rose-600 text-white shadow-sm'
-                      : 'text-slate-600 hover:text-slate-900'
-                  }`}
-                >
-                  {label}
-                </button>
-              ))}
-            </div>
-            <button
-              type="button"
-              onClick={() => { resetForm(); setShowForm(true); }}
-              className="inline-flex w-fit items-center gap-1.5 rounded-lg bg-rose-600 px-3 py-1.5 text-xs font-bold text-white hover:bg-rose-700"
-            >
-              <Plus size={12} /> Add Expense
-            </button>
-          </div>
+          </section>
 
-          <div className="flex-1 grid grid-cols-2 gap-2 sm:grid-cols-3 lg:grid-cols-5">
-            <div className="rounded-xl border border-rose-200 bg-gradient-to-br from-rose-50 to-white px-3 py-2.5">
-              <p className="text-[10px] font-bold uppercase tracking-wider text-rose-700">Period Total</p>
-              <p className="mt-0.5 text-lg font-extrabold leading-tight text-rose-700">{formatMoney(totals.total)}</p>
-              <p className="text-[10px] text-slate-500">{totals.count} entries</p>
-            </div>
-            {totals.topCategories.map(([name, amount]) => (
-              <div key={name} className="rounded-xl border border-slate-200 bg-white px-3 py-2.5">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">{name}</p>
-                <p className="mt-0.5 text-lg font-extrabold leading-tight text-slate-900">{formatMoney(amount)}</p>
-              </div>
-            ))}
-            <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 flex flex-col gap-1.5">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1">
-                <Calendar size={10} /> From
-              </label>
-              <input type="date" value={startDate} onChange={(e) => setStartDate(e.target.value)} className="input-field text-xs" />
-            </div>
-            <div className="rounded-xl border border-slate-200 bg-white px-3 py-2.5 flex flex-col gap-1.5">
-              <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500 flex items-center gap-1">
-                <Calendar size={10} /> To
-              </label>
-              <input type="date" value={endDate} onChange={(e) => setEndDate(e.target.value)} className="input-field text-xs" />
-            </div>
-          </div>
+          {/* Entries */}
+          <section className="supplier-panel">
+        <div className="flex items-center justify-between">
+          <h3>Entries</h3>
+          <span className="badge badge-rose">{expenses.length} rows</span>
         </div>
-      </section>
 
-      {/* List */}
-      <section className="rounded-2xl border border-slate-200 bg-white p-3 shadow-sm">
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="text-sm font-extrabold text-slate-900">Entries</h3>
-          <span className="rounded-full bg-rose-50 px-2.5 py-1 text-[11px] font-bold text-rose-700">
-            {expenses.length} rows
-          </span>
-        </div>
         {expenses.length === 0 ? (
-          <div className="rounded-xl border border-dashed border-slate-300 bg-slate-50 p-6 text-center text-sm font-semibold text-slate-500">
-            {loading ? 'Loading…' : 'No expenses in this period.'}
-          </div>
+          <div className="empty-state mt-4">{loading ? 'Loading…' : 'No expenses in this period.'}</div>
         ) : (
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[720px] text-sm">
+          <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200">
+            <table className="center-table w-full min-w-[720px] text-sm">
               <thead>
-                <tr className="border-b border-slate-200 text-left text-[11px] font-bold uppercase tracking-wider text-slate-500">
-                  <th className="py-2 pr-3">Date</th>
-                  <th className="py-2 pr-3">Category</th>
-                  <th className="py-2 pr-3 text-right">Amount</th>
-                  <th className="py-2 pr-3">Method</th>
-                  <th className="py-2 pr-3">Note</th>
-                  <th className="py-2 pr-3 text-right">Action</th>
+                <tr className="border-b border-slate-200 bg-slate-50">
+                  <th className="px-4 py-3 font-semibold text-slate-700">Date</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Category</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Amount</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Method</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Note</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {expenses.map((expense) => {
+                {pagedExpenses.map((expense) => {
                   const cancelled = expense.status === 'CANCELLED';
                   return (
-                    <tr key={expense.id} className={cancelled ? 'opacity-50 line-through' : 'hover:bg-slate-50'}>
-                      <td className="py-2 pr-3 font-semibold text-slate-800">
-                        {expense.expenseDate ? new Date(expense.expenseDate).toLocaleDateString() : '—'}
+                    <tr key={expense.id} className={`transition ${cancelled ? 'opacity-50 line-through' : 'hover:bg-slate-50'}`}>
+                      <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-800">
+                        {formatDate(expense.expenseDate)}
                       </td>
-                      <td className="py-2 pr-3 text-slate-700">{expense.categoryName}</td>
-                      <td className="py-2 pr-3 text-right font-extrabold text-slate-900">{formatMoney(expense.amount)}</td>
-                      <td className="py-2 pr-3 text-slate-600 text-xs">{expense.paymentMethod}</td>
-                      <td className="py-2 pr-3 text-slate-600 text-xs">{expense.note || '—'}</td>
-                      <td className="py-2 pr-3 text-right">
-                        {!cancelled && (
-                          <button
-                            type="button"
-                            onClick={() => { setCancelTargetId(expense.id); setCancelReason(''); setCancelError(''); }}
-                            className="inline-flex items-center gap-1 rounded-md border border-rose-200 bg-rose-50 px-2 py-1 text-[11px] font-bold text-rose-700 hover:bg-rose-100"
-                          >
-                            <Ban size={11} /> Cancel
-                          </button>
-                        )}
+                      <td className="px-4 py-3 text-slate-700">{expense.categoryName}</td>
+                      <td className="px-4 py-3 font-extrabold text-slate-900 tabular-nums">{fmt(expense.amount)}</td>
+                      <td className="px-4 py-3">
+                        <span className="badge badge-teal">{expense.paymentMethod}</span>
                       </td>
+                      <td className="px-4 py-3 text-slate-500">{expense.note || '—'}</td>
                     </tr>
                   );
                 })}
               </tbody>
             </table>
+            <TablePager {...expensePager} />
           </div>
         )}
-        {error && (
-          <div className="mt-3 rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
-            {error}
+        {error && (<div className="status-error mt-3"><span>!</span><span>{error}</span></div>)}
+          </section>
+
+        </main>
+
+        <aside className="profile-side-stack">
+          <div className="supplier-panel">
+            <h3>Expense Actions</h3>
+            <button type="button" onClick={() => { resetForm(); setShowForm(true); }} className="btn-primary mt-3 inline-flex w-full items-center justify-center gap-2">
+              <Plus size={16} /> New Expense
+            </button>
           </div>
-        )}
+          {/* Filters + KPIs */}
+          <section className="supplier-panel">
+        <h3 className="mb-3 flex items-center gap-2"><Filter size={16} className="text-blue-600" /> Filters</h3>
+        <DateRangeFilter from={startDate} to={endDate} setFrom={setStartDate} setTo={setEndDate} />
+
+        <div className="mt-4">
+          <div className="rounded-2xl border border-rose-200 bg-gradient-to-br from-rose-50 to-white px-3.5 py-3 shadow-sm">
+            <p className="text-[10px] font-bold uppercase tracking-wider text-rose-600">Period Total</p>
+            <p className="mt-1 text-xl font-extrabold leading-tight text-rose-600 tabular-nums">{fmt(totals.total)}</p>
+            <p className="text-[11px] text-slate-400">{totals.count} entries</p>
+          </div>
+
+          {totals.byCategory.length > 0 && (
+            <div className="mt-3">
+              <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">By category</p>
+              <div className="divide-y divide-slate-100">
+                {totals.byCategory.map(([name, amount]) => (
+                  <div key={name} className="flex items-center justify-between gap-3 py-1.5">
+                    <span className="min-w-0 truncate text-xs font-medium text-slate-600">{name}</span>
+                    <span className="shrink-0 text-sm font-bold text-slate-900 tabular-nums">{fmt(amount)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )}
+        </div>
       </section>
+
+        </aside>
+      </div>
 
       {/* Add modal */}
       <Modal
         open={showForm}
         onClose={() => { if (!formBusy) setShowForm(false); }}
         title="Add shop expense"
-        subtitle="Pure overhead — wholesaler bears, reduces profit"
         icon={Wallet}
-        iconClass="bg-rose-100 text-rose-700"
+        iconClass="bg-rose-100 text-rose-600"
         maxWidth="32rem"
         footer={(
           <div className="flex w-full justify-end gap-2">
-            <button type="button" onClick={() => setShowForm(false)} disabled={formBusy} className="btn-secondary">Cancel</button>
-            <button type="submit" form="shop-expense-form" disabled={formBusy} className="rounded-lg bg-rose-600 px-3 py-1.5 text-sm font-bold text-white hover:bg-rose-700 disabled:opacity-50">
-              {formBusy ? 'Saving…' : 'Save'}
-            </button>
+            <button type="submit" form="shop-expense-form" disabled={formBusy} className="btn-primary">{formBusy ? 'Saving…' : 'Save'}</button>
           </div>
         )}
       >
@@ -341,44 +262,37 @@ const ShopExpensesPage = () => {
           </div>
           <div>
             <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Note (optional)</label>
-            <input type="text" value={formNote} onChange={(e) => setFormNote(e.target.value)} className="input-field mt-1 w-full" placeholder="e.g. May salary for shop assistant" />
+            <input type="text" value={formNote} onChange={(e) => setFormNote(e.target.value)} className="input-field mt-1 w-full" placeholder="e.g. May salary" />
           </div>
-          {formError && (
-            <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
-              {formError}
-            </div>
-          )}
+          {formError && (<div className="status-error"><span>!</span><span>{formError}</span></div>)}
         </form>
       </Modal>
 
-      {/* Cancel modal */}
+      {/* Save warning — expenses cannot be changed after saving */}
       <Modal
-        open={cancelTargetId != null}
-        onClose={() => { if (!cancelBusy) setCancelTargetId(null); }}
-        title="Cancel this expense?"
-        subtitle="Marks as CANCELLED — won't count in totals or dashboards."
-        icon={Ban}
-        iconClass="bg-rose-100 text-rose-700"
+        open={showSaveWarning}
+        onClose={() => { if (!formBusy) setShowSaveWarning(false); }}
+        title="Save this expense?"
+        icon={AlertTriangle}
+        iconClass="bg-amber-100 text-amber-600"
         maxWidth="28rem"
         footer={(
           <div className="flex w-full justify-end gap-2">
-            <button type="button" onClick={() => setCancelTargetId(null)} disabled={cancelBusy} className="btn-secondary">Keep</button>
-            <button type="button" onClick={handleCancel} disabled={cancelBusy} className="rounded-lg bg-rose-600 px-3 py-1.5 text-sm font-bold text-white hover:bg-rose-700 disabled:opacity-50">
-              {cancelBusy ? 'Cancelling…' : 'Confirm Cancel'}
-            </button>
+            <button type="button" onClick={() => setShowSaveWarning(false)} disabled={formBusy} className="btn-secondary">Back</button>
+            <button type="button" onClick={handleConfirmSave} disabled={formBusy} className="btn-primary">{formBusy ? 'Saving…' : 'Confirm Save'}</button>
           </div>
         )}
       >
         <div className="space-y-3">
-          <div>
-            <label className="text-[11px] font-bold uppercase tracking-wider text-slate-500">Reason (optional)</label>
-            <input type="text" value={cancelReason} onChange={(e) => setCancelReason(e.target.value)} className="input-field mt-1 w-full" placeholder="e.g. duplicate entry" />
+          <p className="text-sm text-slate-600">
+            Please review before saving — an expense <strong>cannot be changed or cancelled</strong> once recorded.
+          </p>
+          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
+            <div className="flex justify-between py-0.5"><span className="text-slate-500">Category</span><strong className="text-slate-800">{categories.find((c) => String(c.id) === String(formCategoryId))?.name || '—'}</strong></div>
+            <div className="flex justify-between py-0.5"><span className="text-slate-500">Amount</span><strong className="text-slate-900">{fmt(formAmount)}</strong></div>
+            <div className="flex justify-between py-0.5"><span className="text-slate-500">Payment</span><strong className="text-slate-800">{PAYMENT_METHODS.find((m) => m.value === formPaymentMethod)?.label || formPaymentMethod}</strong></div>
+            <div className="flex justify-between py-0.5"><span className="text-slate-500">Date</span><strong className="text-slate-800">{formatDate(formDate)}</strong></div>
           </div>
-          {cancelError && (
-            <div className="rounded-md border border-rose-200 bg-rose-50 px-3 py-2 text-xs font-semibold text-rose-700">
-              {cancelError}
-            </div>
-          )}
         </div>
       </Modal>
     </div>

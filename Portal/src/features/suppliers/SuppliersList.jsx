@@ -1,9 +1,12 @@
 import { useEffect, useState } from 'react';
 import {
-  Search, Plus, UserCheck, Phone, Building2, Percent, Wallet, MapPin, ArrowUpDown,
+  Search, Plus, UserCheck, Phone, Building2, Percent, Wallet, MapPin, ArrowUpDown, Filter,
 } from 'lucide-react';
 import { useData } from '../../data/DataContext';
 import { useToast } from '../../shared/components/Toast';
+import { TablePager, usePagination, ConfirmDialog } from '../../shared/components';
+import { formatMoney } from '../../shared/utils/format';
+import { isValidPhone, numberInRange, PHONE_HINT } from '../../shared/utils/validation';
 import SupplierDetail from './SupplierDetail';
 
 const EMPTY_FORM = {
@@ -41,17 +44,42 @@ const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
   }, [autoOpenId]);
   const [isSaving, setIsSaving] = useState(false);
   const [formError, setFormError] = useState('');
+  const [confirm, setConfirm] = useState(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const runConfirm = async () => {
+    if (!confirm?.run) return;
+    setConfirmBusy(true);
+    try { await confirm.run(); } finally { setConfirmBusy(false); setConfirm(null); }
+  };
   const [formData, setFormData] = useState(EMPTY_FORM);
 
   const handleField = (key) => (e) => setFormData((prev) => ({ ...prev, [key]: e.target.value }));
 
-  const handleAddSupplier = async () => {
+  const requestAddSupplier = () => {
     const name = formData.name.trim();
-    const contact = formData.contact.trim();
+    const contact = normalizePhone(formData.contact);
     if (!name || !contact) {
       setFormError('Supplier name and phone number are required.');
       return;
     }
+    if (!isValidPhone(contact)) {
+      setFormError(PHONE_HINT);
+      return;
+    }
+    if (formData.commissionRate !== '' && !numberInRange(formData.commissionRate, 0, 100)) {
+      setFormError('Commission rate must be between 0 and 100.');
+      return;
+    }
+    if (formData.openingDue !== '' && !numberInRange(formData.openingDue, 0)) {
+      setFormError('Opening due must be zero or a positive amount.');
+      return;
+    }
+    setConfirm({ title: 'Add supplier', label: 'Confirm & Add', message: `Add "${name}" as a new supplier?`, run: handleAddSupplier });
+  };
+
+  const handleAddSupplier = async () => {
+    const name = formData.name.trim();
+    const contact = normalizePhone(formData.contact);
     setIsSaving(true);
     setFormError('');
     try {
@@ -95,9 +123,12 @@ const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
       return true;
     })
     .sort((a, b) => {
+      // The table title is the business name, so name sorting follows it.
+      const titleA = a.businessName || a.name;
+      const titleB = b.businessName || b.name;
       switch (sortBy) {
-        case 'name-asc':   return a.name.localeCompare(b.name);
-        case 'name-desc':  return b.name.localeCompare(a.name);
+        case 'name-asc':   return titleA.localeCompare(titleB);
+        case 'name-desc':  return titleB.localeCompare(titleA);
         case 'due-desc':   return Number(b.amountDue || 0) - Number(a.amountDue || 0);
         case 'due-asc':    return Number(a.amountDue || 0) - Number(b.amountDue || 0);
         case 'comm-desc':  return Number(b.commissionRate || 0) - Number(a.commissionRate || 0);
@@ -106,65 +137,27 @@ const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
       }
     });
 
+  const { pageItems: pagedSuppliers, ...supplierPager } = usePagination(
+    filteredSuppliers, 15, [search, sortBy, filterDue, showDisabled],
+  );
+
   if (selectedSupplierId) {
     return <SupplierDetail supplierId={selectedSupplierId} onBack={() => setSelectedSupplierId(null)} />;
   }
 
-  return (
-    <div className="space-y-4">
-      <div className="suppliers-toolbar">
-        <button onClick={() => setShowForm(true)} className="btn-primary flex items-center gap-2">
-          <Plus size={16} />
-          Add Supplier
-        </button>
-        <div className="suppliers-toolbar-controls">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
-            <input
-              type="text"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="input-field !pl-9"
-              placeholder="Search name, business or phone…"
-            />
-          </div>
-          <div className="suppliers-toolbar-select">
-            <Wallet size={14} className="suppliers-toolbar-select-icon" />
-            <select value={filterDue} onChange={(e) => setFilterDue(e.target.value)} className="input-field !pl-8">
-              <option value="all">All suppliers</option>
-              <option value="with-due">With due</option>
-              <option value="no-due">No due</option>
-            </select>
-          </div>
-          <label className="toggle-pill" title="Show disabled">
-            <input
-              type="checkbox"
-              checked={showDisabled}
-              onChange={(e) => setShowDisabled(e.target.checked)}
-            />
-            <span>Show disabled</span>
-          </label>
-          <div className="suppliers-toolbar-select">
-            <ArrowUpDown size={14} className="suppliers-toolbar-select-icon" />
-            <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="input-field !pl-8">
-              <option value="name-asc">Name A → Z</option>
-              <option value="name-desc">Name Z → A</option>
-              <option value="due-desc">Due (high → low)</option>
-              <option value="due-asc">Due (low → high)</option>
-              <option value="comm-desc">Commission (high → low)</option>
-              <option value="comm-asc">Commission (low → high)</option>
-            </select>
-          </div>
-        </div>
-      </div>
+  const totalDue = suppliers.reduce((sum, s) => sum + Math.max(0, Number(s.amountDue) || 0), 0);
+  const totalAdvance = suppliers.reduce((sum, s) => sum + Math.max(0, -(Number(s.amountDue) || 0)), 0);
+  const totalCratesDue = suppliers.reduce((sum, s) => sum + (Number(s.totalCratesHolding) || 0), 0);
 
+  return (
+    <div className="profile-workspace">
+      <main className="profile-main-stack">
       {showForm && (
         <div className="modal-overlay">
           <div className="modal-content supplier-form-modal">
             <div className="modal-header">
               <div>
                 <h2>Add New Supplier</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Fill in supplier details below</p>
               </div>
               <button onClick={closeForm} className="modal-close-btn">✕</button>
             </div>
@@ -272,7 +265,7 @@ const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
             </div>
             <div className="modal-footer">
               <button onClick={closeForm} className="btn-secondary" disabled={isSaving}>Cancel</button>
-              <button onClick={handleAddSupplier} disabled={isSaving} className="btn-primary flex items-center gap-2">
+              <button onClick={requestAddSupplier} disabled={isSaving} className="btn-primary flex items-center gap-2">
                 {isSaving ? 'Saving…' : (<><Plus size={15} /> Add Supplier</>)}
               </button>
             </div>
@@ -295,7 +288,6 @@ const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
           <div className="empty-state">
             <UserCheck size={36} className="empty-state-icon" />
             <p className="empty-state-title">No suppliers yet</p>
-            <p className="empty-state-sub">Add your first supplier to start receiving shipments.</p>
             <button onClick={() => setShowForm(true)} className="btn-primary mt-3 flex items-center gap-2 mx-auto">
               <Plus size={15} /> Add Supplier
             </button>
@@ -304,43 +296,49 @@ const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
           <div className="empty-state">
             <Search size={32} className="empty-state-icon" />
             <p className="empty-state-title">No results found</p>
-            <p className="empty-state-sub">Try a different name, business or phone.</p>
           </div>
         ) : (
           <>
             {/* Mobile card view */}
             <div className="space-y-3 lg:hidden">
-              {filteredSuppliers.map((supplier) => {
+              {pagedSuppliers.map((supplier) => {
                 const categories = [...new Set(
                   supplierProducts.filter((p) => p.supplierId === supplier.id).map((p) => p.category)
                 )];
+                const net = Number(supplier.amountDue || 0);
+                const advance = net < 0 ? -net : 0;
                 return (
-                  <div key={supplier.id} className="supplier-card">
+                  <div
+                    key={supplier.id}
+                    onClick={() => setSelectedSupplierId(supplier.id)}
+                    className="supplier-card cursor-pointer"
+                  >
                     <div className="flex items-start justify-between gap-3">
                       <div className="flex items-center gap-3 min-w-0">
                         <div className="supplier-card-avatar">
-                          {supplier.name?.charAt(0).toUpperCase() || 'S'}
+                          {(supplier.businessName || supplier.name)?.charAt(0).toUpperCase() || 'S'}
                         </div>
                         <div className="min-w-0">
-                          <p className="font-semibold text-slate-900 truncate">{supplier.name}</p>
+                          <p className="font-semibold text-slate-900 truncate">{supplier.businessName || supplier.name}</p>
                           {supplier.businessName && (
-                            <p className="text-xs text-blue-700 truncate">{supplier.businessName}</p>
+                            <p className="text-xs text-blue-700 truncate">{supplier.name}</p>
                           )}
                           <p className="text-xs text-slate-500 truncate">{supplier.contact}</p>
                         </div>
                       </div>
-                      <button
-                        onClick={() => setSelectedSupplierId(supplier.id)}
-                        className="btn-secondary !py-1.5 !px-3 text-xs shrink-0"
-                      >
-                        Profile
-                      </button>
                     </div>
                     <div className="mt-3 grid grid-cols-3 gap-2 text-center text-xs">
-                      <div className="rounded-lg bg-red-50 px-2 py-2">
-                        <p className="text-slate-500">Due</p>
-                        <p className="font-bold text-red-600">৳{supplier.amountDue.toLocaleString()}</p>
-                      </div>
+                      {advance > 0 ? (
+                        <div className="rounded-lg bg-emerald-50 px-2 py-2">
+                          <p className="text-slate-500">Advance</p>
+                          <p className="font-bold text-emerald-600">৳{Math.ceil(advance).toLocaleString()}</p>
+                        </div>
+                      ) : (
+                        <div className="rounded-lg bg-red-50 px-2 py-2">
+                          <p className="text-slate-500">Due</p>
+                          <p className="font-bold text-red-600">৳{Math.ceil(net).toLocaleString()}</p>
+                        </div>
+                      )}
                       <div className="rounded-lg bg-blue-50 px-2 py-2">
                         <p className="text-slate-500">Comm.</p>
                         <p className="font-bold text-blue-700">{supplier.commissionRate}%</p>
@@ -359,64 +357,141 @@ const SuppliersList = ({ autoOpenId = null, onProfileOpened }) => {
             </div>
 
             {/* Desktop table view */}
-            <div className="hidden lg:block overflow-x-auto rounded-xl border border-slate-200">
-              <table className="w-full text-sm min-w-[860px]">
+            <div className="hidden lg:block overflow-x-auto rounded-lg border border-slate-200 bg-white">
+              <table className="party-table w-full min-w-[680px]">
                 <thead>
-                  <tr className="bg-slate-50 border-b border-slate-200">
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">Supplier</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">Business</th>
-                    <th className="px-4 py-3 text-left font-semibold text-slate-700">Phone</th>
-                    <th className="px-4 py-3 text-right font-semibold text-slate-700">Amount Due</th>
-                    <th className="px-4 py-3 text-center font-semibold text-slate-700">Commission</th>
-                    <th className="px-4 py-3 text-center font-semibold text-slate-700">Crate Due</th>
-                    <th className="px-4 py-3 text-center font-semibold text-slate-700">Action</th>
+                  <tr>
+                    <th className="w-[20%]">Supplier</th>
+                    <th className="w-[14%]">Owner Name</th>
+                    <th className="w-[16%]">Contact</th>
+                    <th className="w-[14%]">Location</th>
+                    <th className="w-[12%] text-right">Amount Due</th>
+                    <th className="w-[13%] text-right">Advance Paid</th>
+                    <th className="w-[11%] text-right">Crate Due</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-slate-100">
-                  {filteredSuppliers.map((supplier) => (
-                    <tr key={supplier.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-4 py-3">
-                        <div className="flex items-center gap-2.5">
-                          <div className="supplier-card-avatar !w-8 !h-8 !text-xs">
-                            {supplier.name?.charAt(0).toUpperCase() || 'S'}
+                <tbody>
+                  {pagedSuppliers.map((supplier) => {
+                    const net = Number(supplier.amountDue || 0);
+                    const due = net > 0 ? net : 0;
+                    const advance = net < 0 ? -net : 0;
+                    return (
+                      <tr
+                        key={supplier.id}
+                        onClick={() => setSelectedSupplierId(supplier.id)}
+                        className="cursor-pointer"
+                      >
+                        <td>
+                          <div className="party-cell-main">
+                            <span className="party-avatar">{(supplier.businessName || supplier.name)?.charAt(0).toUpperCase() || 'S'}</span>
+                            <div className="flex flex-wrap items-center gap-2 min-w-0">
+                              <span className="party-name">{supplier.businessName || supplier.name}</span>
+                              {supplier.status === 'DISABLED' && <span className="badge badge-rose">Disabled</span>}
+                            </div>
                           </div>
-                          <p className="font-semibold text-slate-900">{supplier.name}</p>
-                          {supplier.status === 'DISABLED' && (
-                            <span className="badge badge-rose">Disabled</span>
-                          )}
-                        </div>
-                      </td>
-                      <td className="px-4 py-3 text-slate-700">
-                        {supplier.businessName || <span className="text-slate-400">—</span>}
-                      </td>
-                      <td className="px-4 py-3 text-slate-700">{supplier.contact}</td>
-                      <td className="px-4 py-3 text-right font-bold text-red-600">
-                        ৳{supplier.amountDue.toLocaleString()}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <span className="inline-block rounded-full bg-blue-50 px-2 py-0.5 text-xs font-bold text-blue-700">
-                          {supplier.commissionRate}%
-                        </span>
-                      </td>
-                      <td className="px-4 py-3 text-center font-semibold text-slate-700">
-                        {supplier.totalCratesHolding}
-                      </td>
-                      <td className="px-4 py-3 text-center">
-                        <button
-                          onClick={() => setSelectedSupplierId(supplier.id)}
-                          className="btn-secondary !py-1 !px-3 text-xs"
-                        >
-                          Profile
-                        </button>
-                      </td>
-                    </tr>
-                  ))}
+                        </td>
+                        <td className="font-semibold text-slate-700">{supplier.name || '—'}</td>
+                        <td>
+                          <div className="party-contact">
+                            <span>{supplier.contact || '—'}</span>
+                          </div>
+                        </td>
+                        <td className="text-slate-600">{supplier.location || '—'}</td>
+                        <td className={`text-right font-bold tabular-nums ${due > 0 ? 'text-red-600' : 'text-slate-400'}`}>
+                          {due > 0 ? formatMoney(due) : '—'}
+                        </td>
+                        <td className={`text-right font-bold tabular-nums ${advance > 0 ? 'text-emerald-600' : 'text-slate-400'}`}>
+                          {advance > 0 ? formatMoney(advance) : '—'}
+                        </td>
+                        <td className={`text-right font-semibold tabular-nums ${Number(supplier.totalCratesHolding) > 0 ? 'text-slate-700' : 'text-slate-400'}`}>
+                          {Number(supplier.totalCratesHolding) > 0 ? supplier.totalCratesHolding : '—'}
+                        </td>
+                      </tr>
+                    );
+                  })}
                 </tbody>
               </table>
             </div>
+
+            <TablePager {...supplierPager} />
           </>
         )}
       </div>
+      </main>
+
+      <aside className="profile-side-stack">
+        <div className="supplier-panel">
+          <h3>Supplier Actions</h3>
+          <button
+            type="button"
+            onClick={() => setShowForm(true)}
+            className="btn-primary mt-3 inline-flex w-full items-center justify-center gap-2"
+          >
+            <Plus size={16} /> Add Supplier
+          </button>
+        </div>
+        <div className="supplier-panel">
+          <h3 className="flex items-center gap-2"><Filter size={16} className="text-blue-600" /> Filters</h3>
+          <div className="mt-3 space-y-2.5">
+            <div className="relative">
+              <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 pointer-events-none" />
+              <input
+                type="text"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                className="input-field !pl-9"
+                placeholder="Search name, business or phone…"
+              />
+            </div>
+            <div className="suppliers-toolbar-select">
+              <Wallet size={14} className="suppliers-toolbar-select-icon" />
+              <select value={filterDue} onChange={(e) => setFilterDue(e.target.value)} className="input-field !pl-8 w-full">
+                <option value="all">All suppliers</option>
+                <option value="with-due">With due</option>
+                <option value="no-due">No due</option>
+              </select>
+            </div>
+            <div className="suppliers-toolbar-select">
+              <ArrowUpDown size={14} className="suppliers-toolbar-select-icon" />
+              <select value={sortBy} onChange={(e) => setSortBy(e.target.value)} className="input-field !pl-8 w-full">
+                <option value="name-asc">Name A → Z</option>
+                <option value="name-desc">Name Z → A</option>
+                <option value="due-desc">Due (high → low)</option>
+                <option value="due-asc">Due (low → high)</option>
+                <option value="comm-desc">Commission (high → low)</option>
+                <option value="comm-asc">Commission (low → high)</option>
+              </select>
+            </div>
+            <label className="toggle-pill w-full justify-center" title="Show disabled">
+              <input
+                type="checkbox"
+                checked={showDisabled}
+                onChange={(e) => setShowDisabled(e.target.checked)}
+              />
+              <span>Show disabled</span>
+            </label>
+          </div>
+        </div>
+        <div className="supplier-panel">
+          <h3>Suppliers Summary</h3>
+          <div className="mt-3 space-y-2">
+            <div className="box-row"><span>Total suppliers</span><strong>{suppliers.length}</strong></div>
+            <div className="box-row"><span>Total due</span><strong className="text-rose-700">{formatMoney(totalDue)}</strong></div>
+            <div className="box-row"><span>Advance paid</span><strong className="text-emerald-700">{formatMoney(totalAdvance)}</strong></div>
+            <div className="box-row total"><span>Crates due</span><strong>{totalCratesDue}</strong></div>
+          </div>
+        </div>
+      </aside>
+
+      <ConfirmDialog
+        open={!!confirm}
+        title={confirm?.title}
+        message={confirm?.message}
+        confirmLabel={confirm?.label}
+        busy={confirmBusy}
+        onCancel={() => setConfirm(null)}
+        onConfirm={runConfirm}
+      />
     </div>
   );
 };
