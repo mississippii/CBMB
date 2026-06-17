@@ -89,13 +89,10 @@ public class DashboardService {
         );
 
         BigDecimal customerPayments = money(paymentRepository.sumCashAmountInPeriod(wholesalerId, range.from, range.to));
-        BigDecimal commissionReceive = money(supplierSettlementRepository.sumAmountByTypeInPeriod(wholesalerId, SettlementType.COMMISSION_RECEIVE, range.from, range.to));
-        BigDecimal expenseReceive = money(supplierSettlementRepository.sumAmountByTypeInPeriod(wholesalerId, SettlementType.EXPENSE_RECEIVE, range.from, range.to));
         BigDecimal productPay = money(supplierSettlementRepository.sumAmountByTypeInPeriod(wholesalerId, SettlementType.PRODUCT_PAYMENT, range.from, range.to));
         BigDecimal shopExpenses = money(shopExpenseRepository.sumInPeriod(wholesalerId, range.from, range.to));
         DashboardSummaryResponse.MoneyIn moneyIn = new DashboardSummaryResponse.MoneyIn(
-                customerPayments, commissionReceive, expenseReceive,
-                money(customerPayments.add(commissionReceive).add(expenseReceive))
+                customerPayments, customerPayments
         );
         DashboardSummaryResponse.MoneyOut moneyOut = new DashboardSummaryResponse.MoneyOut(
                 productPay, shopExpenses, money(productPay.add(shopExpenses))
@@ -160,7 +157,7 @@ public class DashboardService {
     }
 
     private static BigDecimal money(BigDecimal value) {
-        return (value == null ? BigDecimal.ZERO : value).setScale(2, RoundingMode.HALF_UP);
+        return (value == null ? BigDecimal.ZERO : value).setScale(0, RoundingMode.CEILING);
     }
 
     private record PeriodRange(String label, LocalDateTime from, LocalDateTime to) {

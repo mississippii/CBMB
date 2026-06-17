@@ -25,8 +25,6 @@ public record DashboardSummaryResponse(
 
     public record MoneyIn(
             BigDecimal customerPayments,
-            BigDecimal supplierCommissionReceive,
-            BigDecimal supplierExpenseReceive,
             BigDecimal total
     ) {
     }

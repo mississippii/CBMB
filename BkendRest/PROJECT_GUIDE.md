@@ -213,8 +213,9 @@ quantity
 unitPrice
 paymentAmount
 saleType=PAY_INSTANT/PAY_LATER
-boxesGiven
-jamanotAmount
+crateLines
+crateDeposit
+cratePaymentMethod
 note
 ```
 
@@ -245,8 +246,9 @@ partyType=CUSTOMER/SUPPLIER
 partyAccountId
 paymentMode=CASH/BOX/BOTH
 cashAmount
-boxType returns
-jamanotAmount
+crateReturns
+depositRefund
+paymentMethod
 note
 ```
 
@@ -256,7 +258,7 @@ The payment API must update:
 payments
 transactions
 account balance
-customer jamanot
+customer refundable crate money
 box balances
 box inventory
 box ledger
@@ -470,8 +472,7 @@ Payload:
   "ownerName": "Doly Ahmed",
   "phone": "01811111111",
   "address": "Mirpur, Dhaka",
-  "openingDue": 5000.00,
-  "jamanotBalance": 1000.00
+  "openingDue": 5000.00
 }
 ```
 
@@ -648,4 +649,44 @@ Before production:
 - Add transaction/payment partitioning when those tables are created.
 - Add integration tests for create wholesaler, login, create supplier, create customer.
 - Move database credentials into environment variables.
+
+## Crate Backend Contract
+
+The crate API uses POST-only routes under `/wholesalers/{wholesalerId}`.
+
+Key controllers:
+
+```text
+CrateController
+  /crates/dashboard
+  /crates/purchase/create
+  /crates/lost-damaged/create
+  /crates/refund
+  /crates/sell
+  /crates/types/catalog
+  /crates/types/set-price
+  /crates/loss-stats
+
+PaymentController
+  /payments/customer/settle
+  /payments/customer/crate-borrow
+  /payments/customer/crate-receive
+  /payments/customer/crate-handback
+  /payments/supplier/crate-give
+  /payments/supplier/crate-return
+  /payments/supplier/crate-receive
+  /payments/supplier/crate-handback
+```
+
+Crate dashboard response fields:
+
+```text
+totalCratesOwned = inHand + withCustomers + withSuppliers + lostDamaged
+cratesInShop = owned inHand only
+customerCratesInShop = customer-owned crates held by wholesaler
+supplierCratesInShop = supplier-owned crates held by wholesaler
+cratesWithCustomers / cratesWithSuppliers = wholesaler-owned crates currently out with parties
+```
+
+Same-type crate netting is required. Returned BANGLA clears BANGLA due first; any extra BANGLA becomes party-owned crate holding. Different crate types never net. `supplier_crate_holdings` and `customer_crate_holdings` are liabilities and must not mutate `box_inventory`.
 

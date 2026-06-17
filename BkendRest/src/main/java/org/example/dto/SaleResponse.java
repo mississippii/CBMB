@@ -6,6 +6,7 @@ import java.time.LocalDateTime;
 public record SaleResponse(
         Long saleId,
         Long transactionId,
+        String transactionCode,
         Long wholesalerCustomerId,
         String customerName,
         String customerPhone,

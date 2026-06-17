@@ -18,7 +18,6 @@ import org.example.service.DashboardService;
 import org.example.service.SupplierDeliveryService;
 import org.example.service.WholesalerService;
 import org.springframework.http.HttpStatus;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -27,7 +26,6 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@CrossOrigin(origins = "*")
 @RequestMapping("/wholesalers/{wholesalerId}")
 public class WholesalerController {
 
@@ -137,6 +135,14 @@ public class WholesalerController {
         return wholesalerService.createCustomer(wholesalerId, request);
     }
 
+    @PostMapping("/customers/update")
+    public CustomerAccountResponse updateCustomer(
+            @PathVariable Long wholesalerId,
+            @RequestBody org.example.dto.UpdateCustomerRequest request
+    ) {
+        return wholesalerService.updateCustomer(wholesalerId, request);
+    }
+
     @PostMapping("/customers/profile")
     public CustomerProfileResponse customerProfile(
             @PathVariable Long wholesalerId,
@@ -173,6 +179,14 @@ public class WholesalerController {
             @RequestBody SetShipmentCommissionRequest request
     ) {
         return supplierDeliveryService.setCommissionRate(wholesalerId, request);
+    }
+
+    @PostMapping("/supplier-deliveries/update")
+    public SupplierDeliveryResponse updateShipment(
+            @PathVariable Long wholesalerId,
+            @RequestBody org.example.dto.UpdateShipmentRequest request
+    ) {
+        return supplierDeliveryService.updateShipment(wholesalerId, request);
     }
 
     @PostMapping("/shipments/settle")

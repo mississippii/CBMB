@@ -12,7 +12,8 @@ const toPositiveNumber = (value) => {
   const numeric = Number(value);
   return Number.isFinite(numeric) && numeric > 0 ? numeric : 0;
 };
-const getDateOnly = () => new Date().toISOString().split('T')[0];
+// Local calendar date (yyyy-mm-dd) — toISOString() would report the UTC day.
+const getDateOnly = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`; };
 
 const getNextId = (items) => {
   if (!items.length) return 1;
@@ -34,6 +35,9 @@ const asArray = (value) => (Array.isArray(value) ? value : []);
 const EMPTY_CRATE_INVENTORY = {
   totalCratesOwned: 0,
   cratesInShop: 0,
+  customerCratesInShop: 0,
+  supplierCratesInShop: 0,
+  othersCratesInShop: 0,
   cratesWithSuppliers: 0,
   cratesWithCustomers: 0,
   cratesLostDamaged: 0,
@@ -61,18 +65,27 @@ const mapCrateDashboard = (dashboard) => {
     byType[name] = {
       total: Number(item.total) || 0,
       inShop: Number(item.inHand) || 0,
+      customerCratesInShop: Number(item.customerCratesInShop) || 0,
+      supplierCratesInShop: Number(item.supplierCratesInShop) || 0,
+      othersCratesInShop: (Number(item.customerCratesInShop) || 0) + (Number(item.supplierCratesInShop) || 0),
       withSuppliers: Number(item.withSuppliers) || 0,
       withCustomers: Number(item.withCustomers) || 0,
       lost: Number(item.lostDamaged) || 0,
       purchasePrice: Number(item.purchasePrice) || 0,
+      weightedAvgCost: Number(item.weightedAvgCost) || 0,
     };
   });
   return {
     totalCratesOwned: Number(dashboard?.totalCratesOwned) || 0,
     cratesInShop: Number(dashboard?.cratesInShop) || 0,
+    customerCratesInShop: Number(dashboard?.customerCratesInShop) || 0,
+    supplierCratesInShop: Number(dashboard?.supplierCratesInShop) || 0,
+    othersCratesInShop: (Number(dashboard?.customerCratesInShop) || 0) + (Number(dashboard?.supplierCratesInShop) || 0),
     cratesWithSuppliers: Number(dashboard?.cratesWithSuppliers) || 0,
     cratesWithCustomers: Number(dashboard?.cratesWithCustomers) || 0,
     cratesLostDamaged: Number(dashboard?.cratesLostDamaged) || 0,
+    totalCrateValue: Number(dashboard?.totalCrateValue) || 0,
+    refundableWalkInCrateSales: Number(dashboard?.refundableWalkInCrateSales) || 0,
     byType,
   };
 };
@@ -126,6 +139,9 @@ const mapSupplierAccount = (account) => ({
   balance: -roundMoney(Number(account.currentDue ?? account.openingDue) || 0),
   crateHoldings: mapCrateDues(account.crateDues),
   totalCratesHolding: Number(account.totalCratesDue) || 0,
+  // Leg 2 — the supplier's own crates the wholesaler is holding (owes back).
+  supplierCrateHoldings: mapCrateDues(account.crateHoldings),
+  totalCratesHeld: Number(account.totalCratesHeld) || 0,
   status: account.status || 'ACTIVE',
 });
 
@@ -143,6 +159,10 @@ const mapCustomerAccount = (account) => ({
   amountDue: roundMoney(Number(account.currentDue ?? account.openingDue) || 0),
   crateHoldings: mapCrateDues(account.crateDues),
   totalCratesHolding: Number(account.totalCratesDue) || 0,
+  // Leg 2 — the customer's own crates the wholesaler is holding (owes back).
+  customerCrateHoldings: mapCrateDues(account.crateHoldings),
+  totalCratesHeld: Number(account.totalCratesHeld) || 0,
+  crateDepositHeld: roundMoney(Number(account.crateDepositHeld) || 0),
   status: account.status || 'ACTIVE',
 });
 
@@ -166,6 +186,8 @@ const mapShipment = (shipment) => ({
   netPayable: roundMoney(Number(shipment.netPayable) || 0),
   expenseTotal: roundMoney(Number(shipment.expenseTotal) || 0),
   expenseDue: roundMoney(Number(shipment.expenseDue) || 0),
+  totalUnitsSold: roundMoney(Number(shipment.totalUnitsSold) || 0),
+  totalKgSold: roundMoney(Number(shipment.totalKgSold) || 0),
   items: (shipment.items || []).map((item) => ({
     id: item.id,
     inventoryId: item.inventoryId,
@@ -176,6 +198,7 @@ const mapShipment = (shipment) => ({
     subCategoryId: item.subCategoryId || null,
     subCategoryName: item.subCategoryName || '',
     quantity: roundMoney(Number(item.quantity) || 0),
+    remaining: roundMoney(Number(item.inventoryQuantityOnHand) || 0),
     unit: String(item.unit || '').toLowerCase(),
     note: item.note || '',
   })),
@@ -203,6 +226,7 @@ const mapTransaction = (transaction) => ({
   subCategoryName: transaction.subCategoryName || '',
   quantity: Number(transaction.quantity) || 0,
   unit: String(transaction.unit || '').toLowerCase(),
+  saleWeightKg: Number(transaction.saleWeightKg) || 0,
   unitPrice: Number(transaction.unitPrice) || 0,
   totalAmount: Number(transaction.saleAmount) || 0,
   grossAmount: Number(transaction.grossAmount) || 0,
@@ -212,6 +236,7 @@ const mapTransaction = (transaction) => ({
   cratesReturned: Number(transaction.cratesReturned) || 0,
   paymentOperationType: transaction.paymentType || '',
   paymentType: transaction.paymentType || transaction.description || '',
+  paymentMethod: transaction.paymentMethod || '',
   note: transaction.description || '',
 });
 
@@ -227,9 +252,7 @@ const mapSupplierProfile = (profile) => ({
     todayCommission: roundMoney(Number(profile.todayCommission) || 0),
     totalSales: roundMoney(Number(profile.totalSale ?? profile.account?.totalSales) || 0),
     totalCommissionEarned: roundMoney(Number(profile.totalCommission ?? profile.account?.totalCommissionEarned) || 0),
-    commissionDue: roundMoney(Number(profile.commissionDue) || 0),
     amountDue: roundMoney(Number(profile.supplierDue ?? profile.account?.currentDue) || 0),
-    otherExpense: roundMoney(Number(profile.otherExpense) || 0),
   },
   transactions: asArray(profile.transactions).map(mapTransaction),
 });
@@ -259,11 +282,14 @@ export const DataProvider = ({ children }) => {
       if (which === 'supplier') queryClient.invalidateQueries({ queryKey: queryKeys.parties.supplierProfile(wholesalerId, accountId) });
     },
     // "Money event" = a write that moves money or due. Touches transaction feed,
-    // dashboard rollup, and the sales aggregate (commission earned changes).
+    // dashboard rollup, the sales aggregate (commission earned changes), and the
+    // cash book (any cash in/out changes the day's drawer reconciliation).
+    cash:         () => queryClient.invalidateQueries({ queryKey: queryKeys.cash.root(wholesalerId) }),
     moneyEvent: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.transactions.root(wholesalerId) });
       queryClient.invalidateQueries({ queryKey: ['dashboardSummary', wholesalerId] });
       queryClient.invalidateQueries({ queryKey: ['salesAggregate', wholesalerId] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.cash.root(wholesalerId) });
     },
   };
 
@@ -349,7 +375,7 @@ export const DataProvider = ({ children }) => {
       businessName: supplierData.businessName || null,
       phone: supplierData.contact || supplierData.phone,
       location: supplierData.location || null,
-      commissionRate: Number(supplierData.commissionRate) || 0,
+      commissionRate: supplierData.commissionRate == null ? null : Number(supplierData.commissionRate) || 0,
       openingDue: Number(supplierData.openingDue) || 0,
     };
 
@@ -368,8 +394,9 @@ export const DataProvider = ({ children }) => {
       accountId: Number(supplierData.id),
       name: supplierData.name,
       businessName: supplierData.businessName || null,
+      phone: supplierData.phone || supplierData.contact,
       location: supplierData.location || null,
-      commissionRate: Number(supplierData.commissionRate) || 0,
+      commissionRate: supplierData.commissionRate == null ? null : Number(supplierData.commissionRate) || 0,
     };
     const account = await postJson(apiPaths.wholesalerSuppliersUpdate(admin.wholesalerId), payload);
     const updated = mapSupplierAccount(account);
@@ -391,6 +418,43 @@ export const DataProvider = ({ children }) => {
       const data = await postJson(apiPaths.wholesalerCustomersList(admin.wholesalerId), { includeDisabled });
       setCustomers(asArray(data).map(mapCustomerAccount));
     } catch { /* keep existing */ }
+  };
+
+  // Re-fetch the shared entities that live in DataContext state (loaded once at login and
+  // patched optimistically), so a page/modal that reads them via dropdowns always shows the
+  // latest server data on open — not a stale in-memory copy. Targeted + a parallel refreshAll().
+  const refreshCrateInventory = async () => {
+    if (!admin?.wholesalerId) return;
+    try {
+      const data = await postJson(apiPaths.cratesDashboard(admin.wholesalerId));
+      setCrateInventory(mapCrateDashboard(data));
+    } catch { /* keep existing */ }
+  };
+
+  const refreshInventory = async () => {
+    if (!admin?.wholesalerId) return;
+    try {
+      const data = await postJson(apiPaths.inventoryList(admin.wholesalerId));
+      setSupplierProducts(asArray(data).map(mapInventoryItem));
+    } catch { /* keep existing */ }
+  };
+
+  const refreshShipments = async () => {
+    if (!admin?.wholesalerId) return;
+    try {
+      const data = await postJson(apiPaths.supplierDeliveriesList(admin.wholesalerId));
+      setShipments(asArray(data).map(mapShipment));
+    } catch { /* keep existing */ }
+  };
+
+  const refreshAll = async () => {
+    await Promise.all([
+      reloadSuppliers(),
+      reloadCustomers(),
+      refreshInventory(),
+      refreshCrateInventory(),
+      refreshShipments(),
+    ]);
   };
 
   const setSupplierStatus = async (supplierAccountId, enable) => {
@@ -588,6 +652,26 @@ export const DataProvider = ({ children }) => {
     return newCustomer;
   };
 
+  const updateCustomer = async (customerData) => {
+    if (!admin?.wholesalerId) {
+      throw new Error('Wholesaler profile not found for this user.');
+    }
+
+    const payload = {
+      accountId: Number(customerData.id),
+      name: customerData.name,
+      ownerName: customerData.owner || customerData.ownerName || null,
+      phone: customerData.phone,
+      address: customerData.address || null,
+    };
+
+    const account = await postJson(apiPaths.wholesalerCustomersUpdate(admin.wholesalerId), payload);
+    const updated = mapCustomerAccount(account);
+    setCustomers((prev) => prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)));
+    invalidate.customers();
+    return updated;
+  };
+
   const recordSale = async (saleData) => {
     if (!admin?.wholesalerId) {
       throw new Error('Wholesaler profile not found for this user.');
@@ -627,6 +711,11 @@ export const DataProvider = ({ children }) => {
       paymentAmount,
       crateType: saleData.crateType || null,
       cratesGiven: Number(saleData.cratesGiven) || 0,
+      paymentMethod: saleData.paymentMethod || null,
+      // Crates ride along in the same atomic sale call: borrow (permanent) or sell (walk-in).
+      crateLines: Array.isArray(saleData.crateLines) && saleData.crateLines.length ? saleData.crateLines : null,
+      crateDeposit: saleData.crateDeposit != null && saleData.crateDeposit !== '' ? Number(saleData.crateDeposit) : null,
+      cratePaymentMethod: saleData.cratePaymentMethod || null,
     });
 
     setSupplierProducts((prev) =>
@@ -718,7 +807,68 @@ export const DataProvider = ({ children }) => {
     invalidate.inventory();
     invalidate.moneyEvent();
     invalidate.crates();
+    // Crates moved server-side in the same call — refresh local crate inventory + customer
+    // holdings/deposit (the optimistic blocks above only cover the legacy single-type path).
+    if (Array.isArray(saleData.crateLines) && saleData.crateLines.length) {
+      try {
+        const dash = await postJson(apiPaths.cratesDashboard(admin.wholesalerId));
+        setCrateInventory(mapCrateDashboard(dash));
+      } catch { /* refetch is best-effort; React Query invalidation will also refresh */ }
+      await reloadCustomers();
+    }
     return transaction;
+  };
+
+  // Multi-line sale: one customer buying several products (possibly from different suppliers) in
+  // one atomic call. The optimistic single-line patching in recordSale doesn't generalize cleanly
+  // across multiple lots/suppliers, so this path posts `lines` and then refetches authoritative
+  // state (stock, customers, suppliers, crates, cash/transactions).
+  const recordMultiSale = async (saleData) => {
+    if (!admin?.wholesalerId) {
+      throw new Error('Wholesaler profile not found for this user.');
+    }
+    const lines = (saleData.lines || []).map((l) => ({
+      inventoryId: Number(l.inventoryId),
+      quantity: toPositiveNumber(l.quantity),
+      saleWeightKg: l.saleWeightKg === '' || l.saleWeightKg == null
+        ? null
+        : Number(l.saleWeightKg) > 0 ? Number(l.saleWeightKg) : null,
+      unitPrice: toPositiveNumber(l.unitPrice),
+    }));
+    if (!lines.length) {
+      throw new Error('Add at least one product line.');
+    }
+    for (const l of lines) {
+      if (!l.inventoryId || !l.quantity || l.unitPrice == null) {
+        throw new Error('Each product line needs a product, quantity and unit price.');
+      }
+    }
+
+    const response = await postJson(apiPaths.salesCreate(admin.wholesalerId), {
+      wholesalerCustomerId: Number(saleData.customerId) || null,
+      customerName: saleData.customerName,
+      customerPhone: saleData.customerPhone,
+      lines,
+      discountAmount: roundMoney(Math.max(0, Number(saleData.discountAmount) || 0)),
+      paymentAmount: roundMoney(Math.max(0, Number(saleData.paymentAmount) || 0)),
+      paymentMethod: saleData.paymentMethod || null,
+      crateLines: Array.isArray(saleData.crateLines) && saleData.crateLines.length ? saleData.crateLines : null,
+      crateDeposit: saleData.crateDeposit != null && saleData.crateDeposit !== '' ? Number(saleData.crateDeposit) : null,
+      cratePaymentMethod: saleData.cratePaymentMethod || null,
+    });
+
+    // Pull fresh authoritative state — stock across several lots, both party balances, crates.
+    await Promise.all([refreshInventory(), reloadCustomers(), reloadSuppliers()]);
+    if (Array.isArray(saleData.crateLines) && saleData.crateLines.length) {
+      try {
+        const dash = await postJson(apiPaths.cratesDashboard(admin.wholesalerId));
+        setCrateInventory(mapCrateDashboard(dash));
+      } catch { /* best-effort; invalidation below also refreshes */ }
+    }
+    invalidate.inventory();
+    invalidate.moneyEvent();
+    invalidate.crates();
+    return response;
   };
 
   const recordCustomerPayment = (customerId, amount) => {
@@ -784,8 +934,12 @@ export const DataProvider = ({ children }) => {
     setCrateInventory((prev) => ({ ...prev, ...updates }));
   };
 
+  // Universal "I just wrote a money/transaction event" refresh, called by every
+  // component-level write (payments, crate ops, sales, purchases). Besides reloading
+  // the transaction feed it invalidates the cash book so the drawer reflects the change.
   const refreshTransactions = async () => {
     if (!admin?.wholesalerId) return;
+    invalidate.cash();
     try {
       const data = await postJson(apiPaths.transactionsList(admin.wholesalerId));
       setTransactions(asArray(data).map(mapTransaction));
@@ -857,6 +1011,7 @@ export const DataProvider = ({ children }) => {
     const response = await postJson(apiPaths.shopExpenseCreate(admin.wholesalerId), payload);
     invalidate.shopExpenses();
     invalidate.dashboard();
+    invalidate.cash();
     return response;
   };
 
@@ -865,6 +1020,26 @@ export const DataProvider = ({ children }) => {
     const response = await postJson(apiPaths.shopExpenseCancel(admin.wholesalerId, expenseId), { reason });
     invalidate.shopExpenses();
     invalidate.dashboard();
+    invalidate.cash();
+    return response;
+  };
+
+  const fetchDailyCash = async (date = null) => {
+    if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
+    return postJson(apiPaths.cashDaily(admin.wholesalerId), { date });
+  };
+
+  const closeCashDay = async (payload) => {
+    if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
+    const response = await postJson(apiPaths.cashClose(admin.wholesalerId), payload);
+    invalidate.cash();
+    return response;
+  };
+
+  const reopenCashDay = async (date = null) => {
+    if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
+    const response = await postJson(apiPaths.cashReopen(admin.wholesalerId), { date });
+    invalidate.cash();
     return response;
   };
 
@@ -876,30 +1051,51 @@ export const DataProvider = ({ children }) => {
     return asArray(data).map(mapShipment);
   };
 
+  // Edit a shipment's label fields (name / note) only.
+  const updateShipment = async (deliveryId, { name, note }) => {
+    if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
+    const data = await postJson(apiPaths.supplierDeliveriesUpdate(admin.wholesalerId), {
+      deliveryId: Number(deliveryId),
+      name,
+      note,
+    });
+    invalidate.shipments();
+    return mapShipment(data);
+  };
+
   const fetchInventoryList = async () => {
     if (!admin?.wholesalerId) throw new Error('Wholesaler profile not found.');
     const data = await postJson(apiPaths.inventoryList(admin.wholesalerId));
     return asArray(data).map(mapInventoryItem);
   };
 
-  const addCrates = async (crateType, quantityInput, unitPriceInput) => {
+  // Single batch: addCrates(type, qty, price). Multi-type: addCrates(null, null, null, [{crateType, quantity, unitPrice}], paymentMethod).
+  const addCrates = async (crateType, quantityInput, unitPriceInput, lines = null, paymentMethod = 'CASH') => {
     if (!admin?.wholesalerId) {
       throw new Error('Wholesaler profile not found for this user.');
     }
-    const quantity = Math.max(0, Math.floor(Number(quantityInput) || 0));
-    if (!quantity) return mapCrateDashboard(null);
-
-    const unitPrice = Number(unitPriceInput);
-    if (unitPriceInput === '' || unitPriceInput == null || !Number.isFinite(unitPrice) || unitPrice <= 0) {
-      throw new Error('Cost per crate is required.');
+    const method = String(paymentMethod || 'CASH').toUpperCase();
+    let payload;
+    if (Array.isArray(lines) && lines.length) {
+      payload = {
+        lines: lines.map((l) => ({
+          crateType: String(l.crateType || '').toUpperCase(),
+          quantity: Math.max(0, Math.floor(Number(l.quantity) || 0)),
+          unitPrice: Number(l.unitPrice),
+        })),
+        paymentMethod: method,
+        note: 'Manual crate purchase',
+      };
+    } else {
+      const quantity = Math.max(0, Math.floor(Number(quantityInput) || 0));
+      if (!quantity) return mapCrateDashboard(null);
+      const unitPrice = Number(unitPriceInput);
+      if (unitPriceInput === '' || unitPriceInput == null || !Number.isFinite(unitPrice) || unitPrice <= 0) {
+        throw new Error('Cost per crate is required.');
+      }
+      payload = { crateType: String(crateType || '').toUpperCase(), quantity, unitPrice, paymentMethod: method, note: 'Manual crate purchase' };
     }
-
-    const dashboard = await postJson(apiPaths.cratesPurchaseCreate(admin.wholesalerId), {
-      crateType: String(crateType || '').toUpperCase(),
-      quantity,
-      unitPrice,
-      note: 'Manual crate purchase',
-    });
+    const dashboard = await postJson(apiPaths.cratesPurchaseCreate(admin.wholesalerId), payload);
     const mapped = mapCrateDashboard(dashboard);
     setCrateInventory(mapped);
     refreshTransactions();
@@ -913,21 +1109,30 @@ export const DataProvider = ({ children }) => {
    * account is debited (receivable). If null/empty, treated as a walk-in cash sale — no
    * account ledger entry, but the SOLD movement still posts and P&L picks up the profit.
    */
-  const sellCrates = async ({ crateType, quantity, unitSalePrice, customerAccountId, note }) => {
+  const sellCrates = async ({ crateType, quantity, unitSalePrice, customerAccountId, note, paymentMethod = 'CASH', lines = null }) => {
     if (!admin?.wholesalerId) {
       throw new Error('Wholesaler profile not found for this user.');
     }
-    const qty = Math.max(0, Math.floor(Number(quantity) || 0));
-    if (!qty) throw new Error('Quantity must be greater than zero.');
-    const price = Number(unitSalePrice);
-    if (!Number.isFinite(price) || price <= 0) throw new Error('Sale price per crate is required.');
-
-    const payload = {
-      crateType: String(crateType || '').toUpperCase(),
-      quantity: qty,
-      unitSalePrice: price,
-      note: note || null,
-    };
+    const payload = { note: note || null };
+    // Walk-in sales (no customer account) carry a payment method; on-account sales ignore it.
+    if (!customerAccountId) {
+      payload.paymentMethod = String(paymentMethod || 'CASH').toUpperCase();
+    }
+    if (Array.isArray(lines) && lines.length) {
+      payload.lines = lines.map((l) => ({
+        crateType: String(l.crateType || '').toUpperCase(),
+        quantity: Math.max(0, Math.floor(Number(l.quantity) || 0)),
+        unitSalePrice: Number(l.unitSalePrice),
+      }));
+    } else {
+      const qty = Math.max(0, Math.floor(Number(quantity) || 0));
+      if (!qty) throw new Error('Quantity must be greater than zero.');
+      const price = Number(unitSalePrice);
+      if (!Number.isFinite(price) || price <= 0) throw new Error('Sale price per crate is required.');
+      payload.crateType = String(crateType || '').toUpperCase();
+      payload.quantity = qty;
+      payload.unitSalePrice = price;
+    }
     if (customerAccountId) {
       payload.customerAccountId = Number(customerAccountId);
     }
@@ -942,20 +1147,48 @@ export const DataProvider = ({ children }) => {
     return mapped;
   };
 
-  /** Mark crates lost/damaged. Loss is always absorbed against crate capital at WAC. */
-  const markCratesLost = async (crateType, quantityInput, reason = 'lost') => {
+  // Permanent customer borrows one or more crate types in a single record.
+  // lines: [{ crateType, quantity }]; depositAmount = optional refundable security money.
+  const borrowCustomerCrates = async (customerId, lines, note, depositAmount = 0) => {
     if (!admin?.wholesalerId) {
       throw new Error('Wholesaler profile not found for this user.');
     }
-    const quantity = Math.max(0, Math.floor(Number(quantityInput) || 0));
-    if (!quantity) return mapCrateDashboard(null);
-
-    const dashboard = await postJson(apiPaths.cratesLostDamagedCreate(admin.wholesalerId), {
-      crateType: String(crateType || '').toUpperCase(),
-      quantity,
-      reason,
-      note: 'Manual crate loss/damage update',
+    const crates = (lines || [])
+      .map((l) => ({ crateType: String(l.crateType || '').toUpperCase(), quantity: Math.max(0, Math.floor(Number(l.quantity) || 0)) }))
+      .filter((l) => l.crateType && l.quantity > 0);
+    if (crates.length === 0) throw new Error('Add at least one crate line.');
+    await postJson(apiPaths.paymentsCustomerCrateBorrow(admin.wholesalerId), {
+      wholesalerCustomerId: Number(customerId),
+      crates,
+      depositAmount: Math.max(0, Number(depositAmount) || 0),
+      note: note || null,
     });
+    invalidate.crates();
+    invalidate.transactions();
+    invalidate.moneyEvent();
+  };
+
+  /** Mark crates lost/damaged. Loss is always absorbed against crate capital at WAC. */
+  const markCratesLost = async (crateType, quantityInput, reason = 'lost', lines = null) => {
+    if (!admin?.wholesalerId) {
+      throw new Error('Wholesaler profile not found for this user.');
+    }
+    let payload;
+    if (Array.isArray(lines) && lines.length) {
+      payload = {
+        reason,
+        note: 'Manual crate loss/damage update',
+        lines: lines.map((l) => ({
+          crateType: String(l.crateType || '').toUpperCase(),
+          quantity: Math.max(0, Math.floor(Number(l.quantity) || 0)),
+        })),
+      };
+    } else {
+      const quantity = Math.max(0, Math.floor(Number(quantityInput) || 0));
+      if (!quantity) return mapCrateDashboard(null);
+      payload = { crateType: String(crateType || '').toUpperCase(), quantity, reason, note: 'Manual crate loss/damage update' };
+    }
+    const dashboard = await postJson(apiPaths.cratesLostDamagedCreate(admin.wholesalerId), payload);
     const mapped = mapCrateDashboard(dashboard);
     setCrateInventory(mapped);
     refreshTransactions();
@@ -997,11 +1230,17 @@ export const DataProvider = ({ children }) => {
         setSupplierStatus,
         reloadSuppliers,
         refreshTransactions,
+        refreshCrateInventory,
+        refreshInventory,
+        refreshShipments,
+        refreshAll,
         addCustomer,
+        updateCustomer,
         setCustomerStatus,
         reloadCustomers,
         addTransaction: recordSale,
         recordSale,
+        recordMultiSale,
         recordCustomerPayment,
         recordSupplierPayment,
         addSupplierProduct,
@@ -1014,6 +1253,7 @@ export const DataProvider = ({ children }) => {
         markCratesLost,
         setCratePrice,
         sellCrates,
+        borrowCustomerCrates,
         getCustomerProfile,
         getSupplierProfile,
         fetchDashboardSummary,
@@ -1026,7 +1266,11 @@ export const DataProvider = ({ children }) => {
         fetchShopExpenses,
         createShopExpense,
         cancelShopExpense,
+        fetchDailyCash,
+        closeCashDay,
+        reopenCashDay,
         fetchShipments,
+        updateShipment,
         fetchInventoryList,
       }}
     >

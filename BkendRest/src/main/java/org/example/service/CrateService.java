@@ -15,6 +15,8 @@ import org.example.dto.CrateDashboardResponse;
 import org.example.dto.CrateInventoryTypeResponse;
 import org.example.dto.CrateLossStatsResponse;
 import org.example.dto.CrateTypeQuantity;
+import org.example.dto.CrateOpLine;
+import org.example.model.enums.PaymentMethod;
 import org.example.dto.CrateQuantityRequest;
 import org.example.exception.BadRequestException;
 import org.example.model.AccountBalance;
@@ -40,6 +42,8 @@ import org.example.repository.BoxInventoryRepository;
 import org.example.repository.BoxLedgerRepository;
 import org.example.repository.BoxTypeRepository;
 import org.example.repository.CrateTypeRepository;
+import org.example.repository.CustomerCrateHoldingRepository;
+import org.example.repository.SupplierCrateHoldingRepository;
 import org.example.repository.TransactionRepository;
 import org.example.repository.WholesalerCustomerRepository;
 import org.example.repository.WholesalerRepository;
@@ -57,6 +61,8 @@ public class CrateService {
     private final TransactionRepository transactionRepository;
     private final WholesalerCustomerRepository wholesalerCustomerRepository;
     private final WholesalerSupplierRepository wholesalerSupplierRepository;
+    private final CustomerCrateHoldingRepository customerCrateHoldingRepository;
+    private final SupplierCrateHoldingRepository supplierCrateHoldingRepository;
     private final AccountBalanceService accountBalanceService;
     private final AccountBalanceRepository accountBalanceRepository;
     private final AccountLedgerRepository accountLedgerRepository;
@@ -70,6 +76,8 @@ public class CrateService {
             TransactionRepository transactionRepository,
             WholesalerCustomerRepository wholesalerCustomerRepository,
             WholesalerSupplierRepository wholesalerSupplierRepository,
+            CustomerCrateHoldingRepository customerCrateHoldingRepository,
+            SupplierCrateHoldingRepository supplierCrateHoldingRepository,
             AccountBalanceService accountBalanceService,
             AccountBalanceRepository accountBalanceRepository,
             AccountLedgerRepository accountLedgerRepository,
@@ -82,6 +90,8 @@ public class CrateService {
         this.transactionRepository = transactionRepository;
         this.wholesalerCustomerRepository = wholesalerCustomerRepository;
         this.wholesalerSupplierRepository = wholesalerSupplierRepository;
+        this.customerCrateHoldingRepository = customerCrateHoldingRepository;
+        this.supplierCrateHoldingRepository = supplierCrateHoldingRepository;
         this.accountBalanceService = accountBalanceService;
         this.accountBalanceRepository = accountBalanceRepository;
         this.accountLedgerRepository = accountLedgerRepository;
@@ -100,17 +110,35 @@ public class CrateService {
 
         int totalOwned = typeResponses.stream().mapToInt(CrateInventoryTypeResponse::total).sum();
         int inHand = typeResponses.stream().mapToInt(CrateInventoryTypeResponse::inHand).sum();
+        int customerCratesInShop = safeInt(customerCrateHoldingRepository.sumHeldInShop(wholesalerId));
+        int supplierCratesInShop = safeInt(supplierCrateHoldingRepository.sumHeldInShop(wholesalerId));
         int withCustomers = typeResponses.stream().mapToInt(CrateInventoryTypeResponse::withCustomers).sum();
         int withSuppliers = typeResponses.stream().mapToInt(CrateInventoryTypeResponse::withSuppliers).sum();
         int lostDamaged = typeResponses.stream().mapToInt(CrateInventoryTypeResponse::lostDamaged).sum();
+
+        // Capital tied up in crates currently on the books (lost/damaged are written off, so
+        // they don't count): Σ (inHand + withCustomers + withSuppliers) × weighted-avg cost.
+        BigDecimal totalCrateValue = typeResponses.stream()
+                .map((t) -> t.weightedAvgCost().multiply(
+                        BigDecimal.valueOf((long) t.inHand() + t.withCustomers() + t.withSuppliers())))
+                .reduce(BigDecimal.ZERO, BigDecimal::add)
+                .setScale(0, java.math.RoundingMode.CEILING);
+
+        BigDecimal refundableWalkInCrateSales = money(boxLedgerRepository.sumWalkInCrateRefundableSales(wholesalerId));
+        BigDecimal permanentCustomerRefundableMoney = money(wholesalerCustomerRepository.sumCrateDepositHeld(wholesalerId));
+        BigDecimal totalRefundableCrateMoney = refundableWalkInCrateSales.add(permanentCustomerRefundableMoney);
 
         return new CrateDashboardResponse(
                 wholesalerId,
                 totalOwned,
                 inHand,
+                customerCratesInShop,
+                supplierCratesInShop,
                 withCustomers,
                 withSuppliers,
                 lostDamaged,
+                totalCrateValue,
+                totalRefundableCrateMoney,
                 typeResponses
         );
     }
@@ -164,7 +192,7 @@ public class CrateService {
      */
     @Transactional
     public CrateDashboardResponse setCratePrice(Long wholesalerId, org.example.dto.SetCratePriceRequest request) {
-        findWholesaler(wholesalerId);
+        Wholesaler wholesaler = findWholesaler(wholesalerId);
         if (request == null || request.purchasePrice() == null) {
             throw new BadRequestException("purchasePrice is required.");
         }
@@ -172,28 +200,66 @@ public class CrateService {
             throw new BadRequestException("purchasePrice must be zero or positive.");
         }
         BoxType boxType = findBoxType(wholesalerId, request.crateType());
-        boxType.setPurchasePrice(money(request.purchasePrice()));
+        // Crate cost is always rounded UP to a whole taka.
+        BigDecimal price = money(request.purchasePrice()).setScale(0, java.math.RoundingMode.CEILING);
+        boxType.setPurchasePrice(price);
         boxTypeRepository.save(boxType);
+        // Manual override of the weighted-average cost (seed/correct). Future purchases
+        // recompute the WAC from this basis.
+        BoxInventory inventory = findOrCreateInventory(wholesaler, boxType);
+        inventory.setWeightedAvgCost(price);
+        boxInventoryRepository.save(inventory);
         return getDashboard(wholesalerId);
     }
 
     @Transactional
     public CrateDashboardResponse addBoxes(Long wholesalerId, CrateQuantityRequest request) {
         Wholesaler wholesaler = findWholesaler(wholesalerId);
-        BoxType boxType = findBoxType(wholesalerId, request.crateType());
-        int quantity = positiveQuantity(request.quantity());
+        if (request == null) {
+            throw new BadRequestException("Request body is required.");
+        }
+        PaymentMethod paymentMethod = parsePurchaseMethod(request.paymentMethod());
+        for (CrateOpLine line : opLines(request.lines(), request.crateType(), request.quantity(), request.unitPrice(), null)) {
+            applyPurchase(wholesaler, wholesalerId, line.crateType(), line.quantity(), line.unitPrice(), request.note(), paymentMethod);
+        }
+        return getDashboard(wholesalerId);
+    }
+
+    /** How a crate purchase was paid. Defaults to CASH; NONE is not valid (a purchase always moves money). */
+    private PaymentMethod parsePurchaseMethod(String raw) {
+        if (raw == null || raw.isBlank()) {
+            return PaymentMethod.CASH;
+        }
+        PaymentMethod method;
+        try {
+            method = PaymentMethod.valueOf(raw.trim().toUpperCase(Locale.ROOT));
+        } catch (IllegalArgumentException ex) {
+            throw new BadRequestException("Unknown payment method: " + raw);
+        }
+        if (method == PaymentMethod.NONE) {
+            throw new BadRequestException("A crate purchase must have a payment method.");
+        }
+        return method;
+    }
+
+    /** Adds one crate-type batch: WAC recompute, inventory bump, PURCHASE ledger + transaction. */
+    private void applyPurchase(Wholesaler wholesaler, Long wholesalerId, String crateType, Integer quantityInput, BigDecimal unitPriceInput, String note, PaymentMethod paymentMethod) {
+        BoxType boxType = findBoxType(wholesalerId, crateType);
+        int quantity = positiveQuantity(quantityInput);
         BoxInventory inventory = findOrCreateInventory(wholesaler, boxType);
 
         // Cost per crate is mandatory — crates are a capital investment and every batch must carry its price.
-        if (request.unitPrice() == null || request.unitPrice().signum() <= 0) {
-            throw new BadRequestException("Cost per crate is required and must be greater than zero.");
+        if (unitPriceInput == null || unitPriceInput.signum() <= 0) {
+            throw new BadRequestException("Cost per crate is required and must be greater than zero for " + boxType.getName() + ".");
         }
-        BigDecimal batchUnitPrice = money(request.unitPrice());
+        BigDecimal batchUnitPrice = money(unitPriceInput);
         // Keep BoxType.purchasePrice in sync so the UI default reflects the most-recent price.
         boxType.setPurchasePrice(batchUnitPrice);
         boxTypeRepository.save(boxType);
 
-        // Recompute weighted-average cost across stock currently on the books.
+        // Recompute weighted-average cost across stock currently on the books (lost/damaged
+        // crates are NOT part of the base). The per-crate cost is always rounded UP to a
+        // whole taka (e.g. 183.33 → 184).
         int existingStock = inventory.getInHand() + inventory.getWithCustomers() + inventory.getWithSuppliers();
         BigDecimal oldWac = inventory.getWeightedAvgCost() == null ? BigDecimal.ZERO : inventory.getWeightedAvgCost();
         BigDecimal oldValue = BigDecimal.valueOf(existingStock).multiply(oldWac);
@@ -201,44 +267,63 @@ public class CrateService {
         int totalStock = existingStock + quantity;
         BigDecimal newWac = totalStock == 0
                 ? BigDecimal.ZERO
-                : oldValue.add(newValue).divide(BigDecimal.valueOf(totalStock), 2, java.math.RoundingMode.HALF_UP);
+                : oldValue.add(newValue).divide(BigDecimal.valueOf(totalStock), 0, java.math.RoundingMode.CEILING);
         inventory.setWeightedAvgCost(newWac);
 
         inventory.setTotalOwned(inventory.getTotalOwned() + quantity);
         inventory.setInHand(inventory.getInHand() + quantity);
         boxInventoryRepository.save(inventory);
 
-        savePurchaseLedger(wholesaler, boxType, quantity, request.note(), batchUnitPrice);
+        savePurchaseLedger(wholesaler, boxType, quantity, note, batchUnitPrice, paymentMethod);
         saveTransaction(wholesalerId,
-                "Crate purchase — " + quantity + " " + boxType.getName() + " added @ ৳" + batchUnitPrice);
-        return getDashboard(wholesalerId);
+                "Crate purchase — " + quantity + " " + boxType.getName() + " added @ ৳" + batchUnitPrice
+                        + " (" + paymentMethod + ")");
     }
 
     @Transactional
     public CrateDashboardResponse markLostOrDamaged(Long wholesalerId, CrateQuantityRequest request) {
         Wholesaler wholesaler = findWholesaler(wholesalerId);
-        BoxType boxType = findBoxType(wholesalerId, request.crateType());
-        int quantity = positiveQuantity(request.quantity());
+        if (request == null) {
+            throw new BadRequestException("Request body is required.");
+        }
+        for (CrateOpLine line : opLines(request.lines(), request.crateType(), request.quantity(), null, null)) {
+            applyLoss(wholesaler, wholesalerId, line.crateType(), line.quantity(), request.reason(), request.note());
+        }
+        return getDashboard(wholesalerId);
+    }
+
+    /** Marks one crate type lost/damaged: inventory move + loss ledger (WAC snapshot) + transaction. */
+    private void applyLoss(Wholesaler wholesaler, Long wholesalerId, String crateType, Integer quantityInput, String reason, String note) {
+        BoxType boxType = findBoxType(wholesalerId, crateType);
+        int quantity = positiveQuantity(quantityInput);
         BoxInventory inventory = findOrCreateInventory(wholesaler, boxType);
 
         if (inventory.getInHand() < quantity) {
-            throw new BadRequestException("Not enough boxes in hand for this update.");
+            throw new BadRequestException("Not enough " + boxType.getName() + " boxes in hand for this update.");
         }
 
-        BoxMovementType movementType = resolveLossMovement(request.reason());
+        BoxMovementType movementType = resolveLossMovement(reason);
         inventory.setInHand(inventory.getInHand() - quantity);
         inventory.setLostDamaged(inventory.getLostDamaged() + quantity);
         boxInventoryRepository.save(inventory);
 
-        // Snapshot weighted-average cost so future purchases / price edits don't shift historical P&L.
         // Loss is always absorbed against crate capital — snapshot the WAC for the P&L.
         BigDecimal unitCost = money(inventory.getWeightedAvgCost());
-        saveLossLedger(wholesaler, boxType, movementType, quantity, request.note(), unitCost);
+        saveLossLedger(wholesaler, boxType, movementType, quantity, note, unitCost);
 
-        String txnDesc = quantity + " " + boxType.getName() + " crates marked "
-                + movementType.name().toLowerCase() + " (absorbed)";
-        saveTransaction(wholesalerId, txnDesc);
-        return getDashboard(wholesalerId);
+        saveTransaction(wholesalerId, quantity + " " + boxType.getName() + " crates marked "
+                + movementType.name().toLowerCase() + " (absorbed)");
+    }
+
+    /**
+     * Resolve the lines to process: the multi-type {@code lines} if provided, otherwise a
+     * single line built from the request's top-level fields (backward compatible).
+     */
+    private java.util.List<CrateOpLine> opLines(java.util.List<CrateOpLine> lines, String crateType, Integer quantity, BigDecimal unitPrice, BigDecimal unitSalePrice) {
+        if (lines != null && !lines.isEmpty()) {
+            return lines;
+        }
+        return java.util.List.of(new CrateOpLine(crateType, quantity, unitPrice, unitSalePrice));
     }
 
     /**
@@ -253,27 +338,36 @@ public class CrateService {
         if (request == null) {
             throw new BadRequestException("Request body is required.");
         }
-        BoxType boxType = findBoxType(wholesalerId, request.crateType());
-        int quantity = positiveQuantity(request.quantity());
-        if (request.unitSalePrice() == null || request.unitSalePrice().signum() <= 0) {
-            throw new BadRequestException("Sale price per crate is required and must be greater than zero.");
-        }
-        BoxInventory inventory = findOrCreateInventory(wholesaler, boxType);
-        if (inventory.getInHand() < quantity) {
-            throw new BadRequestException("Not enough crates in hand for this sale.");
-        }
-
-        BigDecimal unitCost = money(inventory.getWeightedAvgCost());
-        BigDecimal unitSale = money(request.unitSalePrice());
-        BigDecimal saleAmount = money(unitSale.multiply(BigDecimal.valueOf(quantity)));
-
-        // Resolve buyer: permanent customer (account receivable) OR walk-in cash sale.
+        // Resolve buyer once: permanent customer (account receivable) OR walk-in cash sale.
         WholesalerCustomer customer = null;
         if (request.customerAccountId() != null) {
             customer = wholesalerCustomerRepository
                     .findByWholesaler_IdAndId(wholesalerId, request.customerAccountId())
                     .orElseThrow(() -> new BadRequestException("Customer not found for this wholesaler."));
         }
+        // Walk-in sales carry a payment method (CASH lands in the drawer); on-account sales ignore it.
+        PaymentMethod walkInMethod = customer == null ? parsePurchaseMethod(request.paymentMethod()) : null;
+        for (CrateOpLine line : opLines(request.lines(), request.crateType(), request.quantity(), null, request.unitSalePrice())) {
+            applySale(wholesaler, wholesalerId, line.crateType(), line.quantity(), line.unitSalePrice(), customer, walkInMethod, request.note(), request.saleId());
+        }
+        return getDashboard(wholesalerId);
+    }
+
+    /** Sells one crate type: removes from inventory, SOLD ledger (cost+sale snapshot), charges customer or records cash. */
+    private void applySale(Wholesaler wholesaler, Long wholesalerId, String crateType, Integer quantityInput, BigDecimal unitSalePriceInput, WholesalerCustomer customer, PaymentMethod walkInMethod, String note, Long saleId) {
+        BoxType boxType = findBoxType(wholesalerId, crateType);
+        int quantity = positiveQuantity(quantityInput);
+        if (unitSalePriceInput == null || unitSalePriceInput.signum() <= 0) {
+            throw new BadRequestException("Sale price per crate is required and must be greater than zero for " + boxType.getName() + ".");
+        }
+        BoxInventory inventory = findOrCreateInventory(wholesaler, boxType);
+        if (inventory.getInHand() < quantity) {
+            throw new BadRequestException("Not enough " + boxType.getName() + " crates in hand for this sale.");
+        }
+
+        BigDecimal unitCost = money(inventory.getWeightedAvgCost());
+        BigDecimal unitSale = money(unitSalePriceInput);
+        BigDecimal saleAmount = money(unitSale.multiply(BigDecimal.valueOf(quantity)));
 
         // Permanently remove from inventory — sold crates leave the books.
         inventory.setInHand(inventory.getInHand() - quantity);
@@ -291,13 +385,16 @@ public class CrateService {
         } else {
             ledger.setPartyType(BoxLedgerPartyType.WHOLESALER);
             ledger.setPartyAccountId(null);
+            // Walk-in: stamp how the buyer paid so the cash book counts CASH sales only.
+            ledger.setPaymentMethod(walkInMethod);
         }
         ledger.setMovementType(BoxMovementType.SOLD);
         ledger.setQuantity(quantity);
         ledger.setUnitCostSnapshot(unitCost);
         ledger.setUnitSalePrice(unitSale);
-        ledger.setReferenceType(BoxReferenceType.MANUAL);
-        ledger.setNote(clean(request.note()));
+        ledger.setReferenceType(saleId == null ? BoxReferenceType.MANUAL : BoxReferenceType.SALE);
+        ledger.setReferenceId(saleId);
+        ledger.setNote(clean(note));
         BoxLedger savedLedger = boxLedgerRepository.save(ledger);
 
         if (customer != null) {
@@ -326,13 +423,66 @@ public class CrateService {
         } else {
             saveTransaction(wholesalerId,
                     "Walk-in sale — " + quantity + " " + boxType.getName() + " crates @ ৳" + unitSale
-                            + " (cash ৳" + saleAmount + ")");
+                            + " (" + walkInMethod + " ৳" + saleAmount + ")");
         }
+    }
+
+    @Transactional
+    public CrateDashboardResponse refundWalkInCrates(Long wholesalerId, org.example.dto.CrateRefundRequest request) {
+        Wholesaler wholesaler = findWholesaler(wholesalerId);
+        if (request == null) {
+            throw new BadRequestException("Request body is required.");
+        }
+        List<CrateOpLine> lines = opLines(request.lines(), null, null, null, null);
+        int totalQty = lines.stream().mapToInt((line) -> positiveQuantity(line.quantity())).sum();
+        BigDecimal refundAmount = positiveMoney(request.refundAmount(), "Refund amount must be greater than zero.");
+        BigDecimal refundable = money(boxLedgerRepository.sumWalkInCrateRefundableSales(wholesalerId));
+        if (refundAmount.compareTo(refundable) > 0) {
+            throw new BadRequestException("Refund cannot exceed refundable walk-in crate money ৳" + refundable.toPlainString() + ".");
+        }
+        PaymentMethod method = parsePurchaseMethod(request.paymentMethod());
+        BigDecimal unitRefund = refundAmount.divide(BigDecimal.valueOf(totalQty), 2, java.math.RoundingMode.HALF_UP);
+
+        for (CrateOpLine line : lines) {
+            applyWalkInRefund(wholesaler, wholesalerId, line.crateType(), line.quantity(), unitRefund, method, request.note());
+        }
+        saveTransaction(wholesalerId, "Walk-in crate refund — " + totalQty + " crates, ৳" + refundAmount + " (" + method + ")");
         return getDashboard(wholesalerId);
     }
 
+    private void applyWalkInRefund(Wholesaler wholesaler, Long wholesalerId, String crateType, Integer quantityInput, BigDecimal unitRefund, PaymentMethod paymentMethod, String note) {
+        BoxType boxType = findBoxType(wholesalerId, crateType);
+        int quantity = positiveQuantity(quantityInput);
+        BoxInventory inventory = findOrCreateInventory(wholesaler, boxType);
+        inventory.setInHand(inventory.getInHand() + quantity);
+        inventory.setTotalOwned(inventory.getTotalOwned() + quantity);
+        boxInventoryRepository.save(inventory);
+
+        BoxLedger ledger = new BoxLedger();
+        ledger.setWholesaler(wholesaler);
+        ledger.setBoxType(boxType);
+        ledger.setPartyType(BoxLedgerPartyType.WHOLESALER);
+        ledger.setPartyAccountId(null);
+        ledger.setMovementType(BoxMovementType.WALK_IN_REFUND);
+        ledger.setQuantity(quantity);
+        ledger.setUnitCostSnapshot(money(inventory.getWeightedAvgCost()));
+        ledger.setUnitSalePrice(unitRefund);
+        ledger.setPaymentMethod(paymentMethod);
+        ledger.setReferenceType(BoxReferenceType.MANUAL);
+        ledger.setNote(clean(note));
+        boxLedgerRepository.save(ledger);
+    }
+
+    private static BigDecimal positiveMoney(BigDecimal value, String message) {
+        BigDecimal normalized = money(value);
+        if (normalized.signum() <= 0) {
+            throw new BadRequestException(message);
+        }
+        return normalized;
+    }
+
     private static BigDecimal money(BigDecimal value) {
-        return (value == null ? BigDecimal.ZERO : value).setScale(2, java.math.RoundingMode.HALF_UP);
+        return (value == null ? BigDecimal.ZERO : value).setScale(0, java.math.RoundingMode.CEILING);
     }
 
     private BoxLedger saveLossLedger(
@@ -361,7 +511,8 @@ public class CrateService {
             BoxType boxType,
             int quantity,
             String note,
-            BigDecimal batchUnitPrice
+            BigDecimal batchUnitPrice,
+            PaymentMethod paymentMethod
     ) {
         BoxLedger ledger = new BoxLedger();
         ledger.setWholesaler(wholesaler);
@@ -370,6 +521,7 @@ public class CrateService {
         ledger.setMovementType(BoxMovementType.PURCHASE);
         ledger.setQuantity(quantity);
         ledger.setUnitCostSnapshot(batchUnitPrice);
+        ledger.setPaymentMethod(paymentMethod);
         ledger.setReferenceType(BoxReferenceType.MANUAL);
         ledger.setNote(clean(note));
         boxLedgerRepository.save(ledger);
@@ -395,17 +547,26 @@ public class CrateService {
         int withCustomers = value(inventory, BoxInventory::getWithCustomers);
         int withSuppliers = value(inventory, BoxInventory::getWithSuppliers);
         int lostDamaged = value(inventory, BoxInventory::getLostDamaged);
+        int customerCratesInShop = safeInt(customerCrateHoldingRepository.sumHeldInShopByBoxType(wholesalerId, boxType.getId()));
+        int supplierCratesInShop = safeInt(supplierCrateHoldingRepository.sumHeldInShopByBoxType(wholesalerId, boxType.getId()));
 
         return new CrateInventoryTypeResponse(
                 boxType.getId(),
                 boxType.getName(),
                 inHand + withCustomers + withSuppliers + lostDamaged,
                 inHand,
+                customerCratesInShop,
+                supplierCratesInShop,
                 withCustomers,
                 withSuppliers,
                 lostDamaged,
-                boxType.getPurchasePrice() == null ? BigDecimal.ZERO : boxType.getPurchasePrice()
+                boxType.getPurchasePrice() == null ? BigDecimal.ZERO : boxType.getPurchasePrice(),
+                inventory == null || inventory.getWeightedAvgCost() == null ? BigDecimal.ZERO : inventory.getWeightedAvgCost()
         );
+    }
+
+    private int safeInt(Integer value) {
+        return value == null ? 0 : value;
     }
 
     private int value(BoxInventory inventory, InventoryValue valueReader) {

@@ -2,6 +2,7 @@ package org.example.controller;
 
 import org.example.dto.CreateSaleRequest;
 import org.example.dto.SaleCancellationResponse;
+import org.example.dto.SaleDetailResponse;
 import org.example.dto.SaleResponse;
 import org.example.dto.SalesAggregateRequest;
 import org.example.dto.SalesAggregateResponse;
@@ -9,7 +10,6 @@ import org.example.service.SaleCancellationService;
 import org.example.service.SaleService;
 import org.example.service.SalesAggregateService;
 import org.springframework.http.HttpStatus;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -18,7 +18,6 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@CrossOrigin(origins = "*")
 @RequestMapping("/wholesalers/{wholesalerId}/sales")
 public class SaleController {
 
@@ -40,6 +39,22 @@ public class SaleController {
             @RequestBody CreateSaleRequest request
     ) {
         return saleService.createSale(wholesalerId, request);
+    }
+
+    @PostMapping("/{saleId}/detail")
+    public SaleDetailResponse detail(
+            @PathVariable Long wholesalerId,
+            @PathVariable Long saleId
+    ) {
+        return saleService.detail(wholesalerId, saleId);
+    }
+
+    @PostMapping("/transaction/{transactionCode}/detail")
+    public SaleDetailResponse detailByTransactionCode(
+            @PathVariable Long wholesalerId,
+            @PathVariable String transactionCode
+    ) {
+        return saleService.detailByTransactionCode(wholesalerId, transactionCode);
     }
 
     @PostMapping("/aggregate")

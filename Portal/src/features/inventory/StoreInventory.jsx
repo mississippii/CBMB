@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { AlertTriangle, ChevronDown, ChevronRight, Filter, Truck } from 'lucide-react';
+import { AlertTriangle, ChevronDown, ChevronRight, Filter, Truck, ShoppingCart } from 'lucide-react';
 import { useData } from '../../data/DataContext';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../../shared/components/Toast';
 import { queryKeys } from '../../services/queryKeys';
-import OverviewPage from '../overview/OverviewPage';
+import { TablePager, usePagination } from '../../shared/components';
 
 const WRITE_OFF_REASONS = ['Damaged', 'Spoiled / Rotten', 'Shortage', 'Other'];
 
@@ -50,10 +50,20 @@ const formatNumber = (value) =>
     maximumFractionDigits: 2,
   }).format(Number(value) || 0);
 
-const StoreInventory = ({ onOpenProfile }) => {
-  const { suppliers, writeOffStock, fetchShipments, fetchInventoryList } = useData();
+const formatMoney = (value) => '৳ ' + Math.ceil(Number(value) || 0).toLocaleString();
+
+const StoreInventory = () => {
+  const { suppliers, writeOffStock, fetchShipments, fetchInventoryList, fetchDashboardSummary } = useData();
   const { admin } = useAuth();
   const showToast = useToast();
+
+  // Today's sales only — the rest of the money flow lives in the Cash Book.
+  const { data: today } = useQuery({
+    queryKey: queryKeys.dashboardSummary(admin?.wholesalerId, 'today'),
+    queryFn: () => fetchDashboardSummary('today'),
+    enabled: Boolean(admin?.wholesalerId),
+  });
+  const todaySales = today?.sales || {};
 
   // Live inventory + shipments — auto-refresh after sales/shipments/write-offs via
   // invalidate.inventory() / invalidate.shipments() in DataContext.
@@ -143,7 +153,7 @@ const StoreInventory = ({ onOpenProfile }) => {
           return {
             ...product,
             quantity,
-            supplierName: supplier?.name || 'Unknown supplier',
+            supplierName: supplier?.businessName || supplier?.name || 'Unknown supplier',
             supplierPhone: supplier?.contact || supplier?.phone || '',
             stockStatus: quantity <= 0 ? 'Stock out' : quantity <= 10 ? 'Low stock' : 'Available',
           };
@@ -218,15 +228,15 @@ const StoreInventory = ({ onOpenProfile }) => {
       }));
   }, [products]);
 
-  return (
-    <div className="store-inventory space-y-4">
-      <OverviewPage onOpenProfile={onOpenProfile} />
+  const { pageItems: pagedGrouped, ...productPager } = usePagination(grouped, 12);
 
+  return (
+    <div className="store-inventory profile-workspace">
+      <main className="profile-main-stack">
       <section className="supplier-panel inventory-panel">
         <div className="inventory-panel-header">
           <div>
             <h3>Products In Store</h3>
-            <p>Stock out products stay visible so the wholesaler can restock them.</p>
           </div>
           <div className="flex flex-wrap items-center gap-2 text-[11px] font-bold">
             <span className="rounded-full bg-slate-100 px-2.5 py-1 text-slate-700">{summary.productCount} products</span>
@@ -244,7 +254,7 @@ const StoreInventory = ({ onOpenProfile }) => {
           </div>
         ) : (
           <div className="mt-2 space-y-3">
-            {grouped.map((p) => {
+            {pagedGrouped.map((p) => {
               const pOpen = expandedProducts.has(p.name);
               const unitU = String(p.unit || '').toUpperCase();
               const showVarietyCol = p.varietyCount > 0;
@@ -260,9 +270,9 @@ const StoreInventory = ({ onOpenProfile }) => {
               );
               const isFiltered = filter.variety !== 'all' || filter.supplier !== 'all';
               return (
-                <div key={p.name} className={`rounded-2xl border bg-white transition overflow-hidden ${pOpen ? 'border-blue-200 shadow-sm' : 'border-slate-200 hover:border-slate-300'}`}>
+                <div key={p.name} className={`inventory-product-row border bg-white transition overflow-hidden ${pOpen ? 'is-open border-blue-200 shadow-sm' : 'border-slate-200 hover:border-slate-300'}`}>
                   {/* PRODUCT HEADER */}
-                  <div className={`flex items-center gap-3 px-4 py-3 ${pOpen ? 'bg-blue-50/50' : 'hover:bg-slate-50'}`}>
+                  <div className={`inventory-product-header ${pOpen ? 'bg-blue-50/50' : 'hover:bg-slate-50'}`}>
                     {/* Left clickable area — toggle expand */}
                     <button
                       type="button"
@@ -272,9 +282,9 @@ const StoreInventory = ({ onOpenProfile }) => {
                       {(() => {
                         const emoji = emojiForProduct(p.name);
                         return (
-                          <span className={`flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl ${pOpen ? 'bg-blue-50 ring-2 ring-blue-300' : 'bg-slate-100 ring-1 ring-slate-200'}`}>
+                          <span className={`inventory-product-avatar ${pOpen ? 'bg-blue-50 ring-2 ring-blue-300' : 'bg-slate-100 ring-1 ring-slate-200'}`}>
                             {emoji ? (
-                              <span className="text-3xl leading-none" aria-hidden>{emoji}</span>
+                              <span className="text-2xl leading-none" aria-hidden>{emoji}</span>
                             ) : (
                               <span className="text-lg font-extrabold text-slate-600">
                                 {p.name.charAt(0).toUpperCase()}
@@ -294,12 +304,15 @@ const StoreInventory = ({ onOpenProfile }) => {
                           </span>
                         </div>
                         <div className="mt-1 flex flex-wrap items-center gap-1.5">
-                          {p.suppliers.map((s) => (
-                            <span key={s.name} className="inline-flex items-center gap-1 rounded-full bg-slate-100 px-2 py-0.5 text-[11px] font-semibold text-slate-700">
+                          {p.suppliers.slice(0, 3).map((s) => (
+                            <span key={s.name} className="inventory-supplier-chip">
                               <Truck size={10} /> {s.name}
-                              <span className="text-slate-500 font-medium">· {formatNumber(s.qty)} {unitU}</span>
+                              <span>{formatNumber(s.qty)} {unitU}</span>
                             </span>
                           ))}
+                          {p.suppliers.length > 3 && (
+                            <span className="inventory-supplier-more">+{p.suppliers.length - 3} suppliers</span>
+                          )}
                         </div>
                       </div>
                     </button>
@@ -308,10 +321,10 @@ const StoreInventory = ({ onOpenProfile }) => {
                     <button
                       type="button"
                       onClick={() => toggle(expandedProducts, setExpandedProducts, p.name)}
-                      className="shrink-0 text-right"
+                      className="inventory-qty-summary"
                     >
-                      <div className="text-lg font-extrabold text-slate-900 leading-none">{formatNumber(p.qty)}</div>
-                      <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 mt-0.5">{unitU} remaining</div>
+                      <div className="inventory-qty-value">{formatNumber(p.qty)}</div>
+                      <div className="inventory-qty-label">{unitU} remaining</div>
                     </button>
 
                     {/* Right-most: filters (only render if there are multiple options in either dim) */}
@@ -366,7 +379,7 @@ const StoreInventory = ({ onOpenProfile }) => {
 
                   {/* ONE UNIFIED TABLE — Variety / Lot columns hidden when the product doesn't use them */}
                   {pOpen && (
-                    <div className="border-t border-blue-100 bg-slate-50/40 px-4 py-3">
+                    <div className="inventory-lot-panel">
                       {isFiltered && (
                         <p className="mb-2 text-[11px] text-slate-500">
                           Showing <strong className="text-blue-700">{filteredRows.length}</strong> of {p.rows.length} rows
@@ -374,17 +387,17 @@ const StoreInventory = ({ onOpenProfile }) => {
                           {filter.supplier !== 'all' && <> · supplier <strong>{filter.supplier}</strong></>}
                         </p>
                       )}
-                      <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
-                        <table className="w-full text-sm">
+                      <div className="inventory-stock-table-wrap">
+                        <table className="inventory-stock-table">
                           <thead>
-                            <tr className="bg-slate-50 border-b border-slate-200">
-                              {showVarietyCol && <th className="px-3 py-2 !text-center text-[11px] font-bold uppercase tracking-wider text-slate-500">Variety</th>}
-                              {showLotCol && <th className="px-3 py-2 !text-center text-[11px] font-bold uppercase tracking-wider text-slate-500">Lot</th>}
-                              <th className="px-3 py-2 !text-center text-[11px] font-bold uppercase tracking-wider text-slate-500">Qty</th>
-                              <th className="px-3 py-2 !text-center text-[11px] font-bold uppercase tracking-wider text-slate-500">Supplier</th>
-                              <th className="px-3 py-2 !text-center text-[11px] font-bold uppercase tracking-wider text-slate-500">Shipment</th>
-                              <th className="px-3 py-2 !text-center text-[11px] font-bold uppercase tracking-wider text-slate-500">Status</th>
-                              <th className="px-3 py-2 !text-center text-[11px] font-bold uppercase tracking-wider text-slate-500">Action</th>
+                            <tr>
+                              {showVarietyCol && <th>Variety</th>}
+                              {showLotCol && <th>Lot</th>}
+                              <th className="text-right">Qty</th>
+                              <th>Supplier</th>
+                              <th>Shipment</th>
+                              <th>Status</th>
+                              <th className="text-right">Action</th>
                             </tr>
                           </thead>
                           <tbody className="divide-y divide-slate-100">
@@ -403,12 +416,12 @@ const StoreInventory = ({ onOpenProfile }) => {
                               return (
                                 <tr key={lot.id} className="hover:bg-slate-50 transition">
                                   {showVarietyCol && (
-                                    <td className="px-3 py-2 !text-center text-slate-800">
+                                    <td className="inventory-variety-cell">
                                       {lot.category || <span className="text-slate-300">—</span>}
                                     </td>
                                   )}
                                   {showLotCol && (
-                                    <td className="px-3 py-2 !text-center">
+                                    <td className="inventory-lot-cell">
                                       {lot.subCategoryName ? (
                                         <span className={`font-bold ${isOut ? 'text-slate-400' : 'text-blue-700'}`}>{lot.subCategoryName}</span>
                                       ) : (
@@ -416,20 +429,20 @@ const StoreInventory = ({ onOpenProfile }) => {
                                       )}
                                     </td>
                                   )}
-                                  <td className="px-3 py-2 !text-center">
+                                  <td className="inventory-qty-cell">
                                     <span className={isOut ? 'text-slate-400' : 'font-bold text-slate-800'}>
                                       {formatNumber(lot.quantity)}
                                     </span>
                                     <span className="ml-1 text-xs text-slate-500">{String(lot.unit || '').toUpperCase()}</span>
                                   </td>
-                                  <td className="px-3 py-2 !text-center text-slate-700">{lot.supplierName}</td>
-                                  <td className="px-3 py-2 !text-center text-slate-700">{shipName}</td>
-                                  <td className="px-3 py-2 !text-center">
+                                  <td className="inventory-supplier-cell">{lot.supplierName}</td>
+                                  <td className="inventory-shipment-cell">{shipName}</td>
+                                  <td className="inventory-status-cell">
                                     <span className={`stock-pill ${isOut ? 'out' : ''}`}>
                                       {isOut ? 'Out' : 'In stock'}
                                     </span>
                                   </td>
-                                  <td className="px-3 py-2 !text-center">
+                                  <td className="inventory-action-cell">
                                     <button
                                       type="button"
                                       className="btn-compact"
@@ -451,9 +464,35 @@ const StoreInventory = ({ onOpenProfile }) => {
                 </div>
               );
             })}
+            <TablePager {...productPager} />
           </div>
         )}
       </section>
+      </main>
+
+      <aside className="profile-side-stack">
+        {/* Today's sales — full money flow lives in the Cash Book */}
+        <section className="supplier-panel">
+          <div className="flex items-center justify-between">
+            <h3 className="flex items-center gap-2"><ShoppingCart size={16} className="text-teal-600" /> Today's Sales</h3>
+            <span className="badge badge-teal">{Number(todaySales.saleCount) || 0} sales</span>
+          </div>
+          <div className="mt-4 grid grid-cols-1 gap-3">
+            <div className="rounded-2xl border border-teal-200 bg-gradient-to-br from-teal-50 to-white px-3.5 py-3 shadow-sm">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-teal-600">Total Sold</p>
+              <p className="mt-1 text-xl font-extrabold leading-tight text-teal-700 tabular-nums">{formatMoney(todaySales.totalSold)}</p>
+            </div>
+            <div className="rounded-2xl border border-emerald-200 bg-gradient-to-br from-emerald-50 to-white px-3.5 py-3 shadow-sm">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-emerald-600">Cash</p>
+              <p className="mt-1 text-xl font-extrabold leading-tight text-emerald-700 tabular-nums">{formatMoney(todaySales.cashAtSale)}</p>
+            </div>
+            <div className="rounded-2xl border border-amber-200 bg-gradient-to-br from-amber-50 to-white px-3.5 py-3 shadow-sm">
+              <p className="text-[10px] font-bold uppercase tracking-wider text-amber-600">Due</p>
+              <p className="mt-1 text-xl font-extrabold leading-tight text-amber-600 tabular-nums">{formatMoney(todaySales.dueCreated)}</p>
+            </div>
+          </div>
+        </section>
+      </aside>
 
       {writeOff && (
         <div className="modal-overlay">

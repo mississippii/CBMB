@@ -9,21 +9,29 @@ const buildUrl = (path) => {
   return API_BASE_URL + normalizedPath;
 };
 
-export const postJson = async (path, body = undefined) => {
+export const postJson = async (path, body = undefined, extraOptions = {}) => {
   const options = {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: { 'Content-Type': 'application/json', ...(extraOptions.headers || {}) },
   };
 
   if (body !== undefined) {
     options.body = JSON.stringify(body);
   }
 
-  const response = await fetch(buildUrl(path), options);
+  let response;
+  try {
+    response = await fetch(buildUrl(path), options);
+  } catch {
+    throw new Error('Cannot reach the server. Check that the backend is running.');
+  }
+
   const payload = await response.json().catch(() => null);
 
   if (!response.ok) {
-    throw new Error(payload?.message || 'Request failed.');
+    const error = new Error(payload?.message || 'Request failed (' + response.status + ').');
+    error.status = response.status;
+    throw error;
   }
 
   return payload;
@@ -31,9 +39,11 @@ export const postJson = async (path, body = undefined) => {
 
 export const apiPaths = {
   authLogin: '/auth/login',
+  authSupplierLogin: '/auth/supplier-login',
   adminWholesalersList: '/admin/wholesalers/list',
   adminWholesalersSearch: '/admin/wholesalers/search',
   adminWholesalersCreate: '/admin/wholesalers/create',
+  adminWholesalerUpdate: (wholesalerId) => '/admin/wholesalers/' + wholesalerId + '/update',
   adminWholesalerResetPassword: (wholesalerId) => '/admin/wholesalers/' + wholesalerId + '/reset-password',
   adminProductsList: '/admin/products/list',
   adminProductsCreate: '/admin/products/create',
@@ -51,6 +61,7 @@ export const apiPaths = {
   wholesalerSuppliersUpdate: (wholesalerId) => '/wholesalers/' + wholesalerId + '/suppliers/update',
   expenseCategories: (wholesalerId) => '/wholesalers/' + wholesalerId + '/expenses/categories',
   expenseCreate: (wholesalerId) => '/wholesalers/' + wholesalerId + '/expenses/create',
+  expenseCreateBatch: (wholesalerId) => '/wholesalers/' + wholesalerId + '/expenses/create-batch',
   expenseList: (wholesalerId) => '/wholesalers/' + wholesalerId + '/expenses/list',
   supplierStatement: (wholesalerId) => '/wholesalers/' + wholesalerId + '/expenses/statement',
   wholesalerSuppliersDisable: (wholesalerId) => '/wholesalers/' + wholesalerId + '/suppliers/disable',
@@ -59,8 +70,10 @@ export const apiPaths = {
   wholesalerCustomersEnable: (wholesalerId) => '/wholesalers/' + wholesalerId + '/customers/enable',
   wholesalerCustomersList: (wholesalerId) => '/wholesalers/' + wholesalerId + '/customers/list',
   wholesalerCustomersCreate: (wholesalerId) => '/wholesalers/' + wholesalerId + '/customers/create',
+  wholesalerCustomersUpdate: (wholesalerId) => '/wholesalers/' + wholesalerId + '/customers/update',
   wholesalerCustomersProfile: (wholesalerId) => '/wholesalers/' + wholesalerId + '/customers/profile',
   supplierDeliveriesCreate: (wholesalerId) => '/wholesalers/' + wholesalerId + '/supplier-deliveries/create',
+  supplierDeliveriesUpdate: (wholesalerId) => '/wholesalers/' + wholesalerId + '/supplier-deliveries/update',
   supplierDeliveriesList: (wholesalerId) => '/wholesalers/' + wholesalerId + '/supplier-deliveries/list',
   shipmentsBySupplier: (wholesalerId) => '/wholesalers/' + wholesalerId + '/shipments/by-supplier',
   shipmentSetCommission: (wholesalerId) => '/wholesalers/' + wholesalerId + '/shipments/set-commission',
@@ -70,6 +83,8 @@ export const apiPaths = {
   transactionsList: (wholesalerId) => '/wholesalers/' + wholesalerId + '/transactions/list',
   salesCreate: (wholesalerId) => '/wholesalers/' + wholesalerId + '/sales/create',
   salesAggregate: (wholesalerId) => '/wholesalers/' + wholesalerId + '/sales/aggregate',
+  salesDetail: (wholesalerId, saleId) => '/wholesalers/' + wholesalerId + '/sales/' + saleId + '/detail',
+  salesDetailByTransactionCode: (wholesalerId, transactionCode) => '/wholesalers/' + wholesalerId + '/sales/transaction/' + transactionCode + '/detail',
   salesCancel: (wholesalerId, saleId) => '/wholesalers/' + wholesalerId + '/sales/' + saleId + '/cancel',
   dashboardSummary: (wholesalerId) => '/wholesalers/' + wholesalerId + '/dashboard/summary',
   paymentsCustomerCancel: (wholesalerId, paymentId) => '/wholesalers/' + wholesalerId + '/payments/customer/' + paymentId + '/cancel',
@@ -81,16 +96,26 @@ export const apiPaths = {
   cratesTypeSetPrice: (wholesalerId) => '/wholesalers/' + wholesalerId + '/crates/types/set-price',
   cratesLossCompensate: (wholesalerId, boxLedgerId) => '/wholesalers/' + wholesalerId + '/crates/loss/' + boxLedgerId + '/compensate',
   cratesSell: (wholesalerId) => '/wholesalers/' + wholesalerId + '/crates/sell',
+  cratesRefund: (wholesalerId) => '/wholesalers/' + wholesalerId + '/crates/refund',
   reportsPnL: (wholesalerId) => '/wholesalers/' + wholesalerId + '/reports/pnl',
   paymentsCustomerSettle: (wholesalerId) => '/wholesalers/' + wholesalerId + '/payments/customer/settle',
   paymentsCustomerCrateBorrow: (wholesalerId) => '/wholesalers/' + wholesalerId + '/payments/customer/crate-borrow',
+  paymentsCustomerCrateReceive: (wholesalerId) => '/wholesalers/' + wholesalerId + '/payments/customer/crate-receive',
+  paymentsCustomerCrateHandback: (wholesalerId) => '/wholesalers/' + wholesalerId + '/payments/customer/crate-handback',
   paymentsSupplierProductPay: (wholesalerId) => '/wholesalers/' + wholesalerId + '/payments/supplier/product-pay',
-  paymentsSupplierCommissionReceive: (wholesalerId) => '/wholesalers/' + wholesalerId + '/payments/supplier/commission-receive',
-  paymentsSupplierExpenseReceive: (wholesalerId) => '/wholesalers/' + wholesalerId + '/payments/supplier/expense-receive',
   paymentsSupplierCrateGive: (wholesalerId) => '/wholesalers/' + wholesalerId + '/payments/supplier/crate-give',
   paymentsSupplierCrateReturn: (wholesalerId) => '/wholesalers/' + wholesalerId + '/payments/supplier/crate-return',
+  paymentsSupplierCrateReceive: (wholesalerId) => '/wholesalers/' + wholesalerId + '/payments/supplier/crate-receive',
+  paymentsSupplierCrateHandback: (wholesalerId) => '/wholesalers/' + wholesalerId + '/payments/supplier/crate-handback',
   shopExpenseCategories: (wholesalerId) => '/wholesalers/' + wholesalerId + '/shop-expenses/categories',
   shopExpenseCreate: (wholesalerId) => '/wholesalers/' + wholesalerId + '/shop-expenses/create',
   shopExpenseList: (wholesalerId) => '/wholesalers/' + wholesalerId + '/shop-expenses/list',
   shopExpenseCancel: (wholesalerId, expenseId) => '/wholesalers/' + wholesalerId + '/shop-expenses/' + expenseId + '/cancel',
+  supplierPortalOverview: (supplierId) => '/supplier-portal/' + supplierId + '/overview',
+  supplierPortalShipments: (supplierId) => '/supplier-portal/' + supplierId + '/shipments/list',
+  supplierPortalSales: (supplierId) => '/supplier-portal/' + supplierId + '/sales/list',
+  supplierPortalSaleDetail: (supplierId, saleId) => '/supplier-portal/' + supplierId + '/sales/' + saleId + '/detail',
+  cashDaily: (wholesalerId) => '/wholesalers/' + wholesalerId + '/cash/daily',
+  cashClose: (wholesalerId) => '/wholesalers/' + wholesalerId + '/cash/close',
+  cashReopen: (wholesalerId) => '/wholesalers/' + wholesalerId + '/cash/reopen',
 };

@@ -9,9 +9,7 @@ public record SupplierProfileResponse(
         BigDecimal todayCommission,
         BigDecimal totalSale,
         BigDecimal totalCommission,
-        BigDecimal commissionDue,
         BigDecimal supplierDue,
-        BigDecimal otherExpense,
         List<TransactionResponse> transactions
 ) {
 }

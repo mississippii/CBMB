@@ -46,6 +46,11 @@ export const queryKeys = {
     statement: (wholesalerId, supplierAccountId, period) => ['expenseStatement', wholesalerId, supplierAccountId, period],
   },
 
+  cash: {
+    root: (wholesalerId) => ['cash', wholesalerId],
+    daily: (wholesalerId, date) => ['cash', wholesalerId, date || null],
+  },
+
   parties: {
     suppliers: (wholesalerId, includeDisabled = false) => ['suppliers', wholesalerId, includeDisabled],
     customers: (wholesalerId, includeDisabled = false) => ['customers', wholesalerId, includeDisabled],

@@ -4,10 +4,10 @@ import org.example.dto.AdminResponse;
 import org.example.dto.CreateAdminRequest;
 import org.example.dto.LoginRequest;
 import org.example.dto.LoginResponse;
+import org.example.dto.SupplierPhoneLoginRequest;
 import org.example.service.AdminSetupService;
 import org.example.service.AuthService;
 import org.springframework.http.HttpStatus;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
@@ -15,7 +15,6 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@CrossOrigin(origins = "*")
 @RequestMapping("/auth")
 public class AuthController {
 
@@ -30,6 +29,11 @@ public class AuthController {
     @PostMapping("/login")
     public LoginResponse login(@RequestBody LoginRequest request) {
         return authService.login(request);
+    }
+
+    @PostMapping("/supplier-login")
+    public LoginResponse supplierLogin(@RequestBody SupplierPhoneLoginRequest request) {
+        return authService.supplierLogin(request);
     }
 
     @PostMapping("/admin/create")

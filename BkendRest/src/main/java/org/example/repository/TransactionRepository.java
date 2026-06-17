@@ -2,6 +2,7 @@ package org.example.repository;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 import org.example.model.Transaction;
 import org.example.model.id.TransactionId;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -15,6 +16,8 @@ public interface TransactionRepository extends JpaRepository<Transaction, Transa
     List<Transaction> findByWholesalerIdAndWholesalerCustomerIdOrderByCreatedAtDesc(Long wholesalerId, Long wholesalerCustomerId);
 
     List<Transaction> findByWholesalerIdAndWholesalerSupplierIdOrderByCreatedAtDesc(Long wholesalerId, Long wholesalerSupplierId);
+
+    Optional<Transaction> findFirstByWholesalerIdAndSaleIdAndWholesalerSupplierIdOrderByCreatedAtDesc(Long wholesalerId, Long saleId, Long wholesalerSupplierId);
 
     /** Date-filtered list for month / year drilldowns. Null bounds = unbounded on that side. */
     @Query("""

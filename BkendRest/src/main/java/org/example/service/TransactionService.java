@@ -91,9 +91,7 @@ public class TransactionService {
 
     private TransactionResponse toResponse(Transaction transaction) {
         PartySnapshot party = resolveParty(transaction);
-        SaleItem item = transaction.getSaleId() == null
-                ? null
-                : saleItemRepository.findFirstBySale_Id(transaction.getSaleId()).orElse(null);
+        SaleItem item = resolveSaleItem(transaction);
         Sale sale = transaction.getSaleId() == null
                 ? null
                 : saleRepository.findById(transaction.getSaleId()).orElse(null);
@@ -120,6 +118,7 @@ public class TransactionService {
                 item == null || item.getSubCategory() == null ? null : item.getSubCategory().getName(),
                 item == null ? null : item.getQuantity(),
                 item == null ? null : item.getUnit().name(),
+                item == null ? null : item.getSaleWeightKg(),
                 item == null ? null : item.getUnitPrice(),
                 transaction.getSaleAmount(),
                 sale == null ? null : sale.getGrossAmount(),
@@ -128,9 +127,25 @@ public class TransactionService {
                 transaction.getDueAmount(),
                 payment == null ? 0 : payment.getBoxesReturned(),
                 payment == null ? null : payment.getPaymentType().name(),
+                sale != null ? sale.getPaymentMethod().name()
+                        : payment != null ? payment.getPaymentMethod().name()
+                        : null,
                 transaction.getDescription(),
                 transaction.getCreatedAt()
         );
+    }
+
+    private SaleItem resolveSaleItem(Transaction transaction) {
+        if (transaction.getSaleId() == null) {
+            return null;
+        }
+        if (transaction.getWholesalerSupplierId() != null) {
+            return saleItemRepository
+                    .findFirstBySale_IdAndWholesalerSupplier_Id(
+                            transaction.getSaleId(), transaction.getWholesalerSupplierId())
+                    .orElse(null);
+        }
+        return saleItemRepository.findFirstBySale_Id(transaction.getSaleId()).orElse(null);
     }
 
     private PartySnapshot resolveParty(Transaction transaction) {
@@ -153,7 +168,7 @@ public class TransactionService {
                 customerName = sale.getCustomerNameSnapshot();
                 customerPhone = sale.getCustomerPhoneSnapshot();
             }
-            SaleItem item = saleItemRepository.findFirstBySale_Id(transaction.getSaleId()).orElse(null);
+            SaleItem item = resolveSaleItem(transaction);
             if (item != null) {
                 supplierName = item.getWholesalerSupplier().getSupplier().getName();
                 supplierPhone = item.getWholesalerSupplier().getSupplier().getPhone();

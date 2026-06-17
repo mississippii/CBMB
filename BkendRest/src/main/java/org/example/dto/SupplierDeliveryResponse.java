@@ -23,6 +23,8 @@ public record SupplierDeliveryResponse(
         BigDecimal netPayable,       // totalSold - commission - advancePaid
         BigDecimal expenseTotal,     // other expenses booked against this lot
         BigDecimal expenseDue,       // expense the supplier still owes for this lot
+        BigDecimal totalUnitsSold,   // sum of sold pack quantities for this lot
+        BigDecimal totalKgSold,      // sum of sold weight (kg) for this lot
         List<SupplierDeliveryItemResponse> items
 ) {
 }

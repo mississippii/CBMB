@@ -9,7 +9,6 @@ import org.example.dto.SupplierSettlementRequest;
 import org.example.service.PaymentCancellationService;
 import org.example.service.PaymentService;
 import org.springframework.http.HttpStatus;
-import org.springframework.web.bind.annotation.CrossOrigin;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -18,7 +17,6 @@ import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@CrossOrigin(origins = "*")
 @RequestMapping("/wholesalers/{wholesalerId}/payments")
 public class PaymentController {
 
@@ -48,6 +46,24 @@ public class PaymentController {
         return paymentService.borrowCustomerCrates(wholesalerId, request);
     }
 
+    @PostMapping("/customer/crate-receive")
+    @ResponseStatus(HttpStatus.CREATED)
+    public PaymentOperationResponse receiveCustomerCrates(
+            @PathVariable Long wholesalerId,
+            @RequestBody CustomerCrateBorrowRequest request
+    ) {
+        return paymentService.receiveCustomerCrates(wholesalerId, request);
+    }
+
+    @PostMapping("/customer/crate-handback")
+    @ResponseStatus(HttpStatus.CREATED)
+    public PaymentOperationResponse handBackCustomerCrates(
+            @PathVariable Long wholesalerId,
+            @RequestBody CustomerCrateBorrowRequest request
+    ) {
+        return paymentService.handBackCustomerCrates(wholesalerId, request);
+    }
+
     @PostMapping("/supplier/product-pay")
     @ResponseStatus(HttpStatus.CREATED)
     public PaymentOperationResponse paySupplierProduct(
@@ -55,24 +71,6 @@ public class PaymentController {
             @RequestBody SupplierSettlementRequest request
     ) {
         return paymentService.paySupplierProduct(wholesalerId, request);
-    }
-
-    @PostMapping("/supplier/commission-receive")
-    @ResponseStatus(HttpStatus.CREATED)
-    public PaymentOperationResponse receiveSupplierCommission(
-            @PathVariable Long wholesalerId,
-            @RequestBody SupplierSettlementRequest request
-    ) {
-        return paymentService.receiveSupplierCommission(wholesalerId, request);
-    }
-
-    @PostMapping("/supplier/expense-receive")
-    @ResponseStatus(HttpStatus.CREATED)
-    public PaymentOperationResponse receiveSupplierExpense(
-            @PathVariable Long wholesalerId,
-            @RequestBody SupplierSettlementRequest request
-    ) {
-        return paymentService.receiveSupplierExpense(wholesalerId, request);
     }
 
     @PostMapping("/supplier/crate-give")
@@ -91,6 +89,24 @@ public class PaymentController {
             @RequestBody SupplierCrateRequest request
     ) {
         return paymentService.returnSupplierCrates(wholesalerId, request);
+    }
+
+    @PostMapping("/supplier/crate-receive")
+    @ResponseStatus(HttpStatus.CREATED)
+    public PaymentOperationResponse receiveSupplierCrates(
+            @PathVariable Long wholesalerId,
+            @RequestBody SupplierCrateRequest request
+    ) {
+        return paymentService.receiveSupplierCrates(wholesalerId, request);
+    }
+
+    @PostMapping("/supplier/crate-handback")
+    @ResponseStatus(HttpStatus.CREATED)
+    public PaymentOperationResponse handBackSupplierCrates(
+            @PathVariable Long wholesalerId,
+            @RequestBody SupplierCrateRequest request
+    ) {
+        return paymentService.handBackSupplierCrates(wholesalerId, request);
     }
 
     @PostMapping("/customer/{paymentId}/cancel")

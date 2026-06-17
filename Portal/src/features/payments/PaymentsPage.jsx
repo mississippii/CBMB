@@ -1,12 +1,12 @@
 import { useMemo, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
-import { Plus, Receipt, ArrowDownRight, ArrowUpRight, Ban } from 'lucide-react';
+import { Plus, Receipt, ArrowDownRight, ArrowUpRight } from 'lucide-react';
 import { useData } from '../../data/DataContext';
 import { useAuth } from '../auth/AuthContext';
-import { useToast } from '../../shared/components/Toast';
 import { queryKeys } from '../../services/queryKeys';
 import { formatMoney, formatDate } from '../../shared/utils/format';
 import { Loader, EmptyRow, ErrorBanner } from '../../shared/components/Loader';
+import { TablePager, usePagination } from '../../shared/components';
 import PaymentForm from './PaymentForm';
 
 /**
@@ -23,6 +23,12 @@ import PaymentForm from './PaymentForm';
  * TransactionResponse doesn't carry a dedicated `settlementType` field yet
  * (on the Near-Term Gaps list).
  */
+const localDateKey = (value) => {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return '';
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+};
+
 const classify = (t) => {
   const isCustomerSide = Boolean(t.customerId || t.wholesalerCustomerId);
   const isSupplierSide = Boolean(t.supplierId || t.wholesalerSupplierId);
@@ -72,34 +78,8 @@ const classify = (t) => {
 
 const PaymentsPage = () => {
   const { admin } = useAuth();
-  const { fetchTransactionsRange, cancelCustomerPayment, cancelSupplierSettlement } = useData();
-  const showToast = useToast();
+  const { fetchTransactionsRange } = useData();
   const [showModal, setShowModal] = useState(false);
-  const [cancelTarget, setCancelTarget] = useState(null); // payment tx row
-  const [cancelReason, setCancelReason] = useState('');
-  const [cancelError, setCancelError] = useState('');
-  const [isCancelling, setIsCancelling] = useState(false);
-
-  const openCancel = (tx) => { setCancelTarget(tx); setCancelReason(''); setCancelError(''); };
-
-  const handleConfirmCancel = async () => {
-    if (!cancelTarget) return;
-    setIsCancelling(true);
-    setCancelError('');
-    try {
-      if (cancelTarget.paymentId) {
-        await cancelCustomerPayment(cancelTarget.paymentId, cancelReason.trim());
-      } else if (cancelTarget.settlementId) {
-        await cancelSupplierSettlement(cancelTarget.settlementId, cancelReason.trim());
-      }
-      showToast('Payment cancelled', 'success');
-      setCancelTarget(null);
-    } catch (err) {
-      setCancelError(err instanceof Error ? err.message : 'Failed to cancel payment.');
-    } finally {
-      setIsCancelling(false);
-    }
-  };
 
   // Cache key shared with TransactionsList + SalesPage so tab toggles are free.
   const { data: raw = [], isLoading, error: queryError } = useQuery({
@@ -117,29 +97,34 @@ const PaymentsPage = () => {
     [raw],
   );
 
-  const todayKey = new Date().toISOString().split('T')[0];
-  const todayTotal = payments
-    .filter((t) => (t.createdAt || '').split('T')[0] === todayKey)
-    .reduce((sum, t) => sum + (Number(t.paymentAmount) || 0), 0);
+  const { pageItems: pagedPayments, ...paymentPager } = usePagination(payments, 15);
+  const todayPayments = useMemo(() => {
+    const today = localDateKey(new Date());
+    return payments.filter((payment) => localDateKey(payment.createdAt) === today);
+  }, [payments]);
+  const paymentTotals = useMemo(() => todayPayments.reduce((acc, t) => {
+    const cls = classify(t);
+    const amount = Number(t.paymentAmount) || 0;
+    if (cls.dir === 'out') acc.out += amount;
+    else acc.in += amount;
+    return acc;
+  }, { count: todayPayments.length, in: 0, out: 0 }), [todayPayments]);
 
   return (
     <div className="space-y-5">
-      <section className="inventory-hero">
-        <div>
-          <span className="box-eyebrow">Payments</span>
-          <h3>Record &amp; track payments</h3>
-          <p>Pay supplier dues or receive money from customers / suppliers. Today's payments: {formatMoney(todayTotal)}.</p>
-        </div>
-        <button type="button" className="btn-primary inline-flex items-center gap-2" onClick={() => setShowModal(true)}>
-          <Plus size={16} /> New Payment
-        </button>
-      </section>
+      <div className="profile-workspace">
+        <main className="profile-main-stack">
+          <section className="inventory-hero">
+            <div>
+              <span className="box-eyebrow">Payments</span>
+              <h3>Record &amp; track payments</h3>
+            </div>
+          </section>
 
-      <div className="supplier-panel">
+          <div className="supplier-panel">
         <div className="mb-4 flex items-center justify-between">
           <div>
             <h3 className="flex items-center gap-2"><Receipt size={18} className="text-blue-600" /> Recent Payments</h3>
-            <p>Most recent first</p>
           </div>
           <span className="badge badge-teal">{payments.length} total</span>
         </div>
@@ -150,20 +135,19 @@ const PaymentsPage = () => {
           <EmptyRow label="No payments yet. Click 'New Payment' to record your first money movement." />
         ) : (
           <div className="overflow-x-auto rounded-xl border border-slate-200">
-            <table className="w-full min-w-[760px] text-sm">
+            <table className="center-table w-full min-w-[760px] text-sm">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200">
-                  <th className="px-4 py-3 text-left font-semibold text-slate-700">Date</th>
-                  <th className="px-4 py-3 text-left font-semibold text-slate-700">Type</th>
-                  <th className="px-4 py-3 text-left font-semibold text-slate-700">Party</th>
-                  <th className="px-4 py-3 text-right font-semibold text-slate-700">Amount</th>
-                  <th className="px-4 py-3 text-right font-semibold text-slate-700">Balance After</th>
-                  <th className="px-4 py-3 text-left font-semibold text-slate-700">Note</th>
-                  <th className="px-4 py-3 text-right font-semibold text-slate-700">Action</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Date</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Type</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Party</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Amount</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Balance After</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Note</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {payments.map((t) => {
+                {pagedPayments.map((t) => {
                   const cls = classify(t);
                   const Icon = cls.icon;
                   const dirColor = cls.dir === 'in' ? 'text-emerald-700' : 'text-rose-700';
@@ -177,23 +161,11 @@ const PaymentsPage = () => {
                         </span>
                       </td>
                       <td className="px-4 py-3 text-slate-800">{t.customerName || t.supplierName || '—'}</td>
-                      <td className={`px-4 py-3 text-right font-extrabold ${dirColor}`}>
+                      <td className={`px-4 py-3 font-extrabold ${dirColor}`}>
                         {cls.dir === 'in' ? '+ ' : '− '}{formatMoney(t.paymentAmount)}
                       </td>
-                      <td className="px-4 py-3 text-right text-slate-700">{formatMoney(t.dueAmount)}</td>
+                      <td className="px-4 py-3 text-slate-700">{formatMoney(t.dueAmount)}</td>
                       <td className="px-4 py-3 text-slate-600 truncate max-w-[20rem]">{t.description || '—'}</td>
-                      <td className="px-4 py-3 text-right">
-                        {!cancelled && (t.paymentId || t.settlementId) && (
-                          <button
-                            type="button"
-                            onClick={() => openCancel(t)}
-                            className="btn-compact"
-                            title="Cancel this payment (writes reversing entries)"
-                          >
-                            <Ban size={12} /> Cancel
-                          </button>
-                        )}
-                      </td>
                     </tr>
                   );
                 })}
@@ -202,51 +174,31 @@ const PaymentsPage = () => {
           </div>
         )}
 
+        {!isLoading && payments.length > 0 && <TablePager {...paymentPager} />}
+
         {queryError && <div className="mt-3"><ErrorBanner message={queryError.message || 'Failed to load payments.'} /></div>}
+          </div>
+        </main>
+
+        <aside className="profile-side-stack">
+          <div className="supplier-panel">
+            <h3>Payment Actions</h3>
+            <button type="button" className="btn-primary mt-3 inline-flex w-full items-center justify-center gap-2" onClick={() => setShowModal(true)}>
+              <Plus size={16} /> New Payment
+            </button>
+          </div>
+          <div className="supplier-panel">
+            <h3>Today Payment Summary</h3>
+            <div className="mt-3 space-y-2">
+              <div className="box-row"><span>Today entries</span><strong>{paymentTotals.count}</strong></div>
+              <div className="box-row"><span>Money in</span><strong className="text-emerald-700">{formatMoney(paymentTotals.in)}</strong></div>
+              <div className="box-row total"><span>Money out</span><strong className="text-rose-700">{formatMoney(paymentTotals.out)}</strong></div>
+            </div>
+          </div>
+        </aside>
       </div>
 
       {showModal && <PaymentForm onClose={() => setShowModal(false)} />}
-
-      {cancelTarget && (
-        <div className="modal-overlay">
-          <div className="modal-content" style={{ maxWidth: '26rem' }}>
-            <div className="modal-header">
-              <div className="flex items-center gap-2.5">
-                <div className="modal-icon-circle bg-rose-100 text-rose-700"><Ban size={18} /></div>
-                <div>
-                  <h2>Cancel payment</h2>
-                  <p className="text-xs text-slate-500 mt-0.5">
-                    {cancelTarget.customer || cancelTarget.supplier || 'Party'} · {formatMoney(cancelTarget.paymentAmount)}
-                  </p>
-                </div>
-              </div>
-              <button onClick={() => setCancelTarget(null)} className="modal-close-btn">✕</button>
-            </div>
-            <div className="modal-body">
-              <p className="text-sm text-slate-600">
-                This writes reversing entries and restores the affected party balance. The original record is
-                kept and marked cancelled. (Expense reimbursements and manual adjustments can&apos;t be cancelled
-                this way — post a corrective entry instead.)
-              </p>
-              <div className="form-field mt-3">
-                <label className="form-label">Reason <span className="form-label-hint">optional</span></label>
-                <input
-                  type="text" value={cancelReason}
-                  onChange={(e) => setCancelReason(e.target.value)}
-                  className="input-field" placeholder="e.g. duplicate entry" autoFocus
-                />
-              </div>
-              {cancelError && <div className="status-error mt-3"><span>!</span><span>{cancelError}</span></div>}
-            </div>
-            <div className="modal-footer">
-              <button onClick={() => setCancelTarget(null)} className="btn-secondary" disabled={isCancelling}>Keep payment</button>
-              <button onClick={handleConfirmCancel} className="btn-danger flex items-center gap-2" disabled={isCancelling}>
-                <Ban size={14} /> {isCancelling ? 'Cancelling…' : 'Cancel payment'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 };

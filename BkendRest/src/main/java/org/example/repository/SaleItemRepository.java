@@ -15,27 +15,35 @@ public interface SaleItemRepository extends JpaRepository<SaleItem, Long> {
 
     List<SaleItem> findBySale_Id(Long saleId);
 
-    @Query("select coalesce(sum(i.lineTotal), 0) from SaleItem i where i.wholesaler.id = :wholesalerId and i.wholesalerSupplier.id = :supplierAccountId")
+    Optional<SaleItem> findFirstBySale_IdAndWholesalerSupplier_Id(Long saleId, Long wholesalerSupplierId);
+
+    List<SaleItem> findBySale_IdAndWholesalerSupplier_Id(Long saleId, Long wholesalerSupplierId);
+
+    @Query("select coalesce(sum(i.lineTotal), 0) from SaleItem i where i.wholesaler.id = :wholesalerId and i.wholesalerSupplier.id = :supplierAccountId and i.sale.status = org.example.model.enums.PostStatus.POSTED")
     BigDecimal sumLineTotalBySupplier(@Param("wholesalerId") Long wholesalerId, @Param("supplierAccountId") Long supplierAccountId);
 
     @Query("select coalesce(sum(i.commissionAmount), 0) from SaleItem i where i.wholesaler.id = :wholesalerId and i.wholesalerSupplier.id = :supplierAccountId")
     BigDecimal sumCommissionBySupplier(@Param("wholesalerId") Long wholesalerId, @Param("supplierAccountId") Long supplierAccountId);
 
-    @Query("select coalesce(sum(i.lineTotal), 0) from SaleItem i where i.wholesaler.id = :wholesalerId and i.wholesalerSupplier.id = :supplierAccountId and i.sale.saleDate >= :startDate and i.sale.saleDate < :endDate")
+    @Query("select coalesce(sum(i.lineTotal), 0) from SaleItem i where i.wholesaler.id = :wholesalerId and i.wholesalerSupplier.id = :supplierAccountId and i.sale.status = org.example.model.enums.PostStatus.POSTED and i.sale.saleDate >= :startDate and i.sale.saleDate < :endDate")
     BigDecimal sumLineTotalBySupplierBetween(@Param("wholesalerId") Long wholesalerId, @Param("supplierAccountId") Long supplierAccountId, @Param("startDate") LocalDateTime startDate, @Param("endDate") LocalDateTime endDate);
 
     @Query("select coalesce(sum(i.commissionAmount), 0) from SaleItem i where i.wholesaler.id = :wholesalerId and i.wholesalerSupplier.id = :supplierAccountId and i.sale.saleDate >= :startDate and i.sale.saleDate < :endDate")
     BigDecimal sumCommissionBySupplierBetween(@Param("wholesalerId") Long wholesalerId, @Param("supplierAccountId") Long supplierAccountId, @Param("startDate") LocalDateTime startDate, @Param("endDate") LocalDateTime endDate);
 
     // Shipment-wise: total sold value of one lot.
-    @Query("select coalesce(sum(i.lineTotal), 0) from SaleItem i where i.delivery.id = :deliveryId")
+    @Query("select coalesce(sum(i.lineTotal), 0) from SaleItem i where i.delivery.id = :deliveryId and i.sale.status = org.example.model.enums.PostStatus.POSTED")
     BigDecimal sumLineTotalByDelivery(@Param("deliveryId") Long deliveryId);
 
-    @Query("select coalesce(sum(i.lineTotal), 0) from SaleItem i where i.delivery.id = :deliveryId and i.sale.saleDate >= :startDate and i.sale.saleDate < :endDate")
+    @Query("select coalesce(sum(i.lineTotal), 0) from SaleItem i where i.delivery.id = :deliveryId and i.sale.status = org.example.model.enums.PostStatus.POSTED and i.sale.saleDate >= :startDate and i.sale.saleDate < :endDate")
     BigDecimal sumLineTotalByDeliveryBetween(@Param("deliveryId") Long deliveryId, @Param("startDate") LocalDateTime startDate, @Param("endDate") LocalDateTime endDate);
 
-    @Query("select coalesce(sum(i.quantity), 0) from SaleItem i where i.delivery.id = :deliveryId")
+    @Query("select coalesce(sum(i.quantity), 0) from SaleItem i where i.delivery.id = :deliveryId and i.sale.status = org.example.model.enums.PostStatus.POSTED")
     BigDecimal sumQuantityByDelivery(@Param("deliveryId") Long deliveryId);
+
+    /** Total kg sold from one lot (weight-priced sales only; null weights ignored). */
+    @Query("select coalesce(sum(i.saleWeightKg), 0) from SaleItem i where i.delivery.id = :deliveryId and i.sale.status = org.example.model.enums.PostStatus.POSTED")
+    BigDecimal sumSaleWeightByDelivery(@Param("deliveryId") Long deliveryId);
 
     /**
      * Single-row aggregate across all matching sale_items for the wholesaler.
