@@ -66,6 +66,10 @@ public class SaleService {
     private final BoxInventoryRepository boxInventoryRepository;
     private final BoxBalanceRepository boxBalanceRepository;
     private final BoxLedgerRepository boxLedgerRepository;
+    // Crate movement that rides along with a sale is delegated to these so the whole sale stays
+    // atomic (same transaction) without duplicating crate borrow/sell/deposit logic.
+    private final PaymentService paymentService;
+    private final CrateService crateService;
 
     public SaleService(
             WholesalerRepository wholesalerRepository,
@@ -81,7 +85,9 @@ public class SaleService {
             BoxTypeRepository boxTypeRepository,
             BoxInventoryRepository boxInventoryRepository,
             BoxBalanceRepository boxBalanceRepository,
-            BoxLedgerRepository boxLedgerRepository
+            BoxLedgerRepository boxLedgerRepository,
+            PaymentService paymentService,
+            CrateService crateService
     ) {
         this.wholesalerRepository = wholesalerRepository;
         this.inventoryRepository = inventoryRepository;
@@ -97,32 +103,78 @@ public class SaleService {
         this.boxInventoryRepository = boxInventoryRepository;
         this.boxBalanceRepository = boxBalanceRepository;
         this.boxLedgerRepository = boxLedgerRepository;
+        this.paymentService = paymentService;
+        this.crateService = crateService;
+    }
+
+    /** A request line resolved against its inventory, with computed gross + allocated net. */
+    private static final class ResolvedSaleLine {
+        Inventory inventory;
+        BigDecimal quantity;
+        BigDecimal saleWeightKg;
+        BigDecimal unitPrice;
+        BigDecimal lineGross;
+        BigDecimal lineNet;
     }
 
     @Transactional
     public SaleResponse createSale(Long wholesalerId, CreateSaleRequest request) {
         Wholesaler wholesaler = findWholesaler(wholesalerId);
-        Inventory inventory = inventoryRepository.findById(request.inventoryId())
-                .orElseThrow(() -> new BadRequestException("Inventory item not found."));
-        if (!inventory.getWholesaler().getId().equals(wholesalerId)) {
-            throw new BadRequestException("Inventory item does not belong to this wholesaler.");
-        }
+        boolean oneTimeCustomer = request.wholesalerCustomerId() == null;
 
-        BigDecimal quantity = positive(request.quantity(), "Quantity must be greater than zero.");
-        BigDecimal unitPrice = preciseMoney(request.unitPrice(), "Unit price cannot be negative.");
-        BigDecimal paidAmount = cashMoney(nonNegative(request.paymentAmount(), "Payment amount cannot be negative."));
-        // Weight-priced sale: line_total = saleWeightKg × unitPrice (unitPrice = per-kg).
-        // Pack-priced sale (default): line_total = quantity × unitPrice (unitPrice = per-pack).
-        // Inventory still deducts `quantity` (pack count) either way.
-        BigDecimal saleWeightKg = null;
-        if (request.saleWeightKg() != null && request.saleWeightKg().signum() > 0) {
-            saleWeightKg = money3(request.saleWeightKg());
-        } else if (request.saleWeightKg() != null && request.saleWeightKg().signum() < 0) {
-            throw new BadRequestException("Sale weight cannot be negative.");
+        // Normalize to a list of lines. Single-line callers (the "Single Sale" tab and any legacy
+        // caller) send the top-level inventoryId/quantity/unitPrice; multi-line callers send `lines`.
+        java.util.List<CreateSaleRequest.SaleLine> rawLines =
+                (request.lines() != null && !request.lines().isEmpty())
+                        ? request.lines()
+                        : java.util.List.of(new CreateSaleRequest.SaleLine(
+                                request.inventoryId(), request.quantity(),
+                                request.saleWeightKg(), request.unitPrice()));
+
+        // Resolve + validate every line and compute its gross. Cumulative quantity per inventory
+        // is tracked so the same item sold twice in one sale cannot oversell.
+        java.util.List<ResolvedSaleLine> resolved = new java.util.ArrayList<>(rawLines.size());
+        java.util.Map<Long, BigDecimal> requestedByInventory = new java.util.HashMap<>();
+        BigDecimal grossAmount = BigDecimal.ZERO;
+        for (CreateSaleRequest.SaleLine line : rawLines) {
+            if (line.inventoryId() == null) {
+                throw new BadRequestException("Each sale line needs a product.");
+            }
+            Inventory inventory = inventoryRepository.findById(line.inventoryId())
+                    .orElseThrow(() -> new BadRequestException("Inventory item not found."));
+            if (!inventory.getWholesaler().getId().equals(wholesalerId)) {
+                throw new BadRequestException("Inventory item does not belong to this wholesaler.");
+            }
+            BigDecimal quantity = positive(line.quantity(), "Quantity must be greater than zero.");
+            BigDecimal unitPrice = preciseMoney(line.unitPrice(), "Unit price cannot be negative.");
+            // Weight-priced line: gross = saleWeightKg × unitPrice (per-kg). Pack-priced (default):
+            // gross = quantity × unitPrice (per-pack). Inventory deducts `quantity` either way.
+            BigDecimal saleWeightKg = null;
+            if (line.saleWeightKg() != null && line.saleWeightKg().signum() > 0) {
+                saleWeightKg = money3(line.saleWeightKg());
+            } else if (line.saleWeightKg() != null && line.saleWeightKg().signum() < 0) {
+                throw new BadRequestException("Sale weight cannot be negative.");
+            }
+            BigDecimal lineGross = saleWeightKg != null
+                    ? cashMoney(saleWeightKg.multiply(unitPrice))
+                    : cashMoney(quantity.multiply(unitPrice));
+
+            BigDecimal cumulative = requestedByInventory.merge(inventory.getId(), quantity, BigDecimal::add);
+            if (inventory.getQuantityOnHand().compareTo(cumulative) < 0) {
+                throw new BadRequestException("Insufficient stock for selected product.");
+            }
+
+            ResolvedSaleLine r = new ResolvedSaleLine();
+            r.inventory = inventory;
+            r.quantity = quantity;
+            r.saleWeightKg = saleWeightKg;
+            r.unitPrice = unitPrice;
+            r.lineGross = lineGross;
+            resolved.add(r);
+            grossAmount = grossAmount.add(lineGross);
         }
-        BigDecimal grossAmount = saleWeightKg != null
-                ? cashMoney(saleWeightKg.multiply(unitPrice))
-                : cashMoney(quantity.multiply(unitPrice));
+        grossAmount = cashMoney(grossAmount);
+
         BigDecimal discountAmount = cashMoney(nonNegative(request.discountAmount(), "Discount cannot be negative."));
         if (discountAmount.compareTo(grossAmount) > 0) {
             throw new BadRequestException("Discount cannot exceed the sale amount.");
@@ -130,20 +182,25 @@ public class SaleService {
         // Net = gross - discount. Everything downstream (due, commission, supplier payable)
         // works off the net (discounted) amount.
         BigDecimal netAmount = cashMoney(grossAmount.subtract(discountAmount));
-        boolean oneTimeCustomer = request.wholesalerCustomerId() == null;
-        // Crate-borrow on a sale is now opt-in: only honoured when the caller explicitly
-        // passes a crateType + cratesGiven > 0. The SaleForm no longer sends these; crate
-        // movement to customers is handled via the dedicated Customer Crate Movement flow.
-        // One crate type per sale.
-        String saleCrateType = oneTimeCustomer ? null : clean(request.crateType());
-        Integer cratesGiven = oneTimeCustomer ? 0 : resolveSpecificCrates(request.cratesGiven());
-        if (cratesGiven > 0 && (saleCrateType == null || saleCrateType.isBlank())) {
-            throw new BadRequestException("Crate type is required when lending crates with a sale.");
-        }
-        if (inventory.getQuantityOnHand().compareTo(quantity) < 0) {
-            throw new BadRequestException("Insufficient stock for selected product.");
+
+        // Allocate the sale-level net across lines pro-rata to each line's gross, so per-supplier
+        // commission and payable stay correct. The last line absorbs the rounding remainder.
+        BigDecimal allocatedNet = BigDecimal.ZERO;
+        for (int i = 0; i < resolved.size(); i++) {
+            ResolvedSaleLine r = resolved.get(i);
+            BigDecimal lineNet;
+            if (i == resolved.size() - 1) {
+                lineNet = cashMoney(netAmount.subtract(allocatedNet));
+            } else if (grossAmount.signum() == 0) {
+                lineNet = BigDecimal.ZERO;
+            } else {
+                lineNet = cashMoney(netAmount.multiply(r.lineGross).divide(grossAmount, 0, RoundingMode.HALF_UP));
+            }
+            r.lineNet = lineNet;
+            allocatedNet = allocatedNet.add(lineNet);
         }
 
+        BigDecimal paidAmount = cashMoney(nonNegative(request.paymentAmount(), "Payment amount cannot be negative."));
         WholesalerCustomer customerAccount = oneTimeCustomer ? null : resolveCustomerAccount(wholesaler, request);
         String customerNameSnapshot = oneTimeCustomer ? requireText(request.customerName(), "Customer name is required.") : customerAccount.getCustomer().getName();
         String customerPhoneSnapshot = oneTimeCustomer ? requireText(request.customerPhone(), "Customer phone is required.") : customerAccount.getCustomer().getPhone();
@@ -154,6 +211,13 @@ public class SaleService {
             throw new BadRequestException("Paid amount cannot exceed sale amount. To settle prior due, use the customer settle endpoint after this sale.");
         }
         BigDecimal dueAmount = cashMoney(netAmount.subtract(paidAmount));
+
+        // Legacy single-type crate borrow (kept for back-compat). Multi-line crates ride via crateLines.
+        String saleCrateType = oneTimeCustomer ? null : clean(request.crateType());
+        Integer cratesGiven = oneTimeCustomer ? 0 : resolveSpecificCrates(request.cratesGiven());
+        if (cratesGiven > 0 && (saleCrateType == null || saleCrateType.isBlank())) {
+            throw new BadRequestException("Crate type is required when lending crates with a sale.");
+        }
 
         Sale sale = new Sale();
         sale.setWholesaler(wholesaler);
@@ -174,77 +238,120 @@ public class SaleService {
         sale.setStatus(PostStatus.POSTED);
         sale = saleRepository.save(sale);
 
-        WholesalerSupplier supplierAccount = inventory.getWholesalerSupplier();
-        // Commission is negotiated per shipment, usually after the sell. If the shipment's
-        // rate is already set, snapshot it; otherwise it stays 0 here and is computed at the
-        // shipment level once the rate is agreed.
-        org.example.model.SupplierDelivery delivery = inventory.getDelivery();
-        BigDecimal commissionRate = delivery != null && delivery.getCommissionRate() != null
-                ? delivery.getCommissionRate()
-                : BigDecimal.ZERO;
-        BigDecimal commissionAmount = cashMoney(netAmount.multiply(commissionRate).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP));
+        // Per line: snapshot commission from its lot, write the SaleItem, deduct inventory, ledger it.
+        // Accumulate per-supplier net so each supplier gets one balance update + one transaction.
+        java.util.Map<Long, WholesalerSupplier> supplierById = new java.util.LinkedHashMap<>();
+        java.util.Map<Long, BigDecimal> netBySupplier = new java.util.LinkedHashMap<>();
+        BigDecimal totalCommission = BigDecimal.ZERO;
+        for (ResolvedSaleLine r : resolved) {
+            Inventory inventory = r.inventory;
+            WholesalerSupplier supplierAccount = inventory.getWholesalerSupplier();
+            org.example.model.SupplierDelivery delivery = inventory.getDelivery();
+            BigDecimal commissionRate = delivery != null && delivery.getCommissionRate() != null
+                    ? delivery.getCommissionRate()
+                    : BigDecimal.ZERO;
+            BigDecimal commissionAmount = cashMoney(r.lineNet.multiply(commissionRate).divide(BigDecimal.valueOf(100), 2, RoundingMode.HALF_UP));
+            totalCommission = totalCommission.add(commissionAmount);
 
-        SaleItem item = new SaleItem();
-        item.setWholesaler(wholesaler);
-        item.setSale(sale);
-        item.setWholesalerSupplier(supplierAccount);
-        item.setDelivery(delivery);
-        item.setProduct(inventory.getProduct());
-        item.setCategory(inventory.getCategory());
-        item.setSubCategory(inventory.getSubCategory());
-        item.setQuantity(quantity);
-        item.setSaleWeightKg(saleWeightKg);
-        item.setUnit(inventory.getUnit());
-        item.setUnitPrice(unitPrice);
-        item.setLineTotal(netAmount);
-        item.setCommissionRate(commissionRate);
-        item.setCommissionAmount(commissionAmount);
-        saleItemRepository.save(item);
+            SaleItem item = new SaleItem();
+            item.setWholesaler(wholesaler);
+            item.setSale(sale);
+            item.setWholesalerSupplier(supplierAccount);
+            item.setDelivery(delivery);
+            item.setProduct(inventory.getProduct());
+            item.setCategory(inventory.getCategory());
+            item.setSubCategory(inventory.getSubCategory());
+            item.setQuantity(r.quantity);
+            item.setSaleWeightKg(r.saleWeightKg);
+            item.setUnit(inventory.getUnit());
+            item.setUnitPrice(r.unitPrice);
+            item.setLineTotal(r.lineNet);
+            item.setCommissionRate(commissionRate);
+            item.setCommissionAmount(commissionAmount);
+            saleItemRepository.save(item);
 
-        inventory.setQuantityOnHand(inventory.getQuantityOnHand().subtract(quantity));
-        inventory.setStatus(inventory.getQuantityOnHand().signum() == 0 ? InventoryStatus.STOCK_OUT : InventoryStatus.ACTIVE);
-        inventory = inventoryRepository.save(inventory);
+            inventory.setQuantityOnHand(inventory.getQuantityOnHand().subtract(r.quantity));
+            inventory.setStatus(inventory.getQuantityOnHand().signum() == 0 ? InventoryStatus.STOCK_OUT : InventoryStatus.ACTIVE);
+            r.inventory = inventoryRepository.save(inventory);
 
-        saveStockLedger(wholesaler, supplierAccount, inventory, sale, quantity);
-        BigDecimal customerBalance = oneTimeCustomer ? BigDecimal.ZERO : applyCustomerSaleBalance(wholesaler, customerAccount, sale, netAmount, paidAmount);
-        if (!oneTimeCustomer && cratesGiven > 0) {
-            applyCustomerCrateTypeMovement(wholesaler, customerAccount, sale, saleCrateType, cratesGiven);
+            saveStockLedger(wholesaler, supplierAccount, r.inventory, sale, r.quantity);
+
+            supplierById.putIfAbsent(supplierAccount.getId(), supplierAccount);
+            netBySupplier.merge(supplierAccount.getId(), r.lineNet, BigDecimal::add);
         }
-        BigDecimal supplierBalance = applySupplierSaleBalance(wholesaler, supplierAccount, sale, netAmount);
-        Transaction transaction = saveTransaction(wholesaler, customerAccount, supplierAccount, sale, netAmount, paidAmount, customerBalance);
 
-        Category category = inventory.getCategory();
+        BigDecimal customerBalance = oneTimeCustomer ? BigDecimal.ZERO
+                : applyCustomerSaleBalance(wholesaler, customerAccount, sale, netAmount, paidAmount);
+        applySaleCrates(wholesalerId, wholesaler, customerAccount, sale, oneTimeCustomer, request, saleCrateType, cratesGiven);
+
+        // One supplier balance update + one Transaction per supplier. The customer pays once, so
+        // the paid amount is split across suppliers pro-rata to their net for the transaction rows.
+        Long firstTransactionId = null;
+        BigDecimal firstSupplierBalance = null;
+        BigDecimal allocatedPaid = BigDecimal.ZERO;
+        int supplierIdx = 0;
+        int supplierCount = netBySupplier.size();
+        for (java.util.Map.Entry<Long, BigDecimal> entry : netBySupplier.entrySet()) {
+            WholesalerSupplier supplierAccount = supplierById.get(entry.getKey());
+            BigDecimal supplierNet = entry.getValue();
+            BigDecimal supplierBalance = applySupplierSaleBalance(wholesaler, supplierAccount, sale, supplierNet);
+            if (firstSupplierBalance == null) {
+                firstSupplierBalance = supplierBalance;
+            }
+
+            BigDecimal supplierPaid;
+            if (supplierIdx == supplierCount - 1) {
+                supplierPaid = cashMoney(paidAmount.subtract(allocatedPaid));
+            } else if (netAmount.signum() == 0) {
+                supplierPaid = BigDecimal.ZERO;
+            } else {
+                supplierPaid = cashMoney(paidAmount.multiply(supplierNet).divide(netAmount, 0, RoundingMode.HALF_UP));
+            }
+            allocatedPaid = allocatedPaid.add(supplierPaid);
+            Transaction tx = saveTransaction(wholesaler, customerAccount, supplierAccount, sale, supplierNet, supplierPaid, customerBalance);
+            if (firstTransactionId == null) {
+                firstTransactionId = tx.getId();
+            }
+            supplierIdx++;
+        }
+
+        // Response is single-product shaped: report the first line + sale-level totals. Multi-line
+        // callers refresh their views afterward, so first-line detail is enough for the toast/echo.
+        ResolvedSaleLine head = resolved.get(0);
+        Inventory headInv = head.inventory;
+        WholesalerSupplier headSupplier = headInv.getWholesalerSupplier();
+        Category category = headInv.getCategory();
         return new SaleResponse(
                 sale.getId(),
-                transaction.getId(),
+                firstTransactionId,
                 customerAccount == null ? null : customerAccount.getId(),
                 customerNameSnapshot,
                 customerPhoneSnapshot,
                 oneTimeCustomer ? "ONE_TIME" : "PERMANENT",
-                inventory.getId(),
-                inventory.getProduct().getId(),
-                inventory.getProduct().getName(),
+                headInv.getId(),
+                headInv.getProduct().getId(),
+                headInv.getProduct().getName(),
                 category == null ? null : category.getId(),
                 category == null ? null : category.getName(),
-                inventory.getSubCategory() == null ? null : inventory.getSubCategory().getId(),
-                inventory.getSubCategory() == null ? null : inventory.getSubCategory().getName(),
-                supplierAccount.getId(),
-                supplierAccount.getSupplier().getName(),
-                quantity,
-                saleWeightKg,
-                inventory.getUnit().name(),
-                unitPrice,
+                headInv.getSubCategory() == null ? null : headInv.getSubCategory().getId(),
+                headInv.getSubCategory() == null ? null : headInv.getSubCategory().getName(),
+                headSupplier.getId(),
+                headSupplier.getSupplier().getName(),
+                head.quantity,
+                head.saleWeightKg,
+                headInv.getUnit().name(),
+                head.unitPrice,
                 grossAmount,
                 discountAmount,
                 netAmount,
                 paidAmount,
                 dueAmount,
                 customerBalance,
-                commissionAmount,
-                supplierBalance,
+                totalCommission,
+                firstSupplierBalance,
                 saleCrateType,
                 cratesGiven,
-                inventory.getQuantityOnHand(),
+                headInv.getQuantityOnHand(),
                 sale.getSaleDate()
         );
     }
@@ -314,6 +421,44 @@ public class SaleService {
         }
 
         return balance.getBalance();
+    }
+
+    /**
+     * Move crates that ride along with a sale, in the SAME transaction so the sale is atomic.
+     * Walk-in (one-time) → SELL each crate line (delegates to CrateService, which snapshots cost,
+     * posts the SOLD ledger + cash). Permanent customer → BORROW all lines + optional deposit
+     * (delegates to PaymentService). Falls back to the legacy single-type field when no lines
+     * are supplied. All delegate calls join this transaction, so any failure rolls back the sale.
+     */
+    private void applySaleCrates(
+            Long wholesalerId,
+            Wholesaler wholesaler,
+            WholesalerCustomer customerAccount,
+            Sale sale,
+            boolean oneTimeCustomer,
+            CreateSaleRequest request,
+            String legacyCrateType,
+            Integer legacyCratesGiven
+    ) {
+        java.util.List<org.example.dto.CrateOpLine> lines = request.crateLines();
+        if (lines != null && !lines.isEmpty()) {
+            if (oneTimeCustomer) {
+                crateService.sellCrates(wholesalerId, new org.example.dto.SellCratesRequest(
+                        null, null, null, null, "Sold with sale #" + sale.getId(),
+                        request.cratePaymentMethod(), lines));
+            } else {
+                java.util.List<org.example.dto.CrateLineRequest> borrowLines = lines.stream()
+                        .map(l -> new org.example.dto.CrateLineRequest(l.crateType(), l.quantity()))
+                        .toList();
+                paymentService.borrowCustomerCrates(wholesalerId, new org.example.dto.CustomerCrateBorrowRequest(
+                        customerAccount.getId(), borrowLines, request.crateDeposit(), "Borrowed with sale #" + sale.getId()));
+            }
+            return;
+        }
+        // Legacy single-type borrow (kept for back-compat; the SaleForm now sends crateLines).
+        if (!oneTimeCustomer && legacyCratesGiven != null && legacyCratesGiven > 0) {
+            applyCustomerCrateTypeMovement(wholesaler, customerAccount, sale, legacyCrateType, legacyCratesGiven);
+        }
     }
 
     private void applyCustomerCrateTypeMovement(

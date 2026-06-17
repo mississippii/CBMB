@@ -6,7 +6,7 @@ import {
 import { useData } from '../../data/DataContext';
 import { useAuth } from '../auth/AuthContext';
 import { useToast } from '../../shared/components/Toast';
-import { TablePager, usePagination } from '../../shared/components';
+import { TablePager, usePagination, ConfirmDialog } from '../../shared/components';
 import SearchableSelect from '../../shared/components/SearchableSelect';
 import { queryKeys } from '../../services/queryKeys';
 import { formatDate } from '../../shared/utils/format';
@@ -51,6 +51,7 @@ const ShipmentsPage = () => {
   const [editForm, setEditForm] = useState({ name: '', note: '' });
   const [editError, setEditError] = useState('');
   const [isEditing, setIsEditing] = useState(false);
+  const [editConfirm, setEditConfirm] = useState(false);
 
   const supplierById = useMemo(
     () => new Map(suppliers.map((s) => [Number(s.id), s])),
@@ -154,15 +155,21 @@ const ShipmentsPage = () => {
     setEditError('');
   };
 
-  const handleEditSave = async () => {
+  const requestEditSave = () => {
     if (!editForm.name.trim()) { setEditError('Shipment name is required.'); return; }
+    setEditConfirm(true);
+  };
+
+  const handleEditSave = async () => {
     setIsEditing(true);
     setEditError('');
     try {
       await updateShipment(editTarget.id, { name: editForm.name.trim(), note: editForm.note.trim() });
       showToast('Shipment updated', 'success');
+      setEditConfirm(false);
       setEditTarget(null);
     } catch (err) {
+      setEditConfirm(false);
       setEditError(err instanceof Error ? err.message : 'Failed to update shipment.');
     } finally {
       setIsEditing(false);
@@ -189,21 +196,21 @@ const ShipmentsPage = () => {
 
   return (
     <div className="space-y-5">
-      {/* Header */}
-      <section className="inventory-hero">
-        <div className="flex items-start gap-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-md shadow-blue-500/30">
-            <Truck size={22} />
-          </div>
-          <div>
-            <span className="box-eyebrow">Shipments</span>
-            <h3>Supplier shipments</h3>
-          </div>
-        </div>
-      </section>
-
       <div className="profile-workspace">
         <main className="profile-main-stack">
+          {/* Header */}
+          <section className="inventory-hero">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-md shadow-blue-500/30">
+                <Truck size={22} />
+              </div>
+              <div>
+                <span className="box-eyebrow">Shipments</span>
+                <h3>Supplier shipments</h3>
+              </div>
+            </div>
+          </section>
+
           {/* All shipments table */}
           <div className="supplier-panel">
         <div className="mb-4 flex items-center justify-between">
@@ -543,7 +550,7 @@ const ShipmentsPage = () => {
             </div>
             <div className="modal-footer">
               <button type="button" onClick={() => setEditTarget(null)} className="btn-secondary" disabled={isEditing}>Cancel</button>
-              <button type="button" onClick={handleEditSave} className="btn-primary flex items-center gap-2" disabled={isEditing}>
+              <button type="button" onClick={requestEditSave} className="btn-primary flex items-center gap-2" disabled={isEditing}>
                 <Save size={15} /> {isEditing ? 'Saving…' : 'Save'}
               </button>
             </div>
@@ -622,6 +629,16 @@ const ShipmentsPage = () => {
           </div>
         );
       })()}
+
+      <ConfirmDialog
+        open={editConfirm}
+        title="Update shipment"
+        message="Save changes to this shipment?"
+        confirmLabel="Confirm & Save"
+        busy={isEditing}
+        onCancel={() => setEditConfirm(false)}
+        onConfirm={handleEditSave}
+      />
     </div>
   );
 };

@@ -111,7 +111,9 @@ const CustomerDetail = ({ customerId, onBack }) => {
 
   return (
     <div className="space-y-5">
-      <div className="supplier-profile-header" style={{ padding: '0.9rem 1.1rem' }}>
+      <div className="profile-workspace">
+        <main className="profile-main-stack">
+          <div className="supplier-profile-header" style={{ padding: '0.9rem 1.1rem' }}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             {onBack && (
@@ -156,10 +158,8 @@ const CustomerDetail = ({ customerId, onBack }) => {
             )}
           </div>
         </div>
-      </div>
+          </div>
 
-      <div className="profile-workspace">
-        <main className="profile-main-stack">
           {/* Payment Summary — full width, grows with history */}
           <div className="supplier-panel">
         <div className="flex items-center justify-between">

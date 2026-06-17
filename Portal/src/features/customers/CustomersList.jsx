@@ -4,7 +4,7 @@ import {
 } from 'lucide-react';
 import { useData } from '../../data/DataContext';
 import { useToast } from '../../shared/components/Toast';
-import { TablePager, usePagination } from '../../shared/components';
+import { TablePager, usePagination, ConfirmDialog } from '../../shared/components';
 import { formatMoney } from '../../shared/utils/format';
 import { isValidPhone, numberInRange, PHONE_HINT } from '../../shared/utils/validation';
 import CustomerDetail from './CustomerDetail';
@@ -44,10 +44,17 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
   const [formError, setFormError] = useState('');
   const [isSaving, setIsSaving] = useState(false);
   const [formData, setFormData] = useState(EMPTY_FORM);
+  const [confirm, setConfirm] = useState(null);
+  const [confirmBusy, setConfirmBusy] = useState(false);
+  const runConfirm = async () => {
+    if (!confirm?.run) return;
+    setConfirmBusy(true);
+    try { await confirm.run(); } finally { setConfirmBusy(false); setConfirm(null); }
+  };
 
   const handleField = (key) => (e) => setFormData((p) => ({ ...p, [key]: e.target.value }));
 
-  const handleAddCustomer = async () => {
+  const requestAddCustomer = () => {
     const name = formData.name.trim();
     const phone = normalizePhone(formData.phone);
     if (!name || !phone) {
@@ -62,6 +69,12 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
       setFormError('Opening due must be zero or a positive amount.');
       return;
     }
+    setConfirm({ title: 'Add customer', label: 'Confirm & Add', message: `Add "${name}" as a new customer?`, run: handleAddCustomer });
+  };
+
+  const handleAddCustomer = async () => {
+    const name = formData.name.trim();
+    const phone = normalizePhone(formData.phone);
     setIsSaving(true);
     setFormError('');
     try {
@@ -228,7 +241,7 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
             </div>
             <div className="modal-footer">
               <button onClick={closeForm} className="btn-secondary" disabled={isSaving}>Cancel</button>
-              <button onClick={handleAddCustomer} disabled={isSaving} className="btn-primary flex items-center gap-2">
+              <button onClick={requestAddCustomer} disabled={isSaving} className="btn-primary flex items-center gap-2">
                 {isSaving ? 'Saving…' : (<><Plus size={15} /> Add Customer</>)}
               </button>
             </div>
@@ -413,6 +426,16 @@ const CustomersList = ({ autoOpenId = null, onProfileOpened }) => {
           </div>
         </div>
       </aside>
+
+      <ConfirmDialog
+        open={!!confirm}
+        title={confirm?.title}
+        message={confirm?.message}
+        confirmLabel={confirm?.label}
+        busy={confirmBusy}
+        onCancel={() => setConfirm(null)}
+        onConfirm={runConfirm}
+      />
     </div>
   );
 };

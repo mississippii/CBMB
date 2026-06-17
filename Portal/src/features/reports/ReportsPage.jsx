@@ -23,40 +23,40 @@ const SUB_TABS = [
 
 const ReportsPage = () => {
   const [tab, setTab] = useState('pnl');
-  return (
-    <div className="space-y-5">
-      <section className="inventory-hero no-print">
-        <div className="flex items-start gap-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-md shadow-blue-500/30">
-            <BarChart3 size={22} />
-          </div>
-          <div>
-            <span className="box-eyebrow">Reports</span>
-            <h3>Business reports</h3>
-          </div>
+  // Header + sub-tabs render at the top of the active report's left column,
+  // so the right column starts level with it.
+  const header = (
+    <section className="inventory-hero no-print">
+      <div className="flex items-start gap-3">
+        <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-blue-500 to-indigo-600 text-white shadow-md shadow-blue-500/30">
+          <BarChart3 size={22} />
         </div>
-
-        <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white p-1 text-xs font-semibold shadow-sm">
-          {SUB_TABS.map(({ value, label, icon: Icon }) => (
-            <button
-              key={value}
-              type="button"
-              onClick={() => setTab(value)}
-              className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 transition ${
-                tab === value
-                  ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm'
-                  : 'text-slate-600 hover:text-slate-900'
-              }`}
-            >
-              <Icon size={13} /> {label}
-            </button>
-          ))}
+        <div>
+          <span className="box-eyebrow">Reports</span>
+          <h3>Business reports</h3>
         </div>
-      </section>
+      </div>
 
-      {tab === 'pnl' ? <PnLReport /> : <SalesBreakdown />}
-    </div>
+      <div className="inline-flex items-center gap-1 rounded-full border border-slate-200 bg-white p-1 text-xs font-semibold shadow-sm">
+        {SUB_TABS.map(({ value, label, icon: Icon }) => (
+          <button
+            key={value}
+            type="button"
+            onClick={() => setTab(value)}
+            className={`inline-flex items-center gap-1.5 rounded-full px-3.5 py-1.5 transition ${
+              tab === value
+                ? 'bg-gradient-to-r from-blue-600 to-indigo-600 text-white shadow-sm'
+                : 'text-slate-600 hover:text-slate-900'
+            }`}
+          >
+            <Icon size={13} /> {label}
+          </button>
+        ))}
+      </div>
+    </section>
   );
+
+  return tab === 'pnl' ? <PnLReport header={header} /> : <SalesBreakdown header={header} />;
 };
 
 // ============================================================================
@@ -86,7 +86,7 @@ const DeltaBadge = ({ current, prior, light }) => {
   );
 };
 
-const PnLReport = () => {
+const PnLReport = ({ header }) => {
   const { admin } = useAuth();
   const [fromDate, setFromDate] = useState(todayLocalIso());
   const [toDate, setToDate] = useState(todayLocalIso());
@@ -140,6 +140,7 @@ const PnLReport = () => {
   return (
     <div className="profile-workspace">
       <main className="profile-main-stack">
+        {header}
         {isLoading && <Loader />}
         {queryError && <ErrorBanner message={queryError.message || 'Failed to load report.'} />}
 
@@ -483,7 +484,7 @@ const GROUP_BY = [
   { value: 'shipment',    label: 'By Shipment' },
 ];
 
-const SalesBreakdown = () => {
+const SalesBreakdown = ({ header }) => {
   const { admin } = useAuth();
   const { catalogProducts, subCategories, suppliers, fetchSalesAggregate } = useData();
 
@@ -544,6 +545,7 @@ const SalesBreakdown = () => {
   return (
     <div className="profile-workspace">
       <main className="profile-main-stack">
+      {header}
       <section className="grid grid-cols-2 gap-3 md:grid-cols-4 lg:grid-cols-6">
         <KpiTile label="Total Sold" value={formatMoney(summary.totalSold)} tone="blue" />
         <KpiTile label="Cash at Sale" value={formatMoney(summary.cashAtSale)} tone="emerald" />

@@ -78,7 +78,7 @@ const ShopExpensesPage = () => {
     return {
       total,
       count: active.length,
-      topCategories: Array.from(byCategory.entries()).sort((a, b) => b[1] - a[1]).slice(0, 3),
+      byCategory: Array.from(byCategory.entries()).sort((a, b) => b[1] - a[1]),
     };
   }, [expenses]);
 
@@ -121,22 +121,21 @@ const ShopExpensesPage = () => {
 
   return (
     <div className="space-y-5">
-      {/* Header */}
-      <section className="inventory-hero">
-        <div className="flex items-start gap-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-rose-100 text-rose-600">
-            <Wallet size={22} />
-          </div>
-          <div>
-            <span className="box-eyebrow">Shop Expenses</span>
-            <h3>Shop overhead</h3>
-            <p>Rent, salary, utility, lunch, tax</p>
-          </div>
-        </div>
-      </section>
-
       <div className="profile-workspace">
         <main className="profile-main-stack">
+          {/* Header */}
+          <section className="inventory-hero" style={{ padding: '0.75rem 1rem' }}>
+            <div className="flex items-center gap-3">
+              <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-full bg-rose-100 text-rose-600">
+                <Wallet size={18} />
+              </div>
+              <div className="leading-tight">
+                <h3>Shop Overhead</h3>
+                <span className="text-xs text-slate-500">Shop expense</span>
+              </div>
+            </div>
+          </section>
+
           {/* Entries */}
           <section className="supplier-panel">
         <div className="flex items-center justify-between">
@@ -197,18 +196,26 @@ const ShopExpensesPage = () => {
         <h3 className="mb-3 flex items-center gap-2"><Filter size={16} className="text-blue-600" /> Filters</h3>
         <DateRangeFilter from={startDate} to={endDate} setFrom={setStartDate} setTo={setEndDate} />
 
-        <div className="mt-4 grid grid-cols-1 gap-3">
+        <div className="mt-4">
           <div className="rounded-2xl border border-rose-200 bg-gradient-to-br from-rose-50 to-white px-3.5 py-3 shadow-sm">
             <p className="text-[10px] font-bold uppercase tracking-wider text-rose-600">Period Total</p>
             <p className="mt-1 text-xl font-extrabold leading-tight text-rose-600 tabular-nums">{fmt(totals.total)}</p>
             <p className="text-[11px] text-slate-400">{totals.count} entries</p>
           </div>
-          {totals.topCategories.map(([name, amount]) => (
-            <div key={name} className="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 shadow-sm">
-              <p className="truncate text-[10px] font-bold uppercase tracking-wider text-slate-500">{name}</p>
-              <p className="mt-1 text-xl font-extrabold leading-tight text-slate-900 tabular-nums">{fmt(amount)}</p>
+
+          {totals.byCategory.length > 0 && (
+            <div className="mt-3">
+              <p className="mb-1.5 text-[10px] font-bold uppercase tracking-wider text-slate-400">By category</p>
+              <div className="divide-y divide-slate-100">
+                {totals.byCategory.map(([name, amount]) => (
+                  <div key={name} className="flex items-center justify-between gap-3 py-1.5">
+                    <span className="min-w-0 truncate text-xs font-medium text-slate-600">{name}</span>
+                    <span className="shrink-0 text-sm font-bold text-slate-900 tabular-nums">{fmt(amount)}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-          ))}
+          )}
         </div>
       </section>
 

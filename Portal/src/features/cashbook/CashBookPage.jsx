@@ -130,44 +130,47 @@ const CashBookPage = () => {
 
   return (
     <div className="space-y-5">
-      {/* Header */}
-      <section className="inventory-hero">
-        <div className="flex items-start gap-3">
-          <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-teal-500 to-emerald-600 text-white shadow-md shadow-teal-500/30">
-            <BookOpenCheck size={22} />
-          </div>
-          <div>
-            <span className="box-eyebrow">Cash Book</span>
-            <h3>Day-end reconciliation</h3>
-            <p>{prettyDate(date)}</p>
-          </div>
-        </div>
+      <div className="profile-workspace">
+        <main className="profile-main-stack">
+          {/* Header */}
+          <section className="inventory-hero">
+            <div className="flex items-start gap-3">
+              <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-teal-500 to-emerald-600 text-white shadow-md shadow-teal-500/30">
+                <BookOpenCheck size={22} />
+              </div>
+              <div>
+                <span className="box-eyebrow">Cash Book</span>
+                <h3>Day-end reconciliation</h3>
+                <p>{prettyDate(date)}</p>
+              </div>
+            </div>
 
-        <div className="flex flex-wrap items-center gap-2">
-          <div className="inline-flex items-center overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
-            <button type="button" onClick={() => setDate(shiftIso(date, -1))} className="p-2 text-slate-500 hover:bg-slate-50" aria-label="Previous day">
-              <ChevronLeft size={16} />
-            </button>
-            <label className="flex items-center gap-1.5 border-x border-slate-200 px-3 py-1.5">
-              <Calendar size={14} className="text-slate-400" />
-              <input type="date" value={date} max={todayIso()} onChange={(e) => setDate(e.target.value)} className="bg-transparent text-sm font-bold text-slate-800 outline-none" />
-            </label>
-            <button type="button" onClick={() => setDate(shiftIso(date, 1))} disabled={date >= todayIso()} className="p-2 text-slate-500 hover:bg-slate-50 disabled:opacity-30" aria-label="Next day">
-              <ChevronRight size={16} />
-            </button>
-          </div>
-          <span className={`badge ${closed ? 'badge-emerald' : 'badge-amber'} gap-1`}>
-            {closed ? <Lock size={11} /> : <Unlock size={11} />} {closed ? 'Closed' : 'Open'}
-          </span>
-        </div>
-      </section>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="inline-flex items-center overflow-hidden rounded-xl border border-slate-200 bg-white shadow-sm">
+                <button type="button" onClick={() => setDate(shiftIso(date, -1))} className="p-2 text-slate-500 hover:bg-slate-50" aria-label="Previous day">
+                  <ChevronLeft size={16} />
+                </button>
+                <label className="flex items-center gap-1.5 border-x border-slate-200 px-3 py-1.5">
+                  <Calendar size={14} className="text-slate-400" />
+                  <input type="date" value={date} max={todayIso()} onChange={(e) => setDate(e.target.value)} className="bg-transparent text-sm font-bold text-slate-800 outline-none" />
+                </label>
+                <button type="button" onClick={() => setDate(shiftIso(date, 1))} disabled={date >= todayIso()} className="p-2 text-slate-500 hover:bg-slate-50 disabled:opacity-30" aria-label="Next day">
+                  <ChevronRight size={16} />
+                </button>
+              </div>
+              <span
+                className={`badge ${closed ? 'badge-rose' : 'badge-emerald'} gap-1`}
+                style={{ color: closed ? '#FF0000' : '#008000' }}
+              >
+                {closed ? <Lock size={11} /> : <Unlock size={11} />} {closed ? 'Closed' : 'Open'}
+              </span>
+            </div>
+          </section>
 
-      {isLoading ? (
-        <div className="empty-state">Loading cash book…</div>
-      ) : (
-        <>
-          <div className="profile-workspace">
-            <main className="profile-main-stack">
+          {isLoading ? (
+            <div className="empty-state">Loading cash book…</div>
+          ) : (
+            <>
               {/* Day summary */}
               <section className="supplier-panel">
             <div className="flex items-center justify-between">
@@ -216,44 +219,47 @@ const CashBookPage = () => {
             </section>
           </div>
 
-            </main>
+            </>
+          )}
+        </main>
 
-            <aside className="profile-side-stack">
+        {!isLoading && (
+        <aside className="profile-side-stack">
               {/* Reconciliation */}
               <section className="supplier-panel">
             <h3 className="flex items-center gap-2"><Wallet size={16} className="text-teal-600" /> Drawer Reconciliation</h3>
 
-            <div className="mt-4 grid grid-cols-1 gap-3 md:grid-cols-2 lg:grid-cols-4">
-              <div className="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 shadow-sm">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Opening float</label>
+            <div className="mt-3 divide-y divide-slate-100">
+              <div className="flex items-center justify-between gap-3 py-2">
+                <label className="shrink-0 whitespace-nowrap text-xs font-semibold text-slate-600">Opening float</label>
                 <input
                   type="number" inputMode="decimal" step="0.01"
                   value={openingInput} onChange={(e) => setOpeningInput(e.target.value)}
                   disabled={closed || busy}
-                  className="input-field mt-1.5 w-full !py-2 text-base font-extrabold disabled:bg-slate-100"
+                  className="input-field no-spinner w-24 !py-1.5 text-right text-sm font-bold tabular-nums disabled:bg-slate-100"
                   placeholder="0.00"
                 />
               </div>
 
-              <div className="flex flex-col justify-center rounded-2xl border border-slate-200 bg-white px-3.5 py-3 shadow-sm">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Net movement</p>
-                <p className={`mt-1 text-xl font-extrabold tabular-nums ${net >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
+              <div className="flex items-center justify-between gap-3 py-2">
+                <span className="shrink-0 whitespace-nowrap text-xs font-semibold text-slate-600">Net movement</span>
+                <span className={`text-sm font-bold tabular-nums ${net >= 0 ? 'text-emerald-700' : 'text-rose-700'}`}>
                   {net >= 0 ? '+ ' : '− '}{fmt(Math.abs(net))}
-                </p>
+                </span>
               </div>
 
-              <div className="flex flex-col justify-center rounded-2xl border border-teal-200 bg-gradient-to-br from-teal-50 to-white px-3.5 py-3 shadow-sm">
-                <p className="text-[10px] font-bold uppercase tracking-wider text-teal-600">Expected in drawer</p>
-                <p className="mt-1 text-xl font-extrabold text-teal-700 tabular-nums">{fmt(expected)}</p>
+              <div className="flex items-center justify-between gap-3 py-2">
+                <span className="shrink-0 whitespace-nowrap text-xs font-semibold text-slate-600">Expected in drawer</span>
+                <span className="text-sm font-bold text-teal-700 tabular-nums">{fmt(expected)}</span>
               </div>
 
-              <div className="rounded-2xl border border-slate-200 bg-white px-3.5 py-3 shadow-sm">
-                <label className="text-[10px] font-bold uppercase tracking-wider text-slate-500">Counted cash</label>
+              <div className="flex items-center justify-between gap-3 py-2">
+                <label className="shrink-0 whitespace-nowrap text-xs font-semibold text-slate-600">Counted cash</label>
                 <input
                   type="number" inputMode="decimal" step="0.01"
                   value={countedInput} onChange={(e) => setCountedInput(e.target.value)}
                   disabled={closed || busy}
-                  className="input-field mt-1.5 w-full !py-2 text-base font-extrabold disabled:bg-slate-100"
+                  className="input-field no-spinner w-24 !py-1.5 text-right text-sm font-bold tabular-nums disabled:bg-slate-100"
                   placeholder="0.00"
                 />
               </div>
@@ -290,13 +296,12 @@ const CashBookPage = () => {
             </div>
           </section>
 
-            </aside>
-          </div>
+        </aside>
+        )}
+      </div>
 
-          {queryError && (
-            <div className="status-error"><span>!</span><span>{queryError.message || 'Failed to load the cash book.'}</span></div>
-          )}
-        </>
+      {queryError && !isLoading && (
+        <div className="status-error"><span>!</span><span>{queryError.message || 'Failed to load the cash book.'}</span></div>
       )}
     </div>
   );

@@ -2,12 +2,13 @@ import { useCallback, useEffect, useState } from 'react'
 import {
   ArrowLeft, Phone, Building2, MapPin, Percent, DollarSign,
   AlertCircle, Receipt, Package, Boxes, Pencil, UserCheck,
-  Power, RotateCcw, FileText, Tag, Truck, Check, ChevronDown, ChevronUp,
+  Power, RotateCcw, Tag, Truck, Check, ChevronDown, ChevronUp,
+  Plus, Trash2,
 } from 'lucide-react'
 import { useData } from '../../data/DataContext'
 import { useAuth } from '../auth/AuthContext'
 import { useToast } from '../../shared/components/Toast'
-import { TablePager, usePagination } from '../../shared/components'
+import { TablePager, usePagination, ConfirmDialog } from '../../shared/components'
 import { formatDate } from '../../shared/utils/format'
 import { postJson, apiPaths } from '../../services/apiClient'
 
@@ -76,7 +77,8 @@ const SupplierDetail = ({ supplierId, onBack }) => {
   // Supplier expense + statement
   const [showExpenseModal, setShowExpenseModal] = useState(false)
   const [categories, setCategories] = useState([])
-  const [expenseForm, setExpenseForm] = useState({ deliveryId: '', categoryId: '', amount: '', note: '' })
+  const [expenseForm, setExpenseForm] = useState({ deliveryId: '', lines: [] })
+  const [expenseDraft, setExpenseDraft] = useState({ categoryId: '', amount: '', note: '' })
   const [expenseError, setExpenseError] = useState('')
   const [isSavingExpense, setIsSavingExpense] = useState(false)
 
@@ -89,6 +91,16 @@ const SupplierDetail = ({ supplierId, onBack }) => {
   const [isSavingCommission, setIsSavingCommission] = useState(false)
   const [settlingId, setSettlingId] = useState(null)
   const [settleTarget, setSettleTarget] = useState(null)  // shipment awaiting confirm
+
+  // Generic two-step confirmation: { title, label, message, run }. The button validates and
+  // opens this; the dialog runs the actual save so every submission warns first.
+  const [confirm, setConfirm] = useState(null)
+  const [confirmBusy, setConfirmBusy] = useState(false)
+  const runConfirm = async () => {
+    if (!confirm?.run) return
+    setConfirmBusy(true)
+    try { await confirm.run() } finally { setConfirmBusy(false); setConfirm(null) }
+  }
 
   const handleConfirmSettle = async () => {
     if (!settleTarget) return
@@ -138,12 +150,17 @@ const SupplierDetail = ({ supplierId, onBack }) => {
     setShowCommissionModal(true)
   }
 
-  const handleCommissionSave = async () => {
+  const requestCommissionSave = () => {
     if (!commissionForm.deliveryId) { setCommissionError('Select the shipment to set commission for.'); return }
     const rate = Number(commissionForm.rate)
     if (commissionForm.rate === '' || Number.isNaN(rate) || rate < 0 || rate > 100) {
       setCommissionError('Enter a commission rate between 0 and 100.'); return
     }
+    setConfirm({ title: 'Set commission', label: 'Confirm & Save', message: `Set commission for Lot #${commissionForm.deliveryId} to ${rate}%? This updates the supplier's payable.`, run: handleCommissionSave })
+  }
+
+  const handleCommissionSave = async () => {
+    const rate = Number(commissionForm.rate)
     setIsSavingCommission(true)
     setCommissionError('')
     try {
@@ -160,7 +177,8 @@ const SupplierDetail = ({ supplierId, onBack }) => {
 
 
   const openExpenseModal = async (deliveryId = '') => {
-    setExpenseForm({ deliveryId: deliveryId ? String(deliveryId) : '', categoryId: '', amount: '', note: '' })
+    setExpenseForm({ deliveryId: deliveryId ? String(deliveryId) : '', lines: [] })
+    setExpenseDraft({ categoryId: '', amount: '', note: '' })
     setExpenseError('')
     setShowExpenseModal(true)
     if (categories.length === 0 && admin?.wholesalerId) {
@@ -171,27 +189,50 @@ const SupplierDetail = ({ supplierId, onBack }) => {
     }
   }
 
+  const categoryName = (id) => categories.find((c) => String(c.id) === String(id))?.name || `#${id}`
+
+  // Add the current draft (category + amount) to the list, then clear it for the next one.
+  const addExpenseLine = () => {
+    const amt = Number(expenseDraft.amount)
+    if (!expenseDraft.categoryId) { setExpenseError('Select a category.'); return }
+    if (!amt || amt <= 0) { setExpenseError('Enter an amount greater than zero.'); return }
+    setExpenseForm((p) => ({ ...p, lines: [...p.lines, { ...expenseDraft }] }))
+    setExpenseDraft({ categoryId: '', amount: '', note: '' })
+    setExpenseError('')
+  }
+
+  const removeExpenseLine = (idx) =>
+    setExpenseForm((p) => ({ ...p, lines: p.lines.filter((_, i) => i !== idx) }))
+
+  const expenseTotal = expenseForm.lines.reduce((sum, l) => sum + (Number(l.amount) || 0), 0)
+
+  const requestExpenseSave = () => {
+    if (!expenseForm.deliveryId) { setExpenseError('Select the shipment these expenses belong to.'); return }
+    if (expenseForm.lines.length === 0) { setExpenseError('Add at least one expense to the list.'); return }
+    const n = expenseForm.lines.length
+    setConfirm({ title: 'Record expenses', label: `Confirm & Save`, message: `Record ${n} expense${n === 1 ? '' : 's'} (৳${Math.ceil(expenseTotal).toLocaleString()}) against this shipment? The full amount becomes a supplier due.`, run: handleExpenseSave })
+  }
+
   const handleExpenseSave = async () => {
-    const amount = Number(expenseForm.amount)
-    if (!expenseForm.deliveryId) { setExpenseError('Select the shipment this expense belongs to.'); return }
-    if (!amount || amount <= 0) { setExpenseError('Enter a valid expense amount.'); return }
-    if (!expenseForm.categoryId) { setExpenseError('Select an expense category.'); return }
+    const lines = expenseForm.lines
     setIsSavingExpense(true)
     setExpenseError('')
     try {
-      await postJson(apiPaths.expenseCreate(admin.wholesalerId), {
+      await postJson(apiPaths.expenseCreateBatch(admin.wholesalerId), {
         wholesalerSupplierId: Number(supplierId),
         deliveryId: Number(expenseForm.deliveryId),
-        categoryId: Number(expenseForm.categoryId),
-        amount,
-        paidAmount: 0, // wholesaler fronts the full amount → full amount is the supplier's due
-        note: expenseForm.note?.trim() || null,
+        lines: lines.map((l) => ({
+          categoryId: Number(l.categoryId),
+          amount: Number(l.amount),
+          paidAmount: 0, // wholesaler fronts the full amount → full amount is the supplier's due
+          note: l.note?.trim() || null,
+        })),
       })
       setShowExpenseModal(false)
-      showToast('Expense recorded', 'success')
+      showToast(lines.length > 1 ? `${lines.length} expenses recorded` : 'Expense recorded', 'success')
       loadShipments()
     } catch (error) {
-      setExpenseError(error.message || 'Failed to record expense.')
+      setExpenseError(error.message || 'Failed to record expenses.')
     } finally {
       setIsSavingExpense(false)
     }
@@ -224,16 +265,17 @@ const SupplierDetail = ({ supplierId, onBack }) => {
     setShowEditModal(true)
   }
 
-  const handleEditSave = async () => {
-    if (!editForm.name.trim()) {
-      setEditError('Supplier name is required.')
-      return
-    }
+  const requestEditSave = () => {
+    if (!editForm.name.trim()) { setEditError('Supplier name is required.'); return }
     const rate = Number(editForm.commissionRate)
     if (editForm.commissionRate !== '' && (Number.isNaN(rate) || rate < 0 || rate > 100)) {
       setEditError('Commission rate must be between 0 and 100.')
       return
     }
+    setConfirm({ title: 'Update supplier', label: 'Confirm & Save', message: 'Save changes to this supplier?', run: handleEditSave })
+  }
+
+  const handleEditSave = async () => {
     setIsSavingEdit(true)
     setEditError('')
     try {
@@ -344,8 +386,10 @@ const SupplierDetail = ({ supplierId, onBack }) => {
 
   return (
     <div className="space-y-5">
-      {/* HEADER */}
-      <div className="supplier-profile-header" style={{ padding: '0.9rem 1.1rem' }}>
+      <div className="profile-workspace">
+        <main className="profile-main-stack">
+          {/* HEADER */}
+          <div className="supplier-profile-header" style={{ padding: '0.9rem 1.1rem' }}>
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3 min-w-0">
             {onBack && (
@@ -389,10 +433,8 @@ const SupplierDetail = ({ supplierId, onBack }) => {
             )}
           </div>
         </div>
-      </div>
+          </div>
 
-      <div className="profile-workspace">
-        <main className="profile-main-stack">
           {/* SHIPMENTS (per-lot consignment accounting) */}
           <div className="supplier-panel">
         <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
@@ -745,7 +787,7 @@ const SupplierDetail = ({ supplierId, onBack }) => {
             </div>
             <div className="modal-footer">
               <button onClick={() => setShowEditModal(false)} className="btn-secondary" disabled={isSavingEdit}>Cancel</button>
-              <button onClick={handleEditSave} disabled={isSavingEdit} className="btn-primary flex items-center gap-2">
+              <button onClick={requestEditSave} disabled={isSavingEdit} className="btn-primary flex items-center gap-2">
                 {isSavingEdit ? 'Saving…' : (<><Pencil size={14} /> Save Changes</>)}
               </button>
             </div>
@@ -862,7 +904,7 @@ const SupplierDetail = ({ supplierId, onBack }) => {
             </div>
             <div className="modal-footer">
               <button onClick={() => setShowCommissionModal(false)} className="btn-secondary" disabled={isSavingCommission}>Cancel</button>
-              <button onClick={handleCommissionSave} disabled={isSavingCommission} className="btn-primary flex items-center gap-2">
+              <button onClick={requestCommissionSave} disabled={isSavingCommission} className="btn-primary flex items-center gap-2">
                 <Check size={14} /> {isSavingCommission ? 'Saving…' : 'Save Rate'}
               </button>
             </div>
@@ -873,93 +915,133 @@ const SupplierDetail = ({ supplierId, onBack }) => {
       {/* EXPENSE MODAL */}
       {showExpenseModal && (
         <div className="modal-overlay">
-          <div className="modal-content" style={{ maxWidth: '34rem' }}>
+          <div className="modal-content" style={{ maxWidth: '30rem' }}>
             <div className="modal-header">
               <div className="flex items-center gap-2.5">
                 <div className="modal-icon-circle bg-blue-100 text-blue-700">
                   <Receipt size={18} />
                 </div>
                 <div>
-                  <h2>Record Expense for {supplier.name}</h2>
+                  <h2>Record Expenses for {supplier.name}</h2>
                 </div>
               </div>
               <button onClick={() => setShowExpenseModal(false)} className="modal-close-btn">✕</button>
             </div>
-            <div className="modal-body">
-              <div className="form-grid">
-                <div className="form-field form-field-full">
-                  <label className="form-label"><Truck size={13} /> Shipment (lot) <span className="text-red-500">*</span></label>
+            <div className="modal-body max-h-[72vh] overflow-y-auto">
+              <div className="form-field">
+                <label className="form-label"><Truck size={13} /> Shipment (lot) <span className="text-red-500">*</span></label>
+                <select
+                  value={expenseForm.deliveryId}
+                  onChange={(e) => setExpenseForm((p) => ({ ...p, deliveryId: e.target.value }))}
+                  className="input-field"
+                  autoFocus
+                >
+                  <option value="">Select shipment…</option>
+                  {shipments.map((s) => (
+                    <option key={s.id} value={s.id}>
+                      {s.name || `Lot #${s.id}`}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
+              {/* Entry row — category + amount + Add inline, note below. Reuse for each expense. */}
+              <div className="mt-3 rounded-xl border border-slate-200 bg-slate-50/60 p-2.5">
+                <div className="flex items-end gap-2">
                   <select
-                    value={expenseForm.deliveryId}
-                    onChange={(e) => setExpenseForm((p) => ({ ...p, deliveryId: e.target.value }))}
-                    className="input-field"
-                    autoFocus
+                    value={expenseDraft.categoryId}
+                    onChange={(e) => { setExpenseDraft((p) => ({ ...p, categoryId: e.target.value })); setExpenseError('') }}
+                    className="input-field flex-1 min-w-0 basis-0"
                   >
-                    <option value="">Select shipment…</option>
-                    {shipments.map((s) => (
-                      <option key={s.id} value={s.id}>
-                        {s.name || `Lot #${s.id}`}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div className="form-field">
-                  <label className="form-label"><Tag size={13} /> Category <span className="text-red-500">*</span></label>
-                  <select
-                    value={expenseForm.categoryId}
-                    onChange={(e) => setExpenseForm((p) => ({ ...p, categoryId: e.target.value }))}
-                    className="input-field"
-                  >
-                    <option value="">Select category…</option>
+                    <option value="">Category…</option>
                     {categories.map((c) => (
                       <option key={c.id} value={c.id}>{c.name}</option>
                     ))}
                   </select>
-                </div>
-                <div className="form-field">
-                  <label className="form-label"><DollarSign size={13} /> Expense Amount <span className="text-red-500">*</span></label>
-                  <div className="input-with-suffix">
+                  <div className="input-with-suffix flex-1 min-w-0 basis-0">
                     <input
                       type="number"
                       min="0"
                       step="1"
-                      value={expenseForm.amount}
-                      onChange={(e) => setExpenseForm((p) => ({ ...p, amount: e.target.value }))}
+                      value={expenseDraft.amount}
+                      onChange={(e) => { setExpenseDraft((p) => ({ ...p, amount: e.target.value })); setExpenseError('') }}
+                      onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addExpenseLine() } }}
                       className="input-field"
                       placeholder="0"
                     />
                     <span className="input-suffix">৳</span>
                   </div>
-                  <p className="mt-1 text-xs text-slate-500">
-                    You pay this now; the full amount becomes a due the supplier owes you.
-                  </p>
+                  <button
+                    type="button"
+                    onClick={addExpenseLine}
+                    className="btn-primary shrink-0 flex items-center gap-1.5"
+                    title="Add to list"
+                  >
+                    <Plus size={15} /> Add
+                  </button>
                 </div>
-                <div className="form-field">
-                  <label className="form-label"><FileText size={13} /> Note</label>
-                  <input
-                    type="text"
-                    value={expenseForm.note}
-                    onChange={(e) => setExpenseForm((p) => ({ ...p, note: e.target.value }))}
-                    className="input-field"
-                    placeholder="Optional detail"
-                  />
-                </div>
+                <input
+                  type="text"
+                  value={expenseDraft.note}
+                  onChange={(e) => setExpenseDraft((p) => ({ ...p, note: e.target.value }))}
+                  onKeyDown={(e) => { if (e.key === 'Enter') { e.preventDefault(); addExpenseLine() } }}
+                  className="input-field mt-2"
+                  placeholder="Note (optional)"
+                />
               </div>
+
+              {/* Added expenses */}
+              {expenseForm.lines.length > 0 && (
+                <div className="mt-3 space-y-1.5">
+                  {expenseForm.lines.map((line, idx) => (
+                    <div key={idx} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-2 text-sm">
+                      <div className="min-w-0 flex-1">
+                        <span className="font-medium text-slate-800">{categoryName(line.categoryId)}</span>
+                        {line.note && <span className="ml-2 text-xs text-slate-400">{line.note}</span>}
+                      </div>
+                      <span className="font-semibold text-slate-900">{formatCurrency(line.amount)}</span>
+                      <button
+                        type="button"
+                        onClick={() => removeExpenseLine(idx)}
+                        className="icon-btn icon-btn-danger shrink-0"
+                        title="Remove"
+                      >
+                        <Trash2 size={14} />
+                      </button>
+                    </div>
+                  ))}
+                  <div className="statement-net mt-2">
+                    <span>Total ({expenseForm.lines.length} line{expenseForm.lines.length === 1 ? '' : 's'})</span>
+                    <strong>{formatCurrency(expenseTotal)}</strong>
+                  </div>
+                </div>
+              )}
+
               {expenseError && (
-                <div className="status-error mt-4">
+                <div className="status-error mt-3">
                   <span>!</span><span>{expenseError}</span>
                 </div>
               )}
             </div>
             <div className="modal-footer">
               <button onClick={() => setShowExpenseModal(false)} className="btn-secondary" disabled={isSavingExpense}>Cancel</button>
-              <button onClick={handleExpenseSave} disabled={isSavingExpense} className="btn-primary flex items-center gap-2">
-                {isSavingExpense ? 'Saving…' : (<><Receipt size={14} /> Record Expense</>)}
+              <button onClick={requestExpenseSave} disabled={isSavingExpense || expenseForm.lines.length === 0} className="btn-primary flex items-center gap-2">
+                {isSavingExpense ? 'Saving…' : (<><Receipt size={14} /> {expenseForm.lines.length > 1 ? `Record ${expenseForm.lines.length} Expenses` : 'Record Expense'}</>)}
               </button>
             </div>
           </div>
         </div>
       )}
+
+      <ConfirmDialog
+        open={!!confirm}
+        title={confirm?.title}
+        message={confirm?.message}
+        confirmLabel={confirm?.label}
+        busy={confirmBusy}
+        onCancel={() => setConfirm(null)}
+        onConfirm={runConfirm}
+      />
     </div>
   )
 }

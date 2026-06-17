@@ -102,15 +102,15 @@ const PaymentsPage = () => {
 
   return (
     <div className="space-y-5">
-      <section className="inventory-hero">
-        <div>
-          <span className="box-eyebrow">Payments</span>
-          <h3>Record &amp; track payments</h3>
-        </div>
-      </section>
-
       <div className="profile-workspace">
         <main className="profile-main-stack">
+          <section className="inventory-hero">
+            <div>
+              <span className="box-eyebrow">Payments</span>
+              <h3>Record &amp; track payments</h3>
+            </div>
+          </section>
+
           <div className="supplier-panel">
         <div className="mb-4 flex items-center justify-between">
           <div>

@@ -2,6 +2,7 @@ package org.example.controller;
 
 import java.util.List;
 import java.util.Map;
+import org.example.dto.CreateExpenseBatchRequest;
 import org.example.dto.CreateExpenseRequest;
 import org.example.dto.ExpenseCategoryResponse;
 import org.example.dto.ExpenseResponse;
@@ -38,6 +39,15 @@ public class ExpenseController {
             @RequestBody CreateExpenseRequest request
     ) {
         return expenseService.createExpense(wholesalerId, request);
+    }
+
+    @PostMapping("/create-batch")
+    @ResponseStatus(HttpStatus.CREATED)
+    public List<ExpenseResponse> createExpenses(
+            @PathVariable Long wholesalerId,
+            @RequestBody CreateExpenseBatchRequest request
+    ) {
+        return expenseService.createExpenses(wholesalerId, request);
     }
 
     @PostMapping("/list")

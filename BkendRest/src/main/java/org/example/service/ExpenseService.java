@@ -5,6 +5,7 @@ import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.util.List;
+import org.example.dto.CreateExpenseBatchRequest;
 import org.example.dto.CreateExpenseRequest;
 import org.example.dto.ExpenseCategoryResponse;
 import org.example.dto.ExpenseResponse;
@@ -94,31 +95,77 @@ public class ExpenseService {
         if (request == null || request.wholesalerSupplierId() == null) {
             throw new BadRequestException("Supplier account is required.");
         }
-        WholesalerSupplier supplierAccount = wholesalerSupplierRepository
-                .findByWholesaler_IdAndId(wholesalerId, request.wholesalerSupplierId())
-                .orElseThrow(() -> new BadRequestException("Supplier account not found."));
+        WholesalerSupplier supplierAccount = resolveSupplier(wholesalerId, request.wholesalerSupplierId());
+        org.example.model.SupplierDelivery delivery = resolveDelivery(wholesalerId, supplierAccount, request.deliveryId());
 
-        org.example.model.SupplierDelivery delivery = null;
-        if (request.deliveryId() != null) {
-            delivery = supplierDeliveryRepository.findById(request.deliveryId())
-                    .orElseThrow(() -> new BadRequestException("Shipment not found."));
-            if (!delivery.getWholesaler().getId().equals(wholesalerId)
-                    || !delivery.getWholesalerSupplier().getId().equals(supplierAccount.getId())) {
-                throw new BadRequestException("Shipment does not belong to this supplier.");
-            }
+        return recordExpense(wholesaler, supplierAccount, delivery,
+                request.categoryId(), request.categoryName(),
+                request.amount(), request.paidAmount(), request.note());
+    }
+
+    /**
+     * Records several expenses for one shipment in a single transaction —
+     * either all lines persist or none do.
+     */
+    @Transactional
+    public List<ExpenseResponse> createExpenses(Long wholesalerId, CreateExpenseBatchRequest request) {
+        if (request == null || request.wholesalerSupplierId() == null) {
+            throw new BadRequestException("Supplier account is required.");
         }
+        if (request.lines() == null || request.lines().isEmpty()) {
+            throw new BadRequestException("At least one expense line is required.");
+        }
+        Wholesaler wholesaler = findWholesaler(wholesalerId);
+        WholesalerSupplier supplierAccount = resolveSupplier(wholesalerId, request.wholesalerSupplierId());
+        org.example.model.SupplierDelivery delivery = resolveDelivery(wholesalerId, supplierAccount, request.deliveryId());
 
-        BigDecimal amount = nonNegative(request.amount(), "Expense amount cannot be negative.");
+        List<ExpenseResponse> results = new java.util.ArrayList<>(request.lines().size());
+        for (CreateExpenseBatchRequest.Line line : request.lines()) {
+            results.add(recordExpense(wholesaler, supplierAccount, delivery,
+                    line.categoryId(), line.categoryName(),
+                    line.amount(), line.paidAmount(), line.note()));
+        }
+        return results;
+    }
+
+    private WholesalerSupplier resolveSupplier(Long wholesalerId, Long supplierAccountId) {
+        return wholesalerSupplierRepository
+                .findByWholesaler_IdAndId(wholesalerId, supplierAccountId)
+                .orElseThrow(() -> new BadRequestException("Supplier account not found."));
+    }
+
+    private org.example.model.SupplierDelivery resolveDelivery(
+            Long wholesalerId, WholesalerSupplier supplierAccount, Long deliveryId) {
+        if (deliveryId == null) {
+            return null;
+        }
+        org.example.model.SupplierDelivery delivery = supplierDeliveryRepository.findById(deliveryId)
+                .orElseThrow(() -> new BadRequestException("Shipment not found."));
+        if (!delivery.getWholesaler().getId().equals(wholesalerId)
+                || !delivery.getWholesalerSupplier().getId().equals(supplierAccount.getId())) {
+            throw new BadRequestException("Shipment does not belong to this supplier.");
+        }
+        return delivery;
+    }
+
+    private ExpenseResponse recordExpense(
+            Wholesaler wholesaler, WholesalerSupplier supplierAccount,
+            org.example.model.SupplierDelivery delivery,
+            Long categoryId, String categoryName,
+            BigDecimal amountRaw, BigDecimal paidRaw, String note) {
+        Long wholesalerId = wholesaler.getId();
+
+        BigDecimal amount = nonNegative(amountRaw, "Expense amount cannot be negative.");
         if (amount.signum() == 0) {
             throw new BadRequestException("Expense amount must be greater than zero.");
         }
-        BigDecimal paid = nonNegative(request.paidAmount(), "Paid amount cannot be negative.");
+        BigDecimal paid = nonNegative(paidRaw, "Paid amount cannot be negative.");
         if (paid.compareTo(amount) > 0) {
             throw new BadRequestException("Supplier-funded amount cannot exceed the expense amount.");
         }
         BigDecimal due = money(amount.subtract(paid));
 
-        ExpenseCategory category = resolveCategory(wholesaler, request.categoryId(), request.categoryName());
+        ExpenseCategory category = resolveCategory(wholesaler, categoryId, categoryName);
 
         SupplierExpense expense = new SupplierExpense();
         expense.setWholesaler(wholesaler);
@@ -128,7 +175,7 @@ public class ExpenseService {
         expense.setAmount(amount);
         expense.setPaidAmount(paid);
         expense.setDueAmount(due);
-        expense.setNote(clean(request.note()));
+        expense.setNote(clean(note));
         expense.setExpenseDate(LocalDateTime.now());
         SupplierExpense saved = supplierExpenseRepository.save(expense);
 

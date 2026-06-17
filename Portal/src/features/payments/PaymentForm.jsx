@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   AlertTriangle, CreditCard, User, UserCheck, DollarSign, FileText, Save, ArrowDownRight, ArrowUpRight, Wallet,
 } from 'lucide-react';
@@ -42,6 +42,10 @@ const DIRECTIONS = {
 const PaymentForm = ({ onClose }) => {
   const { admin } = useAuth();
   const { suppliers, customers, reloadSuppliers, reloadCustomers, refreshTransactions } = useData();
+
+  // Open with the latest party balances/dues, not the copy cached since login.
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  useEffect(() => { reloadSuppliers(); reloadCustomers(); }, []);
   const showToast = useToast();
 
   const [direction, setDirection] = useState('CUSTOMER_PAY');

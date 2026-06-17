@@ -61,6 +61,7 @@ export const apiPaths = {
   wholesalerSuppliersUpdate: (wholesalerId) => '/wholesalers/' + wholesalerId + '/suppliers/update',
   expenseCategories: (wholesalerId) => '/wholesalers/' + wholesalerId + '/expenses/categories',
   expenseCreate: (wholesalerId) => '/wholesalers/' + wholesalerId + '/expenses/create',
+  expenseCreateBatch: (wholesalerId) => '/wholesalers/' + wholesalerId + '/expenses/create-batch',
   expenseList: (wholesalerId) => '/wholesalers/' + wholesalerId + '/expenses/list',
   supplierStatement: (wholesalerId) => '/wholesalers/' + wholesalerId + '/expenses/statement',
   wholesalerSuppliersDisable: (wholesalerId) => '/wholesalers/' + wholesalerId + '/suppliers/disable',

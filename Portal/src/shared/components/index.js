@@ -1,4 +1,5 @@
 export { default as Modal } from './Modal';
+export { default as ConfirmDialog } from './ConfirmDialog';
 export { default as FormField } from './FormField';
 export { default as KPITile } from './KPITile';
 export { default as EmptyState } from './EmptyState';

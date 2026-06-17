@@ -272,12 +272,14 @@ export const DataProvider = ({ children }) => {
       if (which === 'supplier') queryClient.invalidateQueries({ queryKey: queryKeys.parties.supplierProfile(wholesalerId, accountId) });
     },
     // "Money event" = a write that moves money or due. Touches transaction feed,
-    // dashboard rollup, and the sales aggregate (commission earned changes).
+    // dashboard rollup, the sales aggregate (commission earned changes), and the
+    // cash book (any cash in/out changes the day's drawer reconciliation).
     cash:         () => queryClient.invalidateQueries({ queryKey: queryKeys.cash.root(wholesalerId) }),
     moneyEvent: () => {
       queryClient.invalidateQueries({ queryKey: queryKeys.transactions.root(wholesalerId) });
       queryClient.invalidateQueries({ queryKey: ['dashboardSummary', wholesalerId] });
       queryClient.invalidateQueries({ queryKey: ['salesAggregate', wholesalerId] });
+      queryClient.invalidateQueries({ queryKey: queryKeys.cash.root(wholesalerId) });
     },
   };
 
@@ -405,6 +407,43 @@ export const DataProvider = ({ children }) => {
       const data = await postJson(apiPaths.wholesalerCustomersList(admin.wholesalerId), { includeDisabled });
       setCustomers(asArray(data).map(mapCustomerAccount));
     } catch { /* keep existing */ }
+  };
+
+  // Re-fetch the shared entities that live in DataContext state (loaded once at login and
+  // patched optimistically), so a page/modal that reads them via dropdowns always shows the
+  // latest server data on open — not a stale in-memory copy. Targeted + a parallel refreshAll().
+  const refreshCrateInventory = async () => {
+    if (!admin?.wholesalerId) return;
+    try {
+      const data = await postJson(apiPaths.cratesDashboard(admin.wholesalerId));
+      setCrateInventory(mapCrateDashboard(data));
+    } catch { /* keep existing */ }
+  };
+
+  const refreshInventory = async () => {
+    if (!admin?.wholesalerId) return;
+    try {
+      const data = await postJson(apiPaths.inventoryList(admin.wholesalerId));
+      setSupplierProducts(asArray(data).map(mapInventoryItem));
+    } catch { /* keep existing */ }
+  };
+
+  const refreshShipments = async () => {
+    if (!admin?.wholesalerId) return;
+    try {
+      const data = await postJson(apiPaths.supplierDeliveriesList(admin.wholesalerId));
+      setShipments(asArray(data).map(mapShipment));
+    } catch { /* keep existing */ }
+  };
+
+  const refreshAll = async () => {
+    await Promise.all([
+      reloadSuppliers(),
+      reloadCustomers(),
+      refreshInventory(),
+      refreshCrateInventory(),
+      refreshShipments(),
+    ]);
   };
 
   const setSupplierStatus = async (supplierAccountId, enable) => {
@@ -642,6 +681,10 @@ export const DataProvider = ({ children }) => {
       crateType: saleData.crateType || null,
       cratesGiven: Number(saleData.cratesGiven) || 0,
       paymentMethod: saleData.paymentMethod || null,
+      // Crates ride along in the same atomic sale call: borrow (permanent) or sell (walk-in).
+      crateLines: Array.isArray(saleData.crateLines) && saleData.crateLines.length ? saleData.crateLines : null,
+      crateDeposit: saleData.crateDeposit != null && saleData.crateDeposit !== '' ? Number(saleData.crateDeposit) : null,
+      cratePaymentMethod: saleData.cratePaymentMethod || null,
     });
 
     setSupplierProducts((prev) =>
@@ -733,7 +776,68 @@ export const DataProvider = ({ children }) => {
     invalidate.inventory();
     invalidate.moneyEvent();
     invalidate.crates();
+    // Crates moved server-side in the same call — refresh local crate inventory + customer
+    // holdings/deposit (the optimistic blocks above only cover the legacy single-type path).
+    if (Array.isArray(saleData.crateLines) && saleData.crateLines.length) {
+      try {
+        const dash = await postJson(apiPaths.cratesDashboard(admin.wholesalerId));
+        setCrateInventory(mapCrateDashboard(dash));
+      } catch { /* refetch is best-effort; React Query invalidation will also refresh */ }
+      await reloadCustomers();
+    }
     return transaction;
+  };
+
+  // Multi-line sale: one customer buying several products (possibly from different suppliers) in
+  // one atomic call. The optimistic single-line patching in recordSale doesn't generalize cleanly
+  // across multiple lots/suppliers, so this path posts `lines` and then refetches authoritative
+  // state (stock, customers, suppliers, crates, cash/transactions).
+  const recordMultiSale = async (saleData) => {
+    if (!admin?.wholesalerId) {
+      throw new Error('Wholesaler profile not found for this user.');
+    }
+    const lines = (saleData.lines || []).map((l) => ({
+      inventoryId: Number(l.inventoryId),
+      quantity: toPositiveNumber(l.quantity),
+      saleWeightKg: l.saleWeightKg === '' || l.saleWeightKg == null
+        ? null
+        : Number(l.saleWeightKg) > 0 ? Number(l.saleWeightKg) : null,
+      unitPrice: toPositiveNumber(l.unitPrice),
+    }));
+    if (!lines.length) {
+      throw new Error('Add at least one product line.');
+    }
+    for (const l of lines) {
+      if (!l.inventoryId || !l.quantity || l.unitPrice == null) {
+        throw new Error('Each product line needs a product, quantity and unit price.');
+      }
+    }
+
+    const response = await postJson(apiPaths.salesCreate(admin.wholesalerId), {
+      wholesalerCustomerId: Number(saleData.customerId) || null,
+      customerName: saleData.customerName,
+      customerPhone: saleData.customerPhone,
+      lines,
+      discountAmount: roundMoney(Math.max(0, Number(saleData.discountAmount) || 0)),
+      paymentAmount: roundMoney(Math.max(0, Number(saleData.paymentAmount) || 0)),
+      paymentMethod: saleData.paymentMethod || null,
+      crateLines: Array.isArray(saleData.crateLines) && saleData.crateLines.length ? saleData.crateLines : null,
+      crateDeposit: saleData.crateDeposit != null && saleData.crateDeposit !== '' ? Number(saleData.crateDeposit) : null,
+      cratePaymentMethod: saleData.cratePaymentMethod || null,
+    });
+
+    // Pull fresh authoritative state — stock across several lots, both party balances, crates.
+    await Promise.all([refreshInventory(), reloadCustomers(), reloadSuppliers()]);
+    if (Array.isArray(saleData.crateLines) && saleData.crateLines.length) {
+      try {
+        const dash = await postJson(apiPaths.cratesDashboard(admin.wholesalerId));
+        setCrateInventory(mapCrateDashboard(dash));
+      } catch { /* best-effort; invalidation below also refreshes */ }
+    }
+    invalidate.inventory();
+    invalidate.moneyEvent();
+    invalidate.crates();
+    return response;
   };
 
   const recordCustomerPayment = (customerId, amount) => {
@@ -799,8 +903,12 @@ export const DataProvider = ({ children }) => {
     setCrateInventory((prev) => ({ ...prev, ...updates }));
   };
 
+  // Universal "I just wrote a money/transaction event" refresh, called by every
+  // component-level write (payments, crate ops, sales, purchases). Besides reloading
+  // the transaction feed it invalidates the cash book so the drawer reflects the change.
   const refreshTransactions = async () => {
     if (!admin?.wholesalerId) return;
+    invalidate.cash();
     try {
       const data = await postJson(apiPaths.transactionsList(admin.wholesalerId));
       setTransactions(asArray(data).map(mapTransaction));
@@ -872,6 +980,7 @@ export const DataProvider = ({ children }) => {
     const response = await postJson(apiPaths.shopExpenseCreate(admin.wholesalerId), payload);
     invalidate.shopExpenses();
     invalidate.dashboard();
+    invalidate.cash();
     return response;
   };
 
@@ -880,6 +989,7 @@ export const DataProvider = ({ children }) => {
     const response = await postJson(apiPaths.shopExpenseCancel(admin.wholesalerId, expenseId), { reason });
     invalidate.shopExpenses();
     invalidate.dashboard();
+    invalidate.cash();
     return response;
   };
 
@@ -1089,11 +1199,16 @@ export const DataProvider = ({ children }) => {
         setSupplierStatus,
         reloadSuppliers,
         refreshTransactions,
+        refreshCrateInventory,
+        refreshInventory,
+        refreshShipments,
+        refreshAll,
         addCustomer,
         setCustomerStatus,
         reloadCustomers,
         addTransaction: recordSale,
         recordSale,
+        recordMultiSale,
         recordCustomerPayment,
         recordSupplierPayment,
         addSupplierProduct,
