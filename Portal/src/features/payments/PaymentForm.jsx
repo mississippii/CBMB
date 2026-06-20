@@ -1,11 +1,12 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
-  AlertTriangle, CreditCard, User, UserCheck, DollarSign, FileText, Save, ArrowDownRight, ArrowUpRight, Wallet,
+  CreditCard, User, UserCheck, DollarSign, FileText, Save, ArrowDownRight, ArrowUpRight, Wallet,
 } from 'lucide-react';
 import { useAuth } from '../auth/AuthContext';
 import { useData } from '../../data/DataContext';
 import { useToast } from '../../shared/components/Toast';
 import { postJson, apiPaths } from '../../services/apiClient';
+import ConfirmDialog from '../../shared/components/ConfirmDialog';
 
 const fmt = (value) => `৳ ${Math.ceil(Number(value) || 0).toLocaleString()}`;
 
@@ -251,37 +252,22 @@ const PaymentForm = ({ onClose }) => {
         </div>
       </form>
 
-      {showConfirm && (
-        <div className="modal-overlay" style={{ zIndex: 60 }}>
-          <div className="modal-content" style={{ maxWidth: '26rem' }}>
-            <div className="modal-header">
-              <div className="flex items-center gap-2.5">
-                <div className="modal-icon-circle bg-amber-100 text-amber-700"><AlertTriangle size={18} /></div>
-                <div><h2>Confirm payment</h2></div>
-              </div>
-            </div>
-            <div className="px-1 py-1 space-y-3">
-              <p className="text-sm text-slate-600">
-                A recorded payment <span className="font-semibold text-slate-800">cannot be undone</span>. Please review before saving.
-              </p>
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm space-y-1.5">
-                <div className="flex justify-between"><span className="text-slate-500">{config.label}</span><span className="font-semibold text-slate-800">{selectedParty?.name || '—'}</span></div>
-                <div className="flex justify-between"><span className="text-slate-500">Amount</span><span className="font-semibold text-slate-900">{fmt(amount)} · {PAYMENT_METHODS.find((m) => m.value === method)?.label || method}</span></div>
-                <div className="flex justify-between border-t border-slate-200 pt-1.5 mt-1.5">
-                  <span className="font-semibold text-slate-600">{dueAfter < 0 ? 'Advance after' : 'Due after'}</span>
-                  <span className={`font-bold ${dueAfter < 0 ? 'text-amber-700' : 'text-rose-600'}`}>{fmt(Math.abs(dueAfter))}</span>
-                </div>
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button type="button" onClick={() => setShowConfirm(false)} className="btn-secondary" disabled={isSaving}>Back</button>
-              <button type="button" onClick={handleConfirmSave} className="btn-primary flex items-center gap-2" disabled={isSaving}>
-                <Save size={15} /> {isSaving ? 'Saving…' : 'Confirm & Save'}
-              </button>
-            </div>
-          </div>
+      <ConfirmDialog
+        open={showConfirm}
+        title="Confirm payment"
+        message="Save this payment?"
+        confirmLabel="Confirm & Save"
+        busy={isSaving}
+        onCancel={() => setShowConfirm(false)}
+        onConfirm={handleConfirmSave}
+      >
+        <div className="space-y-1.5">
+          <div className="flex justify-between gap-4"><span className="text-slate-500">{config.label}</span><span className="font-semibold text-slate-900">{selectedParty?.name || '—'}</span></div>
+          <div className="flex justify-between gap-4"><span className="text-slate-500">Amount</span><span className="font-semibold text-slate-900">{fmt(amount)}</span></div>
+          <div className="flex justify-between gap-4"><span className="text-slate-500">Method</span><span className="font-semibold text-slate-900">{PAYMENT_METHODS.find((m) => m.value === method)?.label || method}</span></div>
+          <div className="flex justify-between gap-4 border-t border-slate-200 pt-1.5"><span className="font-semibold text-slate-600">{dueAfter < 0 ? 'Advance after' : 'Due after'}</span><span className={`font-bold ${dueAfter < 0 ? 'text-amber-700' : 'text-rose-600'}`}>{fmt(Math.abs(dueAfter))}</span></div>
         </div>
-      )}
+      </ConfirmDialog>
     </div>
   );
 };

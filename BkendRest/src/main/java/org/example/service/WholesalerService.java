@@ -32,6 +32,7 @@ import org.example.repository.SaleItemRepository;
 import org.example.repository.SaleRepository;
 import org.example.repository.SupplierRepository;
 import org.example.repository.SupplierSettlementRepository;
+import org.example.repository.UserRepository;
 import org.example.repository.WholesalerCustomerRepository;
 import org.example.repository.WholesalerRepository;
 import org.example.repository.WholesalerSupplierRepository;
@@ -57,6 +58,7 @@ public class WholesalerService {
     private final SupplierDueService supplierDueService;
     private final TransactionService transactionService;
     private final SupplierLoginService supplierLoginService;
+    private final UserRepository userRepository;
 
     public WholesalerService(
             WholesalerRepository wholesalerRepository,
@@ -74,7 +76,8 @@ public class WholesalerService {
             SupplierSettlementRepository supplierSettlementRepository,
             SupplierDueService supplierDueService,
             TransactionService transactionService,
-            SupplierLoginService supplierLoginService
+            SupplierLoginService supplierLoginService,
+            UserRepository userRepository
     ) {
         this.wholesalerRepository = wholesalerRepository;
         this.supplierRepository = supplierRepository;
@@ -92,6 +95,7 @@ public class WholesalerService {
         this.supplierDueService = supplierDueService;
         this.transactionService = transactionService;
         this.supplierLoginService = supplierLoginService;
+        this.userRepository = userRepository;
     }
 
     /**
@@ -165,12 +169,33 @@ public class WholesalerService {
 
         Supplier supplier = account.getSupplier();
         String name = requireText(request.name(), "Supplier name is required.");
+        String phone = requireText(request.phone(), "Supplier phone is required.");
+        supplierRepository.findByPhone(phone)
+                .filter(existing -> !existing.getId().equals(supplier.getId()))
+                .ifPresent(existing -> {
+                    throw new BadRequestException("Another supplier already uses this phone number.");
+                });
+        if (supplier.getUser() != null) {
+            userRepository.findByPhone(phone)
+                    .filter(existing -> !existing.getId().equals(supplier.getUser().getId()))
+                    .ifPresent(existing -> {
+                        throw new BadRequestException("Another user already uses this phone number.");
+                    });
+        }
+
         supplier.setName(name);
+        supplier.setPhone(phone);
         supplier.setBusinessName(clean(request.businessName()));
         supplier.setAddress(clean(request.location()));
+        if (supplier.getUser() != null) {
+            supplier.getUser().setName(name);
+            supplier.getUser().setPhone(phone);
+        }
         supplierRepository.save(supplier);
 
-        account.setCommissionRate(nonNegative(request.commissionRate(), "Commission rate cannot be negative."));
+        if (request.commissionRate() != null) {
+            account.setCommissionRate(nonNegative(request.commissionRate(), "Commission rate cannot be negative."));
+        }
         return toSupplierResponse(wholesalerSupplierRepository.save(account));
     }
 
@@ -251,6 +276,32 @@ public class WholesalerService {
         account.setStatus(RecordStatus.ACTIVE);
 
         return toCustomerResponse(wholesalerCustomerRepository.save(account));
+    }
+
+    @Transactional
+    public CustomerAccountResponse updateCustomer(Long wholesalerId, org.example.dto.UpdateCustomerRequest request) {
+        if (request == null || request.accountId() == null) {
+            throw new BadRequestException("Customer account id is required.");
+        }
+        WholesalerCustomer account = wholesalerCustomerRepository
+                .findByWholesaler_IdAndId(wholesalerId, request.accountId())
+                .orElseThrow(() -> new BadRequestException("Customer account not found."));
+
+        Customer customer = account.getCustomer();
+        String name = requireText(request.name(), "Customer name is required.");
+        String phone = requireText(request.phone(), "Customer phone is required.");
+        customerRepository.findByPhone(phone)
+                .filter(existing -> !existing.getId().equals(customer.getId()))
+                .ifPresent(existing -> {
+                    throw new BadRequestException("Another customer already uses this phone number.");
+                });
+
+        customer.setName(name);
+        customer.setOwnerName(clean(request.ownerName()));
+        customer.setPhone(phone);
+        customer.setAddress(clean(request.address()));
+        customerRepository.save(customer);
+        return toCustomerResponse(account);
     }
 
     @Transactional(readOnly = true)
@@ -348,8 +399,12 @@ public class WholesalerService {
         Supplier supplier = account.getSupplier();
         Long wholesalerId = account.getWholesaler().getId();
         BigDecimal currentDue = computeSupplierDue(wholesalerId, account);
-        List<CrateTypeQuantity> crateDues = crateDues(wholesalerId, PartyType.WHOLESALER_SUPPLIER, account.getId());
-        List<CrateTypeQuantity> crateHoldings = supplierCrateHoldings(wholesalerId, account.getId());
+        CrateNet crateNet = netCrates(
+                crateDues(wholesalerId, PartyType.WHOLESALER_SUPPLIER, account.getId()),
+                supplierCrateHoldings(wholesalerId, account.getId())
+        );
+        List<CrateTypeQuantity> crateDues = crateNet.theyOweUs();
+        List<CrateTypeQuantity> crateHoldings = crateNet.weOweThem();
         return new SupplierAccountResponse(
                 account.getId(),
                 wholesalerId,
@@ -393,8 +448,12 @@ public class WholesalerService {
         Long wholesalerId = account.getWholesaler().getId();
         BigDecimal salePaid = saleRepository.sumPaidAmountByCustomer(wholesalerId, account.getId());
         BigDecimal laterPaid = paymentRepository.sumCashAmountByCustomer(wholesalerId, account.getId());
-        List<CrateTypeQuantity> crateDues = crateDues(wholesalerId, PartyType.WHOLESALER_CUSTOMER, account.getId());
-        List<CrateTypeQuantity> crateHoldings = customerCrateHoldings(wholesalerId, account.getId());
+        CrateNet crateNet = netCrates(
+                crateDues(wholesalerId, PartyType.WHOLESALER_CUSTOMER, account.getId()),
+                customerCrateHoldings(wholesalerId, account.getId())
+        );
+        List<CrateTypeQuantity> crateDues = crateNet.theyOweUs();
+        List<CrateTypeQuantity> crateHoldings = crateNet.weOweThem();
         return new CustomerAccountResponse(
                 account.getId(),
                 wholesalerId,
@@ -455,6 +514,30 @@ public class WholesalerService {
                 .map(e -> new CrateTypeQuantity(e.getKey(), e.getValue()))
                 .toList();
     }
+
+    private CrateNet netCrates(List<CrateTypeQuantity> theyOweUs, List<CrateTypeQuantity> weOweThem) {
+        java.util.Map<String, Long> netByType = new java.util.TreeMap<>();
+        for (CrateTypeQuantity line : theyOweUs) {
+            netByType.merge(line.crateType(), line.quantity(), Long::sum);
+        }
+        for (CrateTypeQuantity line : weOweThem) {
+            netByType.merge(line.crateType(), -line.quantity(), Long::sum);
+        }
+
+        java.util.List<CrateTypeQuantity> netDues = new java.util.ArrayList<>();
+        java.util.List<CrateTypeQuantity> netHoldings = new java.util.ArrayList<>();
+        for (java.util.Map.Entry<String, Long> entry : netByType.entrySet()) {
+            long net = entry.getValue();
+            if (net > 0) {
+                netDues.add(new CrateTypeQuantity(entry.getKey(), net));
+            } else if (net < 0) {
+                netHoldings.add(new CrateTypeQuantity(entry.getKey(), -net));
+            }
+        }
+        return new CrateNet(netDues, netHoldings);
+    }
+
+    private record CrateNet(List<CrateTypeQuantity> theyOweUs, List<CrateTypeQuantity> weOweThem) {}
 
     private int crateDueTotal(Long wholesalerId, PartyType partyType, Long partyAccountId) {
         return crateTotal(crateDues(wholesalerId, partyType, partyAccountId));

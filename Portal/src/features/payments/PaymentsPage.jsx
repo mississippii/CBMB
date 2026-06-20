@@ -23,6 +23,12 @@ import PaymentForm from './PaymentForm';
  * TransactionResponse doesn't carry a dedicated `settlementType` field yet
  * (on the Near-Term Gaps list).
  */
+const localDateKey = (value) => {
+  const date = value ? new Date(value) : null;
+  if (!date || Number.isNaN(date.getTime())) return '';
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, '0')}-${String(date.getDate()).padStart(2, '0')}`;
+};
+
 const classify = (t) => {
   const isCustomerSide = Boolean(t.customerId || t.wholesalerCustomerId);
   const isSupplierSide = Boolean(t.supplierId || t.wholesalerSupplierId);
@@ -92,13 +98,17 @@ const PaymentsPage = () => {
   );
 
   const { pageItems: pagedPayments, ...paymentPager } = usePagination(payments, 15);
-  const paymentTotals = useMemo(() => payments.reduce((acc, t) => {
+  const todayPayments = useMemo(() => {
+    const today = localDateKey(new Date());
+    return payments.filter((payment) => localDateKey(payment.createdAt) === today);
+  }, [payments]);
+  const paymentTotals = useMemo(() => todayPayments.reduce((acc, t) => {
     const cls = classify(t);
     const amount = Number(t.paymentAmount) || 0;
     if (cls.dir === 'out') acc.out += amount;
     else acc.in += amount;
     return acc;
-  }, { in: 0, out: 0 }), [payments]);
+  }, { count: todayPayments.length, in: 0, out: 0 }), [todayPayments]);
 
   return (
     <div className="space-y-5">
@@ -178,9 +188,9 @@ const PaymentsPage = () => {
             </button>
           </div>
           <div className="supplier-panel">
-            <h3>Payment Summary</h3>
+            <h3>Today Payment Summary</h3>
             <div className="mt-3 space-y-2">
-              <div className="box-row"><span>Total entries</span><strong>{payments.length}</strong></div>
+              <div className="box-row"><span>Today entries</span><strong>{paymentTotals.count}</strong></div>
               <div className="box-row"><span>Money in</span><strong className="text-emerald-700">{formatMoney(paymentTotals.in)}</strong></div>
               <div className="box-row total"><span>Money out</span><strong className="text-rose-700">{formatMoney(paymentTotals.out)}</strong></div>
             </div>

@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
   ShoppingCart, UserCheck, User, Package, Hash, DollarSign,
-  CreditCard, Save, Tag, X, Scale, Boxes, Wallet, AlertTriangle,
+  CreditCard, Save, Tag, Scale, Boxes, Wallet,
   Plus, Trash2,
 } from 'lucide-react';
 import { useData } from '../../data/DataContext';
 import { useToast } from '../../shared/components/Toast';
 import SearchableSelect from '../../shared/components/SearchableSelect';
+import ConfirmDialog from '../../shared/components/ConfirmDialog';
 
 const PAYMENT_METHODS = ['CASH', 'BANK', 'BKASH', 'NAGAD', 'OTHER'];
 const cashRound = (v) => Math.ceil(Number(v) || 0);
@@ -35,7 +36,7 @@ const initialForm = {
 };
 
 const SaleForm = ({ onClose }) => {
-  const { suppliers, customers, supplierProducts, shipments, crateInventory, recordSale, recordMultiSale, refreshAll } = useData();
+  const { suppliers, customers, supplierProducts, shipments, crateInventory, recordMultiSale, refreshAll } = useData();
 
   // Always open the sale form with the latest server data — suppliers, customers, stock and
   // crate counts — so the dropdowns never show a stale in-memory copy (e.g. crate inventory
@@ -43,10 +44,6 @@ const SaleForm = ({ onClose }) => {
   // eslint-disable-next-line react-hooks/exhaustive-deps
   useEffect(() => { refreshAll(); }, []);
   const showToast = useToast();
-  // 'single' = one product (classic). 'multi' = a basket of products, possibly from several
-  // suppliers, in one atomic sale. The supplier/shipment/product/qty/price inputs act as the
-  // "draft line" in multi mode; Add to list pushes them into saleLines.
-  const [mode, setMode] = useState('single');
   const [saleLines, setSaleLines] = useState([]);
   const [form, setForm] = useState(initialForm);
   const [shipmentKey, setShipmentKey] = useState('');
@@ -56,7 +53,8 @@ const SaleForm = ({ onClose }) => {
   // Walk-in crate sale carries its own payment method, independent of the product payment.
   const [showCrate, setShowCrate] = useState(false);
   const [crateMethod, setCrateMethod] = useState('CASH');
-  const [crateLines, setCrateLines] = useState([{ crateType: '', quantity: '', unitPrice: '' }]);
+  const [crateDraft, setCrateDraft] = useState({ crateType: '', quantity: '', unitPrice: '' });
+  const [crateLines, setCrateLines] = useState([]);
   // Refundable deposit taken against borrowed crates (permanent customers only).
   const [crateDeposit, setCrateDeposit] = useState('');
   const [error, setError] = useState('');
@@ -64,9 +62,29 @@ const SaleForm = ({ onClose }) => {
   const [showConfirm, setShowConfirm] = useState(false);
 
   const set = (key, value) => setForm((prev) => ({ ...prev, [key]: value }));
-  const updateCrateLine = (i, patch) => setCrateLines((ls) => ls.map((l, idx) => (idx === i ? { ...l, ...patch } : l)));
-  const addCrateLine = () => setCrateLines((ls) => [...ls, { crateType: '', quantity: '', unitPrice: '' }]);
-  const removeCrateLine = (i) => setCrateLines((ls) => (ls.length > 1 ? ls.filter((_, idx) => idx !== i) : ls));
+  const setCrate = (key, value) => setCrateDraft((prev) => ({ ...prev, [key]: value }));
+  const addCrateLine = () => {
+    setError('');
+    if (!crateDraft.crateType) { setError('Choose a crate type.'); return; }
+    if (!(Number(crateDraft.quantity) > 0)) { setError('Enter crate quantity.'); return; }
+    if (isOneTime && !(Number(crateDraft.unitPrice) > 0)) { setError('Enter crate price.'); return; }
+
+    setCrateLines((lines) => {
+      const existing = lines.findIndex((line) => line.crateType === crateDraft.crateType);
+      if (existing >= 0) {
+        return lines.map((line, index) => (index === existing
+          ? {
+              ...line,
+              quantity: String((Number(line.quantity) || 0) + (Number(crateDraft.quantity) || 0)),
+              unitPrice: isOneTime ? crateDraft.unitPrice : line.unitPrice,
+            }
+          : line));
+      }
+      return [...lines, { ...crateDraft }];
+    });
+    setCrateDraft({ crateType: '', quantity: '', unitPrice: '' });
+  };
+  const removeCrateLine = (i) => setCrateLines((ls) => ls.filter((_, idx) => idx !== i));
 
   const crateTypeOptions = useMemo(() => Object.keys(crateInventory?.byType || {}), [crateInventory]);
 
@@ -123,16 +141,14 @@ const SaleForm = ({ onClose }) => {
     [availableProducts, form.productId],
   );
 
-  const isMulti = mode === 'multi';
   const quantity = Number(form.quantity) || 0;
   const saleWeightKg = Number(form.saleWeightKg) || 0;
   const unitPrice = Number(form.unitPrice) || 0;
   const pricedByWeight = saleWeightKg > 0;
-  // Gross of the current draft line (used as the single-sale total, or as the row being added).
+  // Gross of the current draft line before it is added to the sale.
   const draftGross = Math.max(0, pricedByWeight ? saleWeightKg * unitPrice : quantity * unitPrice);
   const linesGross = saleLines.reduce((s, l) => s + (Number(l.lineGross) || 0), 0);
-  // In multi mode the sale total is the sum of added lines; in single mode it's the draft line.
-  const grossAmount = cashRound(isMulti ? linesGross : draftGross);
+  const grossAmount = cashRound(linesGross);
   const discount = Math.min(cashRound(Math.max(0, Number(form.discount) || 0)), grossAmount);
   const netSale = cashRound(Math.max(0, grossAmount - discount));
   const isOneTime = form.customerId === 'ONE_TIME';
@@ -154,8 +170,7 @@ const SaleForm = ({ onClose }) => {
         ? cashRound(form.paymentAmount)
         : 0;
   const dueAfter = cashRound(Math.max(0, netSale - paymentReceived));
-  // In multi mode, stock left for the draft is what's on hand minus what's already in the basket.
-  const draftAvailable = selectedProduct ? selectedProduct.quantity - (isMulti ? addedQtyForProduct : 0) : 0;
+  const draftAvailable = selectedProduct ? selectedProduct.quantity - addedQtyForProduct : 0;
   const overStock = selectedProduct && quantity > draftAvailable;
 
   // Crate add-on derived figures
@@ -222,15 +237,7 @@ const SaleForm = ({ onClose }) => {
     event.preventDefault();
     setError('');
 
-    if (isMulti) {
-      if (saleLines.length === 0) { setError('Add at least one product to the basket.'); return; }
-    } else {
-      if (!form.productId) { setError('Select a product variant / lot to sell.'); return; }
-      if (overStock) {
-        setError(`Quantity exceeds stock for ${selectedProduct.productName} (available ${selectedProduct.quantity}).`);
-        return;
-      }
-    }
+    if (saleLines.length === 0) { setError('Add at least one product to the sale.'); return; }
     if (form.paymentType === 'PARTIAL_PAY' && paymentReceived <= 0) { setError('Enter the partial payment amount.'); return; }
     if (form.paymentType === 'PARTIAL_PAY' && paymentReceived >= netSale) { setError('Partial payment must be less than this sale amount.'); return; }
     if (paymentReceived > netSale) { setError('Payment for a sale cannot exceed the sale amount. Settle prior due separately.'); return; }
@@ -270,38 +277,21 @@ const SaleForm = ({ onClose }) => {
     try {
       // One atomic call: the sale plus its crates (borrow for permanent / sell for walk-in)
       // are written in a single backend transaction — no partial state if a crate step fails.
-      if (isMulti) {
-        await recordMultiSale({
-          customerId: form.customerId,
-          customerName: isOneTime ? oneTime.name : undefined,
-          customerPhone: isOneTime ? oneTime.phone : undefined,
-          lines: saleLines.map((l) => ({
-            inventoryId: l.productId,
-            quantity: l.quantity,
-            saleWeightKg: l.saleWeightKg,
-            unitPrice: l.unitPrice,
-          })),
-          discountAmount: discount,
-          paymentAmount: paymentReceived,
-          paymentMethod: paymentReceived > 0 ? method : undefined,
-          ...cratePayload,
-        });
-      } else {
-        await recordSale({
-          supplierId: Number(form.supplierId),
-          customerId: form.customerId,
-          productId: Number(form.productId),
-          quantity,
-          saleWeightKg: pricedByWeight ? saleWeightKg : null,
-          unitPrice,
-          discountAmount: discount,
-          paymentAmount: paymentReceived,
-          paymentMethod: paymentReceived > 0 ? method : undefined,
-          customerName: isOneTime ? oneTime.name : undefined,
-          customerPhone: isOneTime ? oneTime.phone : undefined,
-          ...cratePayload,
-        });
-      }
+      await recordMultiSale({
+        customerId: form.customerId,
+        customerName: isOneTime ? oneTime.name : undefined,
+        customerPhone: isOneTime ? oneTime.phone : undefined,
+        lines: saleLines.map((l) => ({
+          inventoryId: l.productId,
+          quantity: l.quantity,
+          saleWeightKg: l.saleWeightKg,
+          unitPrice: l.unitPrice,
+        })),
+        discountAmount: discount,
+        paymentAmount: paymentReceived,
+        paymentMethod: paymentReceived > 0 ? method : undefined,
+        ...cratePayload,
+      });
       showToast('Sale recorded', 'success');
       onClose?.();
     } catch (err) {
@@ -318,34 +308,13 @@ const SaleForm = ({ onClose }) => {
         <div className="modal-header">
           <div className="flex items-center gap-2.5">
             <div className="modal-icon-circle bg-blue-100 text-blue-700"><ShoppingCart size={18} /></div>
-            <div><h2>Record New Sale</h2></div>
+            <div><h2>Record Sale</h2></div>
           </div>
-          <div className="flex items-center gap-2">
-            {/* Mode: one product vs a basket from several suppliers */}
-            <div className="inline-flex rounded-lg border border-slate-200 bg-slate-100 p-0.5">
-              {[
-                { key: 'single', label: 'Single Sale' },
-                { key: 'multi', label: 'Multiple Sales' },
-              ].map((t) => (
-                <button
-                  key={t.key}
-                  type="button"
-                  onClick={() => { setMode(t.key); setError(''); }}
-                  className={`rounded-md px-3 py-1 text-xs font-bold transition ${
-                    mode === t.key ? 'bg-white text-blue-700 shadow-sm' : 'text-slate-500 hover:text-slate-700'
-                  }`}
-                >
-                  {t.label}
-                </button>
-              ))}
-            </div>
-            <button type="button" onClick={() => onClose?.()} className="modal-close-btn">✕</button>
-          </div>
+          <button type="button" onClick={() => onClose?.()} className="modal-close-btn">✕</button>
         </div>
 
         <div className="modal-body max-h-[72vh] overflow-y-auto text-sm">
-          {/* Customer — with supplier alongside in single mode */}
-          <div className={isMulti ? '' : 'form-grid'}>
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-2">
             <div className="form-field">
               <label className="form-label"><User size={13} /> Customer <span className="text-red-500">*</span></label>
               <select
@@ -367,164 +336,120 @@ const SaleForm = ({ onClose }) => {
                 ))}
               </select>
             </div>
-            {!isMulti && (
-              <div className="form-field">
-                <label className="form-label"><UserCheck size={13} /> Supplier <span className="text-red-500">*</span></label>
-                <select value={form.supplierId} onChange={(e) => handleSupplierChange(e.target.value)} className="input-field" required={!isMulti}>
-                  <option value="">Choose supplier…</option>
-                  {suppliers.map((s) => (
-                    <option key={s.id} value={s.id}>{s.businessName || s.name}</option>
-                  ))}
-                </select>
-              </div>
+
+            {isOneTime && (
+              <>
+                <div className="form-field">
+                  <label className="form-label">Name <span className="text-red-500">*</span></label>
+                  <input type="text" value={oneTime.name} onChange={(e) => setOneTime((p) => ({ ...p, name: e.target.value }))} className="input-field" required />
+                </div>
+                <div className="form-field">
+                  <label className="form-label">Phone <span className="text-red-500">*</span></label>
+                  <input type="tel" value={oneTime.phone} onChange={(e) => setOneTime((p) => ({ ...p, phone: e.target.value }))} className="input-field" required />
+                </div>
+              </>
             )}
           </div>
 
-          {isOneTime && (
-            <div className="form-grid mt-3">
+          <Section title="Products" />
+          <div className="rounded-xl border border-slate-200 bg-slate-50/70 p-3">
+            <div className="grid grid-cols-1 gap-2 md:grid-cols-3">
               <div className="form-field">
-                <label className="form-label">Name <span className="text-red-500">*</span></label>
-                <input type="text" value={oneTime.name} onChange={(e) => setOneTime((p) => ({ ...p, name: e.target.value }))} className="input-field" required />
+                <label className="form-label"><UserCheck size={13} /> Supplier</label>
+                <select value={form.supplierId} onChange={(e) => handleSupplierChange(e.target.value)} className="input-field min-w-0 text-sm">
+                  <option value="">Choose supplier…</option>
+                  {suppliers.map((supplier) => (
+                    <option key={supplier.id} value={supplier.id}>{supplier.businessName || supplier.name}</option>
+                  ))}
+                </select>
               </div>
               <div className="form-field">
-                <label className="form-label">Phone <span className="text-red-500">*</span></label>
-                <input type="tel" value={oneTime.phone} onChange={(e) => setOneTime((p) => ({ ...p, phone: e.target.value }))} className="input-field" required />
+                <label className="form-label"><Package size={13} /> Shipment</label>
+                <select value={shipmentKey} onChange={(e) => handleShipmentChange(e.target.value)} className="input-field min-w-0 text-sm" disabled={!form.supplierId}>
+                  <option value="">{form.supplierId ? 'Choose shipment…' : 'Choose supplier first'}</option>
+                  {shipmentGroups.map((group) => (
+                    <option key={group.key} value={group.key}>{group.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="form-field">
+                <label className="form-label"><Tag size={13} /> Product / variant</label>
+                <SearchableSelect
+                  block
+                  className="input-field min-w-0 text-sm"
+                  disabled={!shipmentKey}
+                  value={form.productId ? String(form.productId) : ''}
+                  onChange={(val) => handleProductChange(val)}
+                  options={variantOptions}
+                  placeholder={shipmentKey ? 'Search product…' : 'Choose shipment first'}
+                />
               </div>
             </div>
-          )}
 
-          {/* PRODUCT(S) */}
-          <Section title={isMulti ? 'Products' : 'Product'} />
-          {isMulti ? (
-            <>
-              {/* Compact draft: supplier → shipment → product → qty/price, then Add to basket */}
-              <div className="rounded-xl border border-slate-200 bg-slate-50/60 p-2.5">
-                {/* Supplier · Shipment · Product — equal thirds */}
-                <div className="grid grid-cols-3 gap-2">
-                  <select value={form.supplierId} onChange={(e) => handleSupplierChange(e.target.value)} className="input-field min-w-0 text-sm">
-                    <option value="">Supplier…</option>
-                    {suppliers.map((s) => (
-                      <option key={s.id} value={s.id}>{s.businessName || s.name}</option>
-                    ))}
-                  </select>
-                  <select value={shipmentKey} onChange={(e) => handleShipmentChange(e.target.value)} className="input-field min-w-0 text-sm" disabled={!form.supplierId}>
-                    <option value="">{form.supplierId ? 'Shipment…' : 'Supplier first'}</option>
-                    {shipmentGroups.map((g) => (
-                      <option key={g.key} value={g.key}>{g.name}</option>
-                    ))}
-                  </select>
-                  <SearchableSelect
-                    block
-                    className="input-field min-w-0 text-sm"
-                    disabled={!shipmentKey}
-                    value={form.productId ? String(form.productId) : ''}
-                    onChange={(val) => handleProductChange(val)}
-                    options={variantOptions}
-                    placeholder={shipmentKey ? 'Product…' : 'Shipment first'}
-                  />
-                </div>
-                {/* Quantity · kg · Unit price — equal thirds */}
-                <div className="mt-2 grid grid-cols-3 gap-2">
-                  <input type="number" min="0" step="0.01" value={form.quantity} onChange={(e) => set('quantity', e.target.value)} className="input-field min-w-0 text-sm" placeholder={selectedProduct ? `Qty (${String(selectedProduct.unit || '').toUpperCase()})` : 'Qty'} />
-                  <div className="input-with-suffix min-w-0">
-                    <input type="number" min="0" step="0.001" value={form.saleWeightKg} onChange={(e) => set('saleWeightKg', e.target.value)} className="input-field text-sm" placeholder="kg" />
-                    <span className="input-suffix">kg</span>
-                  </div>
-                  <div className="input-with-suffix min-w-0">
-                    <input type="number" min="0" step="0.01" value={form.unitPrice} onChange={(e) => set('unitPrice', e.target.value)} className="input-field text-sm" placeholder={pricedByWeight ? 'Price/kg' : 'Unit price'} />
-                    <span className="input-suffix">৳</span>
-                  </div>
-                </div>
-                <button type="button" onClick={addSaleLine} className="btn-primary mt-2 w-full inline-flex items-center justify-center gap-1.5" title="Add to basket">
-                  <Plus size={15} /> Add to list
-                </button>
-                {overStock && (
-                  <div className="status-error mt-2"><span>!</span><span>Quantity exceeds stock left ({draftAvailable}).</span></div>
-                )}
+            <div className="mt-3 grid grid-cols-1 gap-2 md:grid-cols-[1fr_1fr_1fr_auto] md:items-end">
+              <div className="form-field">
+                <label className="form-label"><Hash size={13} /> Quantity <span className="form-label-hint">{selectedProduct ? String(selectedProduct.unit || '').toUpperCase() : ''}</span></label>
+                <input type="number" min="0" step="0.01" value={form.quantity} onChange={(e) => set('quantity', e.target.value)} className="input-field min-w-0 text-sm" placeholder="0" />
               </div>
+              <div className="form-field">
+                <label className="form-label"><Scale size={13} /> Sale Weight <span className="form-label-hint">kg</span></label>
+                <div className="input-with-suffix min-w-0">
+                  <input type="number" min="0" step="0.001" value={form.saleWeightKg} onChange={(e) => set('saleWeightKg', e.target.value)} className="input-field text-sm" placeholder="0" />
+                  <span className="input-suffix">kg</span>
+                </div>
+              </div>
+              <div className="form-field">
+                <label className="form-label"><DollarSign size={13} /> {pricedByWeight ? 'Price per kg' : 'Unit price'}</label>
+                <div className="input-with-suffix min-w-0">
+                  <input type="number" min="0" step="0.01" value={form.unitPrice} onChange={(e) => set('unitPrice', e.target.value)} className="input-field text-sm" placeholder="0" />
+                  <span className="input-suffix">{pricedByWeight ? '৳/kg' : '৳'}</span>
+                </div>
+              </div>
+              <button type="button" onClick={addSaleLine} className="btn-primary inline-flex h-10 items-center justify-center gap-1.5 px-4" title="Add product">
+                <Plus size={15} /> Add
+              </button>
+            </div>
 
-              {saleLines.length > 0 && (
-                <div className="mt-2.5 space-y-1.5">
-                  {saleLines.map((l, i) => (
-                    <div key={i} className="flex items-center gap-2 rounded-lg border border-slate-200 bg-white px-3 py-1.5 text-sm">
+            {(selectedProduct || draftGross > 0 || overStock) && (
+              <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-slate-500">
+                <span>{selectedProduct ? `Stock left: ${Math.max(draftAvailable, 0).toLocaleString()} ${String(selectedProduct.unit || '').toUpperCase()}` : 'Product not selected'}</span>
+                <span className={overStock ? 'text-rose-600' : 'text-slate-700'}>Line total: {fmt(draftGross)}</span>
+              </div>
+            )}
+            {overStock && (
+              <div className="status-error mt-2"><span>!</span><span>Quantity exceeds stock left ({draftAvailable}).</span></div>
+            )}
+          </div>
+
+          {saleLines.length > 0 && (
+            <div className="mt-3 rounded-xl border border-slate-200 bg-white">
+              <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
+                <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Sale items</span>
+                <strong className="text-sm text-slate-900">{fmt(linesGross)}</strong>
+              </div>
+              <div className="divide-y divide-slate-100">
+                  {saleLines.map((line, i) => (
+                    <div key={i} className="flex items-center gap-3 px-3 py-2 text-sm">
                       <div className="min-w-0 flex-1">
-                        <p className="text-slate-700">
-                          <span className="font-semibold text-slate-900">{l.variety}</span>
-                          <span className="text-slate-500">
-                            {[
-                              l.lotName,
-                              `${Number(l.quantity).toLocaleString()} ${l.unit}`,
-                              l.saleWeightKg ? `${Number(l.saleWeightKg).toLocaleString()} kg` : null,
-                              `× ${fmt(l.unitPrice)}`,
-                            ].filter(Boolean).map((part) => ` | ${part}`).join('')}
-                          </span>
+                        <p className="truncate font-semibold text-slate-900">{line.variety}</p>
+                        <p className="truncate text-xs text-slate-500">
+                          {[
+                            line.supplierName,
+                            line.lotName,
+                            `${Number(line.quantity).toLocaleString()} ${line.unit}`,
+                            line.saleWeightKg ? `${Number(line.saleWeightKg).toLocaleString()} kg` : null,
+                            `× ${fmt(line.unitPrice)}`,
+                          ].filter(Boolean).join(' | ')}
                         </p>
-                        <span className="block text-[11px] text-slate-400">{l.supplierName}</span>
                       </div>
-                      <span className="font-semibold text-slate-900">{fmt(l.lineGross)}</span>
+                      <span className="shrink-0 font-semibold text-slate-900">{fmt(line.lineGross)}</span>
                       <button type="button" onClick={() => removeSaleLine(i)} className="icon-btn icon-btn-danger shrink-0" aria-label="Remove line">
                         <Trash2 size={14} />
                       </button>
                     </div>
                   ))}
-                  <div className="flex items-center justify-between rounded-lg bg-slate-50 px-3 py-1.5 text-sm">
-                    <span className="font-semibold text-slate-600">Basket ({saleLines.length} item{saleLines.length === 1 ? '' : 's'})</span>
-                    <strong className="text-slate-900">{fmt(linesGross)}</strong>
-                  </div>
                 </div>
-              )}
-            </>
-          ) : (
-            <>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div className="form-field">
-                  <label className="form-label"><Package size={13} /> Shipment <span className="text-red-500">*</span></label>
-                  <select value={shipmentKey} onChange={(e) => handleShipmentChange(e.target.value)} className="input-field" disabled={!form.supplierId} required>
-                    <option value="">{form.supplierId ? 'Choose shipment…' : 'Select supplier first'}</option>
-                    {shipmentGroups.map((g) => (
-                      <option key={g.key} value={g.key}>{g.name}</option>
-                    ))}
-                  </select>
-                </div>
-                <div className="form-field">
-                  <label className="form-label"><Tag size={13} /> Product / variant <span className="text-red-500">*</span></label>
-                  <SearchableSelect
-                    block
-                    className="input-field"
-                    disabled={!shipmentKey}
-                    value={form.productId ? String(form.productId) : ''}
-                    onChange={(val) => handleProductChange(val)}
-                    options={variantOptions}
-                    placeholder={shipmentKey ? 'Search product…' : 'Choose shipment first'}
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 gap-3 mt-3">
-                <div className="form-field">
-                  <label className="form-label"><Hash size={13} /> Quantity <span className="text-red-500">*</span>
-                    <span className="form-label-hint">{selectedProduct ? String(selectedProduct.unit || '').toUpperCase() : ''}</span>
-                  </label>
-                  <input type="number" min="0" step="0.01" value={form.quantity} onChange={(e) => set('quantity', e.target.value)} className="input-field" placeholder="0" required />
-                </div>
-                <div className="form-field">
-                  <label className="form-label"><Scale size={13} /> Sale Weight <span className="form-label-hint">kg · optional</span></label>
-                  <div className="input-with-suffix">
-                    <input type="number" min="0" step="0.001" value={form.saleWeightKg} onChange={(e) => set('saleWeightKg', e.target.value)} className="input-field" placeholder="0" />
-                    <span className="input-suffix">kg</span>
-                  </div>
-                </div>
-                <div className="form-field">
-                  <label className="form-label"><DollarSign size={13} /> {pricedByWeight ? 'Price per kg' : 'Unit price'} <span className="text-red-500">*</span></label>
-                  <div className="input-with-suffix">
-                    <input type="number" min="0" step="0.01" value={form.unitPrice} onChange={(e) => set('unitPrice', e.target.value)} className="input-field" placeholder="0" required />
-                    <span className="input-suffix">{pricedByWeight ? '৳/kg' : (selectedProduct ? `৳/${String(selectedProduct.unit || 'unit').toLowerCase()}` : '৳')}</span>
-                  </div>
-                </div>
-              </div>
-              {overStock && (
-                <div className="status-error mt-3"><span>!</span><span>Quantity exceeds available stock ({selectedProduct.quantity}).</span></div>
-              )}
-            </>
+            </div>
           )}
 
           {/* ③ CRATES (adaptive: borrow for permanent, sell for walk-in) */}
@@ -533,52 +458,80 @@ const SaleForm = ({ onClose }) => {
             <p className="text-xs text-slate-400">Choose a customer first.</p>
           ) : (
             <>
-              <label className="inline-flex items-center gap-2 cursor-pointer text-sm font-semibold text-slate-700">
+              <label className="inline-flex items-center gap-2 text-sm font-semibold text-slate-700">
                 <input type="checkbox" className="h-4 w-4 shrink-0" checked={showCrate} onChange={(e) => setShowCrate(e.target.checked)} />
                 <Boxes size={14} className="shrink-0 text-blue-600" />
                 <span>{isOneTime ? 'Sell crates with this sale' : 'Customer borrows crates with this sale'}</span>
               </label>
               {showCrate && (
-                <div className="mt-3 space-y-2">
-                  {crateLines.map((line, i) => (
-                    <div key={i} className="flex items-end gap-2">
-                      <div className="form-field flex-1">
-                        {i === 0 && <label className="form-label"><Boxes size={13} /> Crate type</label>}
-                        <select value={line.crateType} onChange={(e) => updateCrateLine(i, { crateType: e.target.value })} className="input-field">
-                          <option value="">Choose crate…</option>
+                <div className="mt-3 space-y-3">
+                  <div className="rounded-xl border border-slate-200 bg-slate-50 p-3">
+                    <div className={`grid grid-cols-1 items-end gap-3 ${isOneTime ? 'md:grid-cols-[minmax(0,1fr)_7rem_9rem_auto]' : 'md:grid-cols-[minmax(0,1fr)_7rem_auto]'}`}>
+                      <div className="form-field min-w-0">
+                        <label className="form-label"><Boxes size={13} /> Crate type</label>
+                        <select value={crateDraft.crateType} onChange={(e) => setCrate('crateType', e.target.value)} className="input-field min-w-0 text-sm">
+                          <option value="">Choose crate</option>
                           {crateTypeOptions.map((t) => (
-                            <option key={t} value={t}>{titleCase(t)} ({(crateInventory.byType[t]?.inShop || 0)} in shop)</option>
+                            <option key={t} value={t}>{titleCase(t)} ({Number(crateInventory.byType?.[t]?.inShop || 0).toLocaleString()} in shop)</option>
                           ))}
                         </select>
                       </div>
-                      <div className="form-field" style={{ maxWidth: '6.5rem' }}>
-                        {i === 0 && <label className="form-label"><Hash size={13} /> Qty</label>}
-                        <input type="number" min="1" value={line.quantity} onChange={(e) => updateCrateLine(i, { quantity: e.target.value })} className="input-field" placeholder="0" />
+                      <div className="form-field min-w-0">
+                        <label className="form-label"><Hash size={13} /> Qty</label>
+                        <input type="number" min="1" value={crateDraft.quantity} onChange={(e) => setCrate('quantity', e.target.value)} className="input-field text-sm" placeholder="0" />
                       </div>
                       {isOneTime && (
-                        <div className="form-field" style={{ maxWidth: '8rem' }}>
-                          {i === 0 && <label className="form-label"><DollarSign size={13} /> ৳ / crate</label>}
-                          <input type="number" min="0" step="0.01" value={line.unitPrice} onChange={(e) => updateCrateLine(i, { unitPrice: e.target.value })} className="input-field" placeholder="0" />
+                        <div className="form-field min-w-0">
+                          <label className="form-label"><DollarSign size={13} /> Price</label>
+                          <div className="input-with-suffix min-w-0">
+                            <input type="number" min="0" step="0.01" value={crateDraft.unitPrice} onChange={(e) => setCrate('unitPrice', e.target.value)} className="input-field text-sm" placeholder="0" />
+                            <span className="input-suffix">৳</span>
+                          </div>
                         </div>
                       )}
-                      <button
-                        type="button"
-                        onClick={() => removeCrateLine(i)}
-                        className="icon-btn mb-[2px]"
-                        disabled={crateLines.length === 1}
-                        aria-label="Remove crate line"
-                      >
-                        <X size={14} />
+                      <button type="button" onClick={addCrateLine} className="btn-primary inline-flex h-10 items-center justify-center gap-1.5 px-4">
+                        <Plus size={15} /> Add
                       </button>
                     </div>
-                  ))}
-                  <button type="button" onClick={addCrateLine} className="btn-compact">
-                    <Boxes size={12} /> Add crate type
-                  </button>
-                  {/* Refundable crate deposit — permanent customers only. Returned when crates come back. */}
+                    {(crateDraft.crateType || crateDraft.quantity || (isOneTime && crateDraft.unitPrice)) && (
+                      <div className="mt-3 flex flex-wrap items-center justify-between gap-2 rounded-lg bg-white px-3 py-2 text-xs font-semibold text-slate-500">
+                        <span>{crateDraft.crateType ? `In shop: ${Number(crateInventory.byType?.[crateDraft.crateType]?.inShop || 0).toLocaleString()}` : 'Crate not selected'}</span>
+                        <span className="text-slate-700">{isOneTime ? `Line total: ${fmt((Number(crateDraft.quantity) || 0) * (Number(crateDraft.unitPrice) || 0))}` : 'Borrow line'}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  {validCrateLines.length > 0 && (
+                    <div className="rounded-xl border border-slate-200 bg-white">
+                      <div className="flex items-center justify-between border-b border-slate-100 px-3 py-2">
+                        <span className="text-xs font-bold uppercase tracking-wide text-slate-500">Crate items</span>
+                        <strong className="text-sm text-slate-900">{isOneTime ? fmt(crateSellTotal) : `${crateBorrowQty.toLocaleString()} crates`}</strong>
+                      </div>
+                      <div className="divide-y divide-slate-100">
+                          {validCrateLines.map((line, i) => (
+                            <div key={`${line.crateType}-${i}`} className="flex items-center gap-3 px-3 py-2 text-sm">
+                              <div className="min-w-0 flex-1">
+                                <p className="truncate font-semibold text-slate-900">{titleCase(line.crateType)}</p>
+                                <p className="truncate text-xs text-slate-500">
+                                  {[
+                                    `${Number(line.quantity).toLocaleString()} crates`,
+                                    isOneTime ? `x ${fmt(line.unitPrice)}` : 'Borrowed',
+                                  ].join(' | ')}
+                                </p>
+                              </div>
+                              <span className="shrink-0 font-semibold text-slate-900">{isOneTime ? fmt((Number(line.quantity) || 0) * (Number(line.unitPrice) || 0)) : Number(line.quantity).toLocaleString()}</span>
+                              <button type="button" onClick={() => removeCrateLine(i)} className="icon-btn icon-btn-danger shrink-0" aria-label="Remove crate line">
+                                <Trash2 size={14} />
+                              </button>
+                            </div>
+                          ))}
+                        </div>
+                    </div>
+                  )}
+
                   {!isOneTime && (
-                    <div className="flex items-end gap-3 pt-1">
-                      <div className="form-field" style={{ maxWidth: '12rem' }}>
+                    <div className="rounded-xl border border-slate-200 bg-white p-3">
+                      <div className="form-field max-w-xs">
                         <label className="form-label"><DollarSign size={13} /> Deposit taken <span className="form-label-hint">refundable</span></label>
                         <div className="input-with-suffix">
                           <span className="input-prefix">৳</span>
@@ -591,25 +544,17 @@ const SaleForm = ({ onClose }) => {
                           />
                         </div>
                       </div>
-                      <p className="mb-2 text-[11px] text-slate-400">Security money — returned when crates come back.</p>
                     </div>
                   )}
+
                   {isOneTime && (
-                    <div className="form-field pt-1" style={{ maxWidth: '14rem' }}>
-                      <label className="form-label"><Wallet size={13} /> Crate paid with</label>
-                      <select value={crateMethod} onChange={(e) => setCrateMethod(e.target.value)} className="input-field">
-                        {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{titleCase(m)}</option>)}
-                      </select>
-                      <p className="mt-1 text-[11px] text-slate-400">
-                        {crateMethod === 'CASH'
-                          ? 'Cash — enters the drawer / Cash Book.'
-                          : 'Non-cash — P&L profit only, not the cash drawer.'}
-                      </p>
-                    </div>
-                  )}
-                  {isOneTime && crateSellTotal > 0 && (
-                    <div className="flex justify-end text-sm font-semibold text-slate-700">
-                      Total crate price:&nbsp;<span className="text-blue-700">{fmt(crateSellTotal)}</span>
+                    <div className="rounded-xl border border-slate-200 bg-white p-3">
+                      <div className="form-field max-w-xs">
+                        <label className="form-label"><Wallet size={13} /> Crate paid with</label>
+                        <select value={crateMethod} onChange={(e) => setCrateMethod(e.target.value)} className="input-field">
+                          {PAYMENT_METHODS.map((m) => <option key={m} value={m}>{titleCase(m)}</option>)}
+                        </select>
+                      </div>
                     </div>
                   )}
                 </div>
@@ -619,7 +564,7 @@ const SaleForm = ({ onClose }) => {
 
           {/* ④ PAYMENT — Payment Type · Payment Received · Discount, equal thirds */}
           <Section title="Payment" />
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
             <div className="form-field">
               <label className="form-label"><CreditCard size={13} /> Payment Type</label>
               <select
@@ -691,52 +636,31 @@ const SaleForm = ({ onClose }) => {
         </div>
 
         <div className="modal-footer">
-          <button type="submit" className="btn-primary flex items-center gap-2" disabled={isSaving || (!isMulti && overStock)}>
+          <button type="submit" className="btn-primary flex items-center gap-2" disabled={isSaving}>
             <Save size={15} /> Record Sale
           </button>
         </div>
       </form>
 
-      {showConfirm && (
-        <div className="modal-overlay" style={{ zIndex: 60 }}>
-          <div className="modal-content" style={{ maxWidth: '26rem' }}>
-            <div className="modal-header">
-              <div className="flex items-center gap-2.5">
-                <div className="modal-icon-circle bg-amber-100 text-amber-700"><AlertTriangle size={18} /></div>
-                <div><h2>Confirm sale</h2></div>
-              </div>
-            </div>
-            <div className="px-1 py-1 space-y-3">
-              <p className="text-sm text-slate-600">
-                A recorded sale <span className="font-semibold text-slate-800">cannot be undone</span>. Please review before saving.
-              </p>
-              <div className="rounded-lg border border-slate-200 bg-slate-50 p-3 text-sm space-y-1.5">
-                <div className="flex justify-between"><span className="text-slate-500">Sale amount</span><span className="font-semibold text-slate-800">{fmt(netSale)}</span></div>
-                <div className="flex justify-between"><span className="text-slate-500">Paid now</span><span className="font-semibold text-slate-800">{fmt(paymentReceived)}{paymentReceived > 0 ? ` · ${titleCase(method)}` : ''}</span></div>
-                {dueAfter > 0 && (
-                  <div className="flex justify-between"><span className="text-slate-500">Due</span><span className="font-semibold text-rose-600">{fmt(dueAfter)}</span></div>
-                )}
-                {showCrate && crateBorrowQty > 0 && (
-                  <div className="flex justify-between"><span className="text-slate-500">Crates</span><span className="font-semibold text-slate-800">{crateBorrowQty} {isOneTime ? `sold · ${fmt(crateSellTotal)}` : 'borrowed'}</span></div>
-                )}
-                {showCrate && !isOneTime && Number(crateDeposit) > 0 && (
-                  <div className="flex justify-between"><span className="text-slate-500">Crate deposit (refundable)</span><span className="font-semibold text-amber-700">{fmt(Number(crateDeposit))}</span></div>
-                )}
-                <div className="flex justify-between border-t border-slate-200 pt-1.5 mt-1.5">
-                  <span className="font-semibold text-slate-600">Total received</span>
-                  <span className="font-bold text-emerald-600">{fmt(paymentReceived + crateSellTotal + (!isOneTime ? Number(crateDeposit) || 0 : 0))}</span>
-                </div>
-              </div>
-            </div>
-            <div className="modal-footer">
-              <button type="button" onClick={() => setShowConfirm(false)} className="btn-secondary" disabled={isSaving}>Back</button>
-              <button type="button" onClick={handleConfirmSave} className="btn-primary flex items-center gap-2" disabled={isSaving}>
-                <Save size={15} /> {isSaving ? 'Saving…' : 'Confirm & Save'}
-              </button>
-            </div>
-          </div>
+      <ConfirmDialog
+        open={showConfirm}
+        title="Confirm sale"
+        message="Save this sale?"
+        confirmLabel="Confirm & Save"
+        busy={isSaving}
+        onCancel={() => setShowConfirm(false)}
+        onConfirm={handleConfirmSave}
+      >
+        <div className="space-y-1.5">
+          <div className="flex justify-between gap-4"><span className="text-slate-500">Items</span><span className="font-semibold text-slate-900">{saleLines.length}</span></div>
+          <div className="flex justify-between gap-4"><span className="text-slate-500">Sale</span><span className="font-semibold text-slate-900">{fmt(netSale)}</span></div>
+          <div className="flex justify-between gap-4"><span className="text-slate-500">Paid</span><span className="font-semibold text-emerald-700">{fmt(paymentReceived)}{paymentReceived > 0 ? ` · ${titleCase(method)}` : ''}</span></div>
+          {dueAfter > 0 && <div className="flex justify-between gap-4"><span className="text-slate-500">Due</span><span className="font-semibold text-rose-600">{fmt(dueAfter)}</span></div>}
+          {showCrate && crateBorrowQty > 0 && <div className="flex justify-between gap-4"><span className="text-slate-500">Crates</span><span className="font-semibold text-slate-900">{crateBorrowQty} {isOneTime ? `sold · ${fmt(crateSellTotal)}` : 'borrowed'}</span></div>}
+          {showCrate && !isOneTime && Number(crateDeposit) > 0 && <div className="flex justify-between gap-4"><span className="text-slate-500">Deposit</span><span className="font-semibold text-amber-700">{fmt(Number(crateDeposit))}</span></div>}
+          <div className="flex justify-between gap-4 border-t border-slate-200 pt-1.5"><span className="font-semibold text-slate-600">Total received</span><span className="font-bold text-emerald-700">{fmt(paymentReceived + crateSellTotal + (!isOneTime ? Number(crateDeposit) || 0 : 0))}</span></div>
         </div>
-      )}
+      </ConfirmDialog>
     </div>
   );
 };

@@ -7,6 +7,8 @@ public record CrateInventoryTypeResponse(
         String crateType,
         Integer total,
         Integer inHand,
+        Integer customerCratesInShop,
+        Integer supplierCratesInShop,
         Integer withCustomers,
         Integer withSuppliers,
         Integer lostDamaged,

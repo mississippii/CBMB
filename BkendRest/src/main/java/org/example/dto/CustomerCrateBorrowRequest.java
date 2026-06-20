@@ -8,6 +8,7 @@ public record CustomerCrateBorrowRequest(
         List<CrateLineRequest> crates,
         /** Optional refundable deposit taken against the borrowed crates (cash in). */
         BigDecimal depositAmount,
-        String note
+        String note,
+        Long saleId
 ) {
 }

@@ -159,4 +159,42 @@ public interface BoxLedgerRepository extends JpaRepository<BoxLedger, BoxLedgerI
             @Param("from") LocalDateTime from,
             @Param("to") LocalDateTime to
     );
+    /**
+     * Gross money held from walk-in crate sales. These rows represent refundable
+     * security money for non-account customers until a referenced return/refund flow clears them.
+     */
+    @Query("""
+        SELECT COALESCE(SUM(
+            CASE
+              WHEN l.movementType = org.example.model.enums.BoxMovementType.SOLD THEN l.quantity * l.unitSalePrice
+              WHEN l.movementType = org.example.model.enums.BoxMovementType.WALK_IN_REFUND THEN -l.quantity * l.unitSalePrice
+              ELSE 0
+            END
+        ), 0)
+        FROM BoxLedger l
+        WHERE l.wholesaler.id = :wholesalerId
+          AND l.partyType = org.example.model.enums.BoxLedgerPartyType.WHOLESALER
+          AND l.movementType IN (org.example.model.enums.BoxMovementType.SOLD,
+                                 org.example.model.enums.BoxMovementType.WALK_IN_REFUND)
+          AND l.unitSalePrice IS NOT NULL
+        """)
+    java.math.BigDecimal sumWalkInCrateRefundableSales(@Param("wholesalerId") Long wholesalerId);
+
+    @Query("""
+        SELECT COALESCE(SUM(l.quantity * l.unitSalePrice), 0)
+        FROM BoxLedger l
+        WHERE l.wholesaler.id = :wholesalerId
+          AND l.movementType = org.example.model.enums.BoxMovementType.WALK_IN_REFUND
+          AND l.partyType = org.example.model.enums.BoxLedgerPartyType.WHOLESALER
+          AND (l.paymentMethod IS NULL OR l.paymentMethod = org.example.model.enums.PaymentMethod.CASH)
+          AND l.unitSalePrice IS NOT NULL
+          AND (:from IS NULL OR l.createdAt >= :from)
+          AND (:to   IS NULL OR l.createdAt <  :to)
+        """)
+    java.math.BigDecimal sumWalkInCrateCashRefunds(
+            @Param("wholesalerId") Long wholesalerId,
+            @Param("from") LocalDateTime from,
+            @Param("to") LocalDateTime to
+    );
+
 }

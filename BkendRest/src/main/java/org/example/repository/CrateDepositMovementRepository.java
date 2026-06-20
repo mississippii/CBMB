@@ -12,6 +12,8 @@ public interface CrateDepositMovementRepository extends JpaRepository<CrateDepos
     /** Deposit movements recorded against a customer payment (used to reverse on cancellation). */
     List<CrateDepositMovement> findByWholesalerIdAndPaymentId(Long wholesalerId, Long paymentId);
 
+    List<CrateDepositMovement> findByWholesalerIdAndSaleId(Long wholesalerId, Long saleId);
+
     /** Deposit money TAKEN (cash in) in [from, to). */
     @Query("""
         select coalesce(sum(m.amount), 0) from CrateDepositMovement m

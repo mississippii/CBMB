@@ -107,28 +107,19 @@ const Navbar = ({ onHome, subtitle, onLogout }) => {
                 </div>
 
                 {/* Footer action — finishes the card */}
-                <div className="border-t border-slate-100 bg-slate-50/60 px-2.5 py-2">
+                <div className="flex justify-center border-t border-slate-100 bg-slate-50/60 px-4 py-3">
                   <button
                     type="button"
                     onClick={onLogout || logout}
-                    className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-sm font-semibold text-slate-600 transition hover:bg-rose-50 hover:text-rose-600"
+                    className="inline-flex items-center justify-center gap-2 rounded-lg bg-amber-500 px-4 py-2 text-sm font-bold text-slate-950 shadow-sm transition hover:bg-amber-600 focus:outline-none focus:ring-2 focus:ring-amber-200"
                   >
-                    <LogOut size={15} /> Sign out
+                    <LogOut size={15} /> Logout
                   </button>
                 </div>
               </div>
             )}
           </div>
 
-          <button
-            type="button"
-            onClick={onLogout || logout}
-            className="flex h-10 w-10 items-center justify-center rounded-full border border-slate-200 bg-white text-slate-500 shadow-sm transition hover:border-rose-200 hover:bg-rose-50 hover:text-rose-600 focus:outline-none focus:ring-2 focus:ring-rose-200"
-            aria-label="Logout"
-            title="Logout"
-          >
-            <LogOut size={17} />
-          </button>
         </div>
       </div>
     </nav>

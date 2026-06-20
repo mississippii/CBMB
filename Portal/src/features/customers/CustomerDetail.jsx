@@ -1,46 +1,67 @@
 import { useEffect, useState } from 'react'
-import { Power, RotateCcw, Users, ArrowLeft, Phone, MapPin, Building2 } from 'lucide-react'
+import { Power, RotateCcw, Users, ArrowLeft, Phone, MapPin, Building2, Pencil } from 'lucide-react'
 import { useData } from '../../data/DataContext'
 import { useToast } from '../../shared/components/Toast'
 import { TablePager, usePagination } from '../../shared/components'
 import { formatDate } from '../../shared/utils/format'
+import { isValidPhone, normalizePhone, PHONE_HINT } from '../../shared/utils/validation'
 
 const formatCurrency = (value) => '৳ ' + Math.ceil(Number(value) || 0).toLocaleString()
-const formatAmount = (transaction) => {
-  if (transaction.transactionType === 'Payment') {
-    return formatCurrency(transaction.paymentAmount || transaction.totalAmount)
-  }
-  return formatCurrency(transaction.totalAmount)
+const moneyOrDash = (value) => Number(value) > 0 ? formatCurrency(value) : '—'
+
+const methodLabel = (value) => {
+  const method = String(value || '').toUpperCase()
+  if (!method || method === 'NONE') return '—'
+  if (method === 'BKASH') return 'bKash'
+  return method.charAt(0) + method.slice(1).toLowerCase()
 }
 
-const renderCustomerTransactionDetails = (transaction) => {
-  if (transaction.transactionType === 'Payment') {
-    const parts = []
-    if (Number(transaction.paymentAmount) > 0) parts.push('Cash received')
-    if (Number(transaction.cratesReturned) > 0) parts.push('Crates returned: ' + transaction.cratesReturned)
-    return parts.length ? parts.join(' • ') : (transaction.note || 'Payment recorded')
-  }
+const typeLabel = (transaction) => {
+  if (transaction.transactionType !== 'Payment') return 'Sale'
+  const value = String(transaction.paymentOperationType || transaction.paymentType || transaction.note || '').toUpperCase()
+  if (value.includes('CASH_AND_CRATE_RETURN')) return 'Cash + crates'
+  if (value.includes('CRATE_RETURN')) return 'Crates received'
+  if (value.includes('CASH_RECEIVE')) return 'Cash received'
+  if (Number(transaction.cratesReturned) > 0 && Number(transaction.paymentAmount) > 0) return 'Cash + crates'
+  if (Number(transaction.cratesReturned) > 0) return 'Crates received'
+  if (Number(transaction.paymentAmount) > 0) return 'Cash received'
+  return 'Payment'
+}
 
-  return [transaction.product, transaction.category && transaction.category !== 'No Category' ? transaction.category : null]
-    .filter(Boolean)
-    .join(' · ') || 'Sale recorded'
+const productLabel = (transaction) => {
+  if (transaction.transactionType !== 'Payment') return transaction.product || 'Product'
+  const value = String(transaction.paymentOperationType || transaction.paymentType || transaction.note || '').toUpperCase()
+  return value.includes('CRATE') || Number(transaction.cratesReturned) > 0 ? 'Crate' : '—'
+}
+
+const transactionAmount = (transaction) => (
+  transaction.transactionType === 'Payment' ? '—' : moneyOrDash(transaction.totalAmount)
+)
+
+const transactionPaid = (transaction) => moneyOrDash(transaction.paymentAmount)
+const transactionDue = (transaction) => {
+  if (transaction.transactionType === 'Payment') return '—'
+  return formatCurrency(Math.max(0, (Number(transaction.totalAmount) || 0) - (Number(transaction.paymentAmount) || 0)))
 }
 
 const CustomerDetail = ({ customerId, onBack }) => {
-  const { customers, transactions, getCustomerProfile, setCustomerStatus } = useData()
+  const { customers, transactions, getCustomerProfile, updateCustomer, setCustomerStatus } = useData()
   const showToast = useToast()
   const [profile, setProfile] = useState(null)
   const [isProfileLoading, setIsProfileLoading] = useState(false)
   const [showDisableConfirm, setShowDisableConfirm] = useState(false)
+  const [showEditModal, setShowEditModal] = useState(false)
+  const [editForm, setEditForm] = useState({ name: '', ownerName: '', phone: '', address: '' })
+  const [editError, setEditError] = useState('')
+  const [isSavingEdit, setIsSavingEdit] = useState(false)
   const [isTogglingStatus, setIsTogglingStatus] = useState(false)
   const [disableError, setDisableError] = useState('')
 
   useEffect(() => {
     let isActive = true
-    setProfile(null)
-
     if (!customerId || !getCustomerProfile) return undefined
 
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setIsProfileLoading(true)
     getCustomerProfile(customerId)
       .then((result) => {
@@ -61,7 +82,8 @@ const CustomerDetail = ({ customerId, onBack }) => {
   }, [customerId])
 
   const fallbackCustomer = customers.find((item) => item.id === customerId)
-  const customer = profile?.account || fallbackCustomer
+  const profileMatches = profile?.account?.id === customerId
+  const customer = profileMatches ? profile.account : fallbackCustomer
 
   const fallbackTransactions = (customer
     ? transactions.filter((transaction) => (
@@ -72,7 +94,7 @@ const CustomerDetail = ({ customerId, onBack }) => {
     : [])
     .slice()
     .sort((a, b) => new Date(b.createdAt || b.date) - new Date(a.createdAt || a.date))
-  const customerTransactions = profile?.transactions || fallbackTransactions
+  const customerTransactions = profileMatches ? (profile?.transactions || []) : fallbackTransactions
   // Hook must run before any early return — keep it above the not-found guard.
   const { pageItems: pagedTransactions, ...txnPager } = usePagination(customerTransactions, 12, [customerId])
 
@@ -80,6 +102,44 @@ const CustomerDetail = ({ customerId, onBack }) => {
     return <div className="text-gray-600">Customer not found</div>
   }
 
+  const openEditModal = () => {
+    setEditForm({
+      name: customer.name || '',
+      ownerName: customer.ownerName || customer.owner || '',
+      phone: normalizePhone(customer.phone),
+      address: customer.address || '',
+    })
+    setEditError('')
+    setShowEditModal(true)
+  }
+
+  const handleEditSave = async () => {
+    const phone = normalizePhone(editForm.phone)
+    setIsSavingEdit(true)
+    setEditError('')
+    try {
+      const updated = await updateCustomer({
+        id: customer.id,
+        name: editForm.name.trim(),
+        ownerName: editForm.ownerName.trim(),
+        phone,
+        address: editForm.address.trim(),
+      })
+      setProfile((prev) => (prev ? { ...prev, account: { ...prev.account, ...updated } } : prev))
+      setShowEditModal(false)
+      showToast('Customer updated', 'success')
+    } catch (error) {
+      setEditError(error.message || 'Failed to update customer.')
+    } finally {
+      setIsSavingEdit(false)
+    }
+  }
+
+  const requestEditSave = () => {
+    if (!editForm.name.trim()) { setEditError('Business name is required.'); return }
+    if (!isValidPhone(editForm.phone)) { setEditError(PHONE_HINT); return }
+    handleEditSave()
+  }
 
   const handleConfirmDisable = async () => {
     setIsTogglingStatus(true)
@@ -152,9 +212,14 @@ const CustomerDetail = ({ customerId, onBack }) => {
                 <RotateCcw size={14} /> {isTogglingStatus ? 'Reactivating…' : 'Reactivate'}
               </button>
             ) : (
-              <button onClick={() => { setDisableError(''); setShowDisableConfirm(true); }} className="icon-btn icon-btn-danger" title="Disable customer">
-                <Power size={15} />
-              </button>
+              <>
+                <button onClick={openEditModal} className="icon-btn" title="Edit customer">
+                  <Pencil size={15} />
+                </button>
+                <button onClick={() => { setDisableError(''); setShowDisableConfirm(true); }} className="icon-btn icon-btn-danger" title="Disable customer">
+                  <Power size={15} />
+                </button>
+              </>
             )}
           </div>
         </div>
@@ -173,13 +238,16 @@ const CustomerDetail = ({ customerId, onBack }) => {
           {customerTransactions.length === 0 ? (
             <div className="empty-state">No customer transactions found.</div>
           ) : (
-            <table className="center-table w-full min-w-[640px] text-sm">
+            <table className="center-table w-full min-w-[860px] text-sm">
               <thead>
                 <tr className="border-b border-slate-200 bg-slate-50">
                   <th className="px-4 py-3 font-semibold text-slate-700">Date</th>
                   <th className="px-4 py-3 font-semibold text-slate-700">Type</th>
-                  <th className="px-4 py-3 font-semibold text-slate-700">Details</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Product</th>
                   <th className="px-4 py-3 font-semibold text-slate-700">Amount</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Paid</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Due</th>
+                  <th className="px-4 py-3 font-semibold text-slate-700">Method</th>
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
@@ -188,11 +256,14 @@ const CustomerDetail = ({ customerId, onBack }) => {
                     <td className="whitespace-nowrap px-4 py-3 font-semibold text-slate-900">{formatDate(transaction.createdAt || transaction.date)}</td>
                     <td className="px-4 py-3">
                       <span className={`badge ${transaction.transactionType === 'Payment' ? 'badge-teal' : 'badge-emerald'}`}>
-                        {transaction.transactionType === 'Payment' ? 'Payment' : 'Sale'}
+                        {typeLabel(transaction)}
                       </span>
                     </td>
-                    <td className="px-4 py-3 text-slate-600">{renderCustomerTransactionDetails(transaction)}</td>
-                    <td className="px-4 py-3 font-extrabold text-slate-900 tabular-nums">{formatAmount(transaction)}</td>
+                    <td className="px-4 py-3 text-left font-semibold text-slate-700">{productLabel(transaction)}</td>
+                    <td className="px-4 py-3 font-extrabold text-slate-900 tabular-nums">{transactionAmount(transaction)}</td>
+                    <td className="px-4 py-3 font-semibold text-emerald-700 tabular-nums">{transactionPaid(transaction)}</td>
+                    <td className="px-4 py-3 font-semibold text-rose-700 tabular-nums">{transactionDue(transaction)}</td>
+                    <td className="px-4 py-3"><span className="badge badge-teal">{methodLabel(transaction.paymentMethod)}</span></td>
                   </tr>
                 ))}
               </tbody>
@@ -271,6 +342,81 @@ const CustomerDetail = ({ customerId, onBack }) => {
 
         </aside>
       </div>
+
+      {showEditModal && (
+        <div className="modal-overlay">
+          <div className="modal-content supplier-form-modal">
+            <div className="modal-header">
+              <div>
+                <h2>Edit Customer</h2>
+              </div>
+              <button onClick={() => setShowEditModal(false)} className="modal-close-btn">✕</button>
+            </div>
+            <div className="modal-body">
+              <div className="form-grid">
+                <div className="form-field">
+                  <label className="form-label">
+                    <Building2 size={13} /> Business Name <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="text"
+                    value={editForm.name}
+                    onChange={(e) => setEditForm((p) => ({ ...p, name: e.target.value }))}
+                    className="input-field"
+                    autoFocus
+                  />
+                </div>
+                <div className="form-field">
+                  <label className="form-label">
+                    <Users size={13} /> Owner Name
+                  </label>
+                  <input
+                    type="text"
+                    value={editForm.ownerName}
+                    onChange={(e) => setEditForm((p) => ({ ...p, ownerName: e.target.value }))}
+                    className="input-field"
+                  />
+                </div>
+                <div className="form-field">
+                  <label className="form-label">
+                    <Phone size={13} /> Phone Number <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="tel"
+                    value={editForm.phone}
+                    onChange={(e) => setEditForm((p) => ({ ...p, phone: normalizePhone(e.target.value) }))}
+                    className="input-field"
+                    inputMode="numeric"
+                  />
+                </div>
+                <div className="form-field">
+                  <label className="form-label">
+                    <MapPin size={13} /> Location
+                  </label>
+                  <input
+                    type="text"
+                    value={editForm.address}
+                    onChange={(e) => setEditForm((p) => ({ ...p, address: e.target.value }))}
+                    className="input-field"
+                  />
+                </div>
+              </div>
+              {editError && (
+                <div className="status-error mt-4">
+                  <span>!</span>
+                  <span>{editError}</span>
+                </div>
+              )}
+            </div>
+            <div className="modal-footer justify-center">
+              <button onClick={() => setShowEditModal(false)} className="btn-secondary" disabled={isSavingEdit}>Cancel</button>
+              <button onClick={requestEditSave} disabled={isSavingEdit} className="btn-primary flex items-center gap-2">
+                {isSavingEdit ? 'Saving…' : (<><Pencil size={14} /> Save Changes</>)}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {showDisableConfirm && (
         <div className="modal-overlay">

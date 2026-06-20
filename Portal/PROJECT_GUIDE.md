@@ -223,8 +223,7 @@ Payload sent to backend:
   "ownerName": "Doly Ahmed",
   "phone": "01811111111",
   "address": "Mirpur, Dhaka",
-  "openingDue": 5000,
-  "jamanotBalance": 1000
+  "openingDue": 5000
 }
 ```
 
@@ -254,4 +253,33 @@ The following areas still mostly run in frontend state and need backend APIs/tab
 - Use backend data for all wholesaler-specific records as APIs become available.
 - When changing login response shape, update `AuthContext` and route guards together.
 - Keep admin and wholesaler experiences role-separated.
+
+## Crate Frontend Contract
+
+Crate UI lives in `src/features/crates/CratesDashboard.jsx`. Shared startup state and refresh helpers live in `src/data/DataContext.jsx`.
+
+Primary crate endpoints used by the frontend:
+
+```http
+POST /wholesalers/{wholesalerId}/crates/dashboard
+POST /wholesalers/{wholesalerId}/crates/purchase/create
+POST /wholesalers/{wholesalerId}/crates/lost-damaged/create
+POST /wholesalers/{wholesalerId}/crates/refund
+POST /wholesalers/{wholesalerId}/payments/customer/settle
+POST /wholesalers/{wholesalerId}/payments/supplier/crate-give
+POST /wholesalers/{wholesalerId}/payments/supplier/crate-return
+```
+
+Dashboard mapping rules:
+
+```text
+cratesInShop              -> In Shop KPI; wholesaler-owned crates only
+customerCratesInShop     -> customer-owned crates physically in shop
+supplierCratesInShop     -> supplier-owned crates physically in shop
+Others Crate KPI         -> customerCratesInShop + supplierCratesInShop
+crateTypes[].inHand      -> per-type owned in-shop count; used for validation/sell/loss/give limits
+crateTypes[].customerCratesInShop + supplierCratesInShop -> per-type Others Crate display
+```
+
+Important rendering rule: `In Shop` must never include supplier/customer-owned crates. Those are shown in `Others Crate` and are not usable as owned stock.
 

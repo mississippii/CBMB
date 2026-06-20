@@ -15,5 +15,6 @@ public enum BoxMovementType {
     LOST,
     DAMAGED,
     SOLD,
+    WALK_IN_REFUND,
     ADJUSTMENT
 }

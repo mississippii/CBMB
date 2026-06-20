@@ -165,7 +165,8 @@ public class CashReconciliationService {
         BigDecimal customerCollections = money(paymentRepository.sumCashAmountInPeriod(wholesalerId, from, to));
         // Refundable crate deposits: taken = cash in, refunded = cash out (a liability, not income).
         BigDecimal crateDepositsTaken = money(crateDepositMovementRepository.sumTakenInPeriod(wholesalerId, from, to));
-        BigDecimal crateDepositRefunds = money(crateDepositMovementRepository.sumRefundedInPeriod(wholesalerId, from, to));
+        BigDecimal crateDepositRefunds = money(crateDepositMovementRepository.sumRefundedInPeriod(wholesalerId, from, to)
+                .add(boxLedgerRepository.sumWalkInCrateCashRefunds(wholesalerId, from, to)));
 
         BigDecimal supplierPayments = money(supplierSettlementRepository
                 .sumAmountByTypeInPeriod(wholesalerId, SettlementType.PRODUCT_PAYMENT, from, to));

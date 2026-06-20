@@ -135,6 +135,14 @@ public class WholesalerController {
         return wholesalerService.createCustomer(wholesalerId, request);
     }
 
+    @PostMapping("/customers/update")
+    public CustomerAccountResponse updateCustomer(
+            @PathVariable Long wholesalerId,
+            @RequestBody org.example.dto.UpdateCustomerRequest request
+    ) {
+        return wholesalerService.updateCustomer(wholesalerId, request);
+    }
+
     @PostMapping("/customers/profile")
     public CustomerProfileResponse customerProfile(
             @PathVariable Long wholesalerId,

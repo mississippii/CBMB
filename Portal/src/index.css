@@ -5761,12 +5761,15 @@ tbody tr:hover,
   grid-template-columns: 1fr !important;
 }
 
-/* Number input without the up/down spinner arrows. */
+/* Number inputs accept typed entry only; hide browser up/down spinner arrows globally. */
+input[type="number"]::-webkit-outer-spin-button,
+input[type="number"]::-webkit-inner-spin-button,
 .no-spinner::-webkit-outer-spin-button,
 .no-spinner::-webkit-inner-spin-button {
   -webkit-appearance: none;
   margin: 0;
 }
+input[type="number"],
 .no-spinner {
   -moz-appearance: textfield;
   appearance: textfield;
@@ -6335,4 +6338,12 @@ tbody tr:hover,
     padding-left: 0;
     text-align: left;
   }
+}
+
+.purchase-modal-footer {
+  justify-content: center !important;
+}
+
+.purchase-modal-footer button {
+  flex: 0 0 auto !important;
 }

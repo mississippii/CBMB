@@ -1,6 +1,7 @@
 package org.example.controller;
 
 import java.util.List;
+import org.example.dto.SaleDetailResponse;
 import org.example.dto.SupplierPortalOverviewResponse;
 import org.example.dto.SupplierPortalSalesRequest;
 import org.example.dto.SupplierPortalShipmentResponse;
@@ -53,6 +54,17 @@ public class SupplierPortalController {
     ) {
         supplierPortalTokenService.requireValid(supplierId, token);
         return supplierPortalService.sales(supplierId, request == null ? null : request.accountId());
+    }
+
+    @PostMapping("/sales/{saleId}/detail")
+    public SaleDetailResponse saleDetail(
+            @PathVariable Long supplierId,
+            @PathVariable Long saleId,
+            @RequestHeader(name = "X-Supplier-Portal-Token", required = false) String token,
+            @RequestBody SupplierPortalSalesRequest request
+    ) {
+        supplierPortalTokenService.requireValid(supplierId, token);
+        return supplierPortalService.saleDetail(supplierId, request == null ? null : request.accountId(), saleId);
     }
 
     @PostMapping("/shipments/list")

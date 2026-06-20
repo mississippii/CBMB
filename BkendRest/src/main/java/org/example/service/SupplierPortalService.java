@@ -8,6 +8,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import org.example.dto.CrateTypeQuantity;
+import org.example.dto.SaleDetailResponse;
 import org.example.dto.SupplierDeliveryResponse;
 import org.example.dto.SupplierPortalOverviewResponse;
 import org.example.dto.SupplierPortalShipmentResponse;
@@ -39,6 +40,7 @@ public class SupplierPortalService {
     private final SupplierDueService supplierDueService;
     private final SupplierDeliveryService supplierDeliveryService;
     private final TransactionService transactionService;
+    private final SaleService saleService;
     private final BoxBalanceRepository boxBalanceRepository;
 
     public SupplierPortalService(
@@ -48,6 +50,7 @@ public class SupplierPortalService {
             SupplierDueService supplierDueService,
             SupplierDeliveryService supplierDeliveryService,
             TransactionService transactionService,
+            SaleService saleService,
             BoxBalanceRepository boxBalanceRepository
     ) {
         this.supplierRepository = supplierRepository;
@@ -56,6 +59,7 @@ public class SupplierPortalService {
         this.supplierDueService = supplierDueService;
         this.supplierDeliveryService = supplierDeliveryService;
         this.transactionService = transactionService;
+        this.saleService = saleService;
         this.boxBalanceRepository = boxBalanceRepository;
     }
 
@@ -129,19 +133,17 @@ public class SupplierPortalService {
 
     @Transactional(readOnly = true)
     public List<TransactionResponse> sales(Long supplierId, Long accountId) {
-        findSupplier(supplierId);
-        if (accountId == null) {
-            throw new BadRequestException("Supplier account is required.");
-        }
-        WholesalerSupplier account = wholesalerSupplierRepository.findById(accountId)
-                .orElseThrow(() -> new BadRequestException("Supplier account not found."));
-        if (account.getSupplier() == null || !account.getSupplier().getId().equals(supplierId)) {
-            throw new BadRequestException("Supplier account not found.");
-        }
+        WholesalerSupplier account = findSupplierAccount(supplierId, accountId);
         return transactionService.listSupplierTransactions(account.getWholesaler().getId(), account.getId())
                 .stream()
                 .filter(t -> "SALE".equals(t.transactionType()))
                 .toList();
+    }
+
+    @Transactional(readOnly = true)
+    public SaleDetailResponse saleDetail(Long supplierId, Long accountId, Long saleId) {
+        WholesalerSupplier account = findSupplierAccount(supplierId, accountId);
+        return saleService.detailForSupplier(account.getWholesaler().getId(), saleId, account.getId());
     }
 
     /** Crates this supplier currently holds from the wholesaler, per type (non-zero only). */
@@ -159,6 +161,19 @@ public class SupplierPortalService {
         return byType.entrySet().stream()
                 .map(e -> new CrateTypeQuantity(e.getKey(), e.getValue()))
                 .toList();
+    }
+
+    private WholesalerSupplier findSupplierAccount(Long supplierId, Long accountId) {
+        findSupplier(supplierId);
+        if (accountId == null) {
+            throw new BadRequestException("Supplier account is required.");
+        }
+        WholesalerSupplier account = wholesalerSupplierRepository.findById(accountId)
+                .orElseThrow(() -> new BadRequestException("Supplier account not found."));
+        if (account.getSupplier() == null || !account.getSupplier().getId().equals(supplierId)) {
+            throw new BadRequestException("Supplier account not found.");
+        }
+        return account;
     }
 
     private Supplier findSupplier(Long supplierId) {

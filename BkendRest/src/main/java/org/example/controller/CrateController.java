@@ -2,6 +2,7 @@ package org.example.controller;
 
 import org.example.dto.CrateDashboardResponse;
 import org.example.dto.CrateLossStatsResponse;
+import org.example.dto.CrateRefundRequest;
 import org.example.dto.CrateQuantityRequest;
 import org.example.dto.CrateTypeResponse;
 import org.example.dto.SellCratesRequest;
@@ -80,4 +81,12 @@ public class CrateController {
     ) {
         return crateService.sellCrates(wholesalerId, request);
     }
+    @PostMapping("/refund")
+    public CrateDashboardResponse refundWalkInCrates(
+            @PathVariable Long wholesalerId,
+            @RequestBody CrateRefundRequest request
+    ) {
+        return crateService.refundWalkInCrates(wholesalerId, request);
+    }
+
 }

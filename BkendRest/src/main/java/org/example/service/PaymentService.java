@@ -171,7 +171,7 @@ public class PaymentService {
         payment.setBoxesReturned(boxesReturned);
         payment.setPreviousDue(previousDue);
         payment.setDueAfterPayment(dueAfter);
-        payment.setPaymentMethod(resolveCustomerPaymentMethod(request.paymentMethod(), cashAmount));
+        payment.setPaymentMethod(resolveCustomerPaymentMethod(request.paymentMethod(), cashAmount, depositRefund));
         payment.setNote(clean(request.note()));
         payment = paymentRepository.save(payment);
 
@@ -216,14 +216,14 @@ public class PaymentService {
 
         List<CrateTypeQuantity> crateLines = new ArrayList<>();
         for (Map.Entry<String, Integer> line : lines.entrySet()) {
-            applyCustomerCrateBorrow(wholesaler, customerAccount, line.getKey(), line.getValue(), request.note());
+            applyCustomerCrateBorrow(wholesaler, customerAccount, line.getKey(), line.getValue(), request.saleId(), request.note());
             crateLines.add(new CrateTypeQuantity(line.getKey(), line.getValue()));
         }
 
         // Optional refundable deposit taken against the borrowed crates (cash in, not income).
         BigDecimal deposit = money(nonNegative(request.depositAmount(), "Crate deposit cannot be negative."));
         if (deposit.signum() > 0) {
-            recordCrateDeposit(wholesaler, customerAccount, CrateDepositMovementType.TAKEN, deposit, null, null,
+            recordCrateDeposit(wholesaler, customerAccount, CrateDepositMovementType.TAKEN, deposit, request.saleId(), null,
                     "Crate deposit taken — " + describeLines(crateLines));
         }
 
@@ -366,93 +366,112 @@ public class PaymentService {
         return sb.toString();
     }
 
-    private void applyCustomerCrateBorrow(Wholesaler wholesaler, WholesalerCustomer customerAccount, String crateTypeValue, int quantity, String note) {
+    private void applyCustomerCrateBorrow(Wholesaler wholesaler, WholesalerCustomer customerAccount, String crateTypeValue, int quantity, Long saleId, String note) {
         BoxType boxType = findBoxType(wholesaler.getId(), crateTypeValue);
+        CustomerCrateHolding holding = findOrCreateCustomerHolding(wholesaler, customerAccount, boxType);
+        int offset = Math.min(quantity, safeQty(holding.getQuantity()));
+        if (offset > 0) {
+            holding.setQuantity(holding.getQuantity() - offset);
+            customerCrateHoldingRepository.save(holding);
+            saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), BoxMovementType.RETURNED_TO_CUSTOMER, offset, saleId == null ? BoxReferenceType.PAYMENT : BoxReferenceType.SALE, saleId, note);
+        }
+
+        int remaining = quantity - offset;
+        if (remaining == 0) {
+            return;
+        }
+
         BoxInventory inventory = findBoxInventory(wholesaler, boxType);
-        if (inventory.getInHand() < quantity) {
+        if (inventory.getInHand() < remaining) {
             throw new BadRequestException("Not enough " + crateTypeValue + " crates in shop.");
         }
-        BoxBalance balance = boxBalanceRepository
-                .findByWholesaler_IdAndPartyTypeAndPartyAccountIdAndBoxType_Id(wholesaler.getId(), PartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), boxType.getId())
-                .orElseGet(() -> {
-                    BoxBalance newBalance = new BoxBalance();
-                    newBalance.setWholesaler(wholesaler);
-                    newBalance.setBoxType(boxType);
-                    newBalance.setPartyType(PartyType.WHOLESALER_CUSTOMER);
-                    newBalance.setPartyAccountId(customerAccount.getId());
-                    newBalance.setBoxesDue(0);
-                    return newBalance;
-                });
-        inventory.setInHand(inventory.getInHand() - quantity);
-        inventory.setWithCustomers(inventory.getWithCustomers() + quantity);
-        balance.setBoxesDue(balance.getBoxesDue() + quantity);
+        BoxBalance balance = findOrCreateBoxBalance(wholesaler, PartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), boxType);
+        inventory.setInHand(inventory.getInHand() - remaining);
+        inventory.setWithCustomers(inventory.getWithCustomers() + remaining);
+        balance.setBoxesDue(safeQty(balance.getBoxesDue()) + remaining);
         boxInventoryRepository.save(inventory);
         boxBalanceRepository.save(balance);
-        saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), BoxMovementType.GIVEN_TO_CUSTOMER, quantity, null, note);
+        saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), BoxMovementType.GIVEN_TO_CUSTOMER, remaining, saleId == null ? BoxReferenceType.PAYMENT : BoxReferenceType.SALE, saleId, note);
     }
 
     private void applyCustomerCrateReturn(Wholesaler wholesaler, WholesalerCustomer customerAccount, String crateTypeValue, int quantity, Long paymentId, String note) {
         BoxType boxType = findBoxType(wholesaler.getId(), crateTypeValue);
-        BoxBalance balance = boxBalanceRepository
-                .findByWholesaler_IdAndPartyTypeAndPartyAccountIdAndBoxType_Id(wholesaler.getId(), PartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), boxType.getId())
-                .orElseThrow(() -> new BadRequestException(crateTypeValue + " crate due was not found for this customer."));
-        if (balance.getBoxesDue() < quantity) {
-            throw new BadRequestException("Returned " + crateTypeValue + " crates cannot exceed customer crate due.");
+        BoxBalance balance = findOrCreateBoxBalance(wholesaler, PartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), boxType);
+        int offset = Math.min(quantity, safeQty(balance.getBoxesDue()));
+        if (offset > 0) {
+            BoxInventory inventory = findBoxInventory(wholesaler, boxType);
+            if (inventory.getWithCustomers() < offset) {
+                throw new BadRequestException("Crate inventory inconsistency for " + crateTypeValue + ": with_customers (" + inventory.getWithCustomers() + ") < returned (" + offset + "). Reconcile before processing.");
+            }
+            balance.setBoxesDue(balance.getBoxesDue() - offset);
+            inventory.setInHand(inventory.getInHand() + offset);
+            inventory.setWithCustomers(inventory.getWithCustomers() - offset);
+            boxBalanceRepository.save(balance);
+            boxInventoryRepository.save(inventory);
+            saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), BoxMovementType.RETURNED_FROM_CUSTOMER, offset, BoxReferenceType.PAYMENT, paymentId, note);
         }
-        BoxInventory inventory = findBoxInventory(wholesaler, boxType);
-        if (inventory.getWithCustomers() < quantity) {
-            throw new BadRequestException("Crate inventory inconsistency for " + crateTypeValue + ": with_customers (" + inventory.getWithCustomers() + ") < returned (" + quantity + "). Reconcile before processing.");
+
+        int extra = quantity - offset;
+        if (extra > 0) {
+            CustomerCrateHolding holding = findOrCreateCustomerHolding(wholesaler, customerAccount, boxType);
+            holding.setQuantity(safeQty(holding.getQuantity()) + extra);
+            customerCrateHoldingRepository.save(holding);
+            saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), BoxMovementType.RECEIVED_FROM_CUSTOMER, extra, BoxReferenceType.PAYMENT, paymentId, note);
         }
-        balance.setBoxesDue(balance.getBoxesDue() - quantity);
-        inventory.setInHand(inventory.getInHand() + quantity);
-        inventory.setWithCustomers(inventory.getWithCustomers() - quantity);
-        boxBalanceRepository.save(balance);
-        boxInventoryRepository.save(inventory);
-        saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), BoxMovementType.RETURNED_FROM_CUSTOMER, quantity, paymentId, note);
     }
 
     private void applySupplierCrateMovement(Wholesaler wholesaler, WholesalerSupplier supplierAccount, String crateTypeValue, int quantity, boolean giveToSupplier, String note) {
         BoxType boxType = findBoxType(wholesaler.getId(), crateTypeValue);
-        BoxInventory inventory = findBoxInventory(wholesaler, boxType);
-        var existing = boxBalanceRepository
-                .findByWholesaler_IdAndPartyTypeAndPartyAccountIdAndBoxType_Id(wholesaler.getId(), PartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), boxType.getId());
-
-        if (!giveToSupplier && existing.isEmpty()) {
-            throw new BadRequestException("This supplier has no " + crateTypeValue + " crate balance to return.");
-        }
-
-        BoxBalance balance = existing.orElseGet(() -> {
-            BoxBalance newBalance = new BoxBalance();
-            newBalance.setWholesaler(wholesaler);
-            newBalance.setBoxType(boxType);
-            newBalance.setPartyType(PartyType.WHOLESALER_SUPPLIER);
-            newBalance.setPartyAccountId(supplierAccount.getId());
-            newBalance.setBoxesDue(0);
-            return newBalance;
-        });
 
         if (giveToSupplier) {
-            if (inventory.getInHand() < quantity) {
+            SupplierCrateHolding holding = findOrCreateSupplierHolding(wholesaler, supplierAccount, boxType);
+            int offset = Math.min(quantity, safeQty(holding.getQuantity()));
+            if (offset > 0) {
+                holding.setQuantity(holding.getQuantity() - offset);
+                supplierCrateHoldingRepository.save(holding);
+                saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), BoxMovementType.RETURNED_TO_SUPPLIER, offset, BoxReferenceType.PAYMENT, null, note);
+            }
+
+            int remaining = quantity - offset;
+            if (remaining == 0) {
+                return;
+            }
+
+            BoxInventory inventory = findBoxInventory(wholesaler, boxType);
+            if (inventory.getInHand() < remaining) {
                 throw new BadRequestException("Not enough " + crateTypeValue + " crates in hand.");
             }
-            inventory.setInHand(inventory.getInHand() - quantity);
-            inventory.setWithSuppliers(inventory.getWithSuppliers() + quantity);
-            balance.setBoxesDue(balance.getBoxesDue() + quantity);
-            saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), BoxMovementType.GIVEN_TO_SUPPLIER, quantity, null, note);
+            BoxBalance balance = findOrCreateBoxBalance(wholesaler, PartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), boxType);
+            inventory.setInHand(inventory.getInHand() - remaining);
+            inventory.setWithSuppliers(inventory.getWithSuppliers() + remaining);
+            balance.setBoxesDue(safeQty(balance.getBoxesDue()) + remaining);
+            boxInventoryRepository.save(inventory);
+            boxBalanceRepository.save(balance);
+            saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), BoxMovementType.GIVEN_TO_SUPPLIER, remaining, BoxReferenceType.PAYMENT, null, note);
         } else {
-            if (balance.getBoxesDue() < quantity) {
-                throw new BadRequestException("Returned " + crateTypeValue + " crates cannot exceed supplier crate due.");
+            BoxBalance balance = findOrCreateBoxBalance(wholesaler, PartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), boxType);
+            int offset = Math.min(quantity, safeQty(balance.getBoxesDue()));
+            if (offset > 0) {
+                BoxInventory inventory = findBoxInventory(wholesaler, boxType);
+                if (inventory.getWithSuppliers() < offset) {
+                    throw new BadRequestException("Crate inventory inconsistency for " + crateTypeValue + ": with_suppliers (" + inventory.getWithSuppliers() + ") < returned (" + offset + "). Reconcile before processing.");
+                }
+                inventory.setInHand(inventory.getInHand() + offset);
+                inventory.setWithSuppliers(inventory.getWithSuppliers() - offset);
+                balance.setBoxesDue(balance.getBoxesDue() - offset);
+                boxInventoryRepository.save(inventory);
+                boxBalanceRepository.save(balance);
+                saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), BoxMovementType.RETURNED_FROM_SUPPLIER, offset, BoxReferenceType.PAYMENT, null, note);
             }
-            if (inventory.getWithSuppliers() < quantity) {
-                throw new BadRequestException("Crate inventory inconsistency for " + crateTypeValue + ": with_suppliers (" + inventory.getWithSuppliers() + ") < returned (" + quantity + "). Reconcile before processing.");
+
+            int extra = quantity - offset;
+            if (extra > 0) {
+                SupplierCrateHolding holding = findOrCreateSupplierHolding(wholesaler, supplierAccount, boxType);
+                holding.setQuantity(safeQty(holding.getQuantity()) + extra);
+                supplierCrateHoldingRepository.save(holding);
+                saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), BoxMovementType.RECEIVED_FROM_SUPPLIER, extra, BoxReferenceType.PAYMENT, null, note);
             }
-            inventory.setInHand(inventory.getInHand() + quantity);
-            inventory.setWithSuppliers(inventory.getWithSuppliers() - quantity);
-            balance.setBoxesDue(balance.getBoxesDue() - quantity);
-            saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), BoxMovementType.RETURNED_FROM_SUPPLIER, quantity, null, note);
         }
-        boxInventoryRepository.save(inventory);
-        boxBalanceRepository.save(balance);
     }
 
     /**
@@ -472,7 +491,7 @@ public class PaymentService {
 
         List<CrateTypeQuantity> crateLines = new ArrayList<>();
         for (Map.Entry<String, Integer> line : lines.entrySet()) {
-            applySupplierHeldCrateMovement(wholesaler, supplierAccount, line.getKey(), line.getValue(), receive, request.note());
+            applySupplierCrateMovement(wholesaler, supplierAccount, line.getKey(), line.getValue(), !receive, request.note());
             crateLines.add(new CrateTypeQuantity(line.getKey(), line.getValue()));
         }
 
@@ -506,13 +525,13 @@ public class PaymentService {
 
         if (receive) {
             holding.setQuantity(holding.getQuantity() + quantity);
-            saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), BoxMovementType.RECEIVED_FROM_SUPPLIER, quantity, null, note);
+            saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), BoxMovementType.RECEIVED_FROM_SUPPLIER, quantity, BoxReferenceType.PAYMENT, null, note);
         } else {
             if (holding.getQuantity() < quantity) {
                 throw new BadRequestException("Handed-back " + crateTypeValue + " crates cannot exceed the " + holding.getQuantity() + " held from this supplier.");
             }
             holding.setQuantity(holding.getQuantity() - quantity);
-            saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), BoxMovementType.RETURNED_TO_SUPPLIER, quantity, null, note);
+            saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), BoxMovementType.RETURNED_TO_SUPPLIER, quantity, BoxReferenceType.PAYMENT, null, note);
         }
         supplierCrateHoldingRepository.save(holding);
     }
@@ -533,7 +552,11 @@ public class PaymentService {
 
         List<CrateTypeQuantity> crateLines = new ArrayList<>();
         for (Map.Entry<String, Integer> line : lines.entrySet()) {
-            applyCustomerHeldCrateMovement(wholesaler, customerAccount, line.getKey(), line.getValue(), receive, request.note());
+            if (receive) {
+                applyCustomerCrateReturn(wholesaler, customerAccount, line.getKey(), line.getValue(), null, request.note());
+            } else {
+                applyCustomerCrateBorrow(wholesaler, customerAccount, line.getKey(), line.getValue(), null, request.note());
+            }
             crateLines.add(new CrateTypeQuantity(line.getKey(), line.getValue()));
         }
 
@@ -567,15 +590,59 @@ public class PaymentService {
 
         if (receive) {
             holding.setQuantity(holding.getQuantity() + quantity);
-            saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), BoxMovementType.RECEIVED_FROM_CUSTOMER, quantity, null, note);
+            saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), BoxMovementType.RECEIVED_FROM_CUSTOMER, quantity, BoxReferenceType.PAYMENT, null, note);
         } else {
             if (holding.getQuantity() < quantity) {
                 throw new BadRequestException("Handed-back " + crateTypeValue + " crates cannot exceed the " + holding.getQuantity() + " held from this customer.");
             }
             holding.setQuantity(holding.getQuantity() - quantity);
-            saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), BoxMovementType.RETURNED_TO_CUSTOMER, quantity, null, note);
+            saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), BoxMovementType.RETURNED_TO_CUSTOMER, quantity, BoxReferenceType.PAYMENT, null, note);
         }
         customerCrateHoldingRepository.save(holding);
+    }
+
+    private BoxBalance findOrCreateBoxBalance(Wholesaler wholesaler, PartyType partyType, Long partyAccountId, BoxType boxType) {
+        return boxBalanceRepository
+                .findByWholesaler_IdAndPartyTypeAndPartyAccountIdAndBoxType_Id(wholesaler.getId(), partyType, partyAccountId, boxType.getId())
+                .orElseGet(() -> {
+                    BoxBalance newBalance = new BoxBalance();
+                    newBalance.setWholesaler(wholesaler);
+                    newBalance.setBoxType(boxType);
+                    newBalance.setPartyType(partyType);
+                    newBalance.setPartyAccountId(partyAccountId);
+                    newBalance.setBoxesDue(0);
+                    return newBalance;
+                });
+    }
+
+    private SupplierCrateHolding findOrCreateSupplierHolding(Wholesaler wholesaler, WholesalerSupplier supplierAccount, BoxType boxType) {
+        return supplierCrateHoldingRepository
+                .findByWholesaler_IdAndWholesalerSupplierIdAndBoxType_Id(wholesaler.getId(), supplierAccount.getId(), boxType.getId())
+                .orElseGet(() -> {
+                    SupplierCrateHolding newHolding = new SupplierCrateHolding();
+                    newHolding.setWholesaler(wholesaler);
+                    newHolding.setBoxType(boxType);
+                    newHolding.setWholesalerSupplierId(supplierAccount.getId());
+                    newHolding.setQuantity(0);
+                    return newHolding;
+                });
+    }
+
+    private CustomerCrateHolding findOrCreateCustomerHolding(Wholesaler wholesaler, WholesalerCustomer customerAccount, BoxType boxType) {
+        return customerCrateHoldingRepository
+                .findByWholesaler_IdAndWholesalerCustomerIdAndBoxType_Id(wholesaler.getId(), customerAccount.getId(), boxType.getId())
+                .orElseGet(() -> {
+                    CustomerCrateHolding newHolding = new CustomerCrateHolding();
+                    newHolding.setWholesaler(wholesaler);
+                    newHolding.setBoxType(boxType);
+                    newHolding.setWholesalerCustomerId(customerAccount.getId());
+                    newHolding.setQuantity(0);
+                    return newHolding;
+                });
+    }
+
+    private int safeQty(Integer value) {
+        return value == null ? 0 : value;
     }
 
     private Transaction savePaymentTransaction(Long wholesalerId, Long paymentId, Long settlementId, Long customerAccountId, Long supplierAccountId, BigDecimal amount, BigDecimal dueAfter, String description) {
@@ -606,7 +673,7 @@ public class PaymentService {
         accountLedgerRepository.save(ledger);
     }
 
-    private void saveBoxLedger(Wholesaler wholesaler, BoxType boxType, BoxLedgerPartyType partyType, Long partyAccountId, BoxMovementType movementType, int quantity, Long referenceId, String note) {
+    private void saveBoxLedger(Wholesaler wholesaler, BoxType boxType, BoxLedgerPartyType partyType, Long partyAccountId, BoxMovementType movementType, int quantity, BoxReferenceType referenceType, Long referenceId, String note) {
         BoxLedger ledger = new BoxLedger();
         ledger.setWholesaler(wholesaler);
         ledger.setBoxType(boxType);
@@ -614,7 +681,7 @@ public class PaymentService {
         ledger.setPartyAccountId(partyAccountId);
         ledger.setMovementType(movementType);
         ledger.setQuantity(quantity);
-        ledger.setReferenceType(BoxReferenceType.PAYMENT);
+        ledger.setReferenceType(referenceType);
         ledger.setReferenceId(referenceId);
         ledger.setNote(clean(note));
         boxLedgerRepository.save(ledger);
@@ -647,8 +714,8 @@ public class PaymentService {
         return PaymentType.CRATE_RETURN;
     }
 
-    private PaymentMethod resolveCustomerPaymentMethod(PaymentMethod method, BigDecimal cashAmount) {
-        if (cashAmount.signum() == 0) {
+    private PaymentMethod resolveCustomerPaymentMethod(PaymentMethod method, BigDecimal cashAmount, BigDecimal depositRefund) {
+        if (cashAmount.signum() == 0 && depositRefund.signum() == 0) {
             return PaymentMethod.NONE;
         }
         return method == null || method == PaymentMethod.NONE ? PaymentMethod.CASH : method;

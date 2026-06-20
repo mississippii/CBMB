@@ -23,6 +23,7 @@ import lombok.Setter;
 @Entity
 @Table(name = "sales",
         indexes = {
+                @jakarta.persistence.Index(name = "idx_sales_transaction_code", columnList = "transaction_code"),
                 @jakarta.persistence.Index(name = "idx_sales_wholesaler_date", columnList = "wholesaler_id,sale_date"),
                 @jakarta.persistence.Index(name = "idx_sales_customer_date", columnList = "wholesaler_customer_id,sale_date"),
                 @jakarta.persistence.Index(name = "idx_sales_wh_customer_date", columnList = "wholesaler_id,wholesaler_customer_id,sale_date"),
@@ -35,6 +36,9 @@ public class Sale {
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
+
+    @Column(name = "transaction_code", nullable = false, unique = true, length = 10)
+    private String transactionCode;
 
     @ManyToOne(fetch = FetchType.LAZY, optional = false)
     @JoinColumn(name = "wholesaler_id", nullable = false)

@@ -160,19 +160,29 @@ Crates are a wholesaler-owned reusable asset (UI says "crate"; some DB tables us
 Crate types are a GLOBAL admin catalog (e.g. BANGLA, CHINA, WOODEN, …) — not a fixed
 two-type list. Adding a type propagates to every wholesaler.
 
-Ownership: only the wholesaler owns crates. Suppliers and customers borrow/hold them.
-Crates are a capital asset valued at weighted-average cost; there is NO jamanot/deposit.
-Crate movements are recorded ONE TYPE PER ENTRY (borrow, return, sell separately).
+Ownership has two legs:
+- Wholesaler-owned crates: active stock tracked in `box_inventory`.
+- Other-party crates: supplier/customer crates physically in the wholesaler shop, tracked as a liability in `supplier_crate_holdings` / `customer_crate_holdings`.
+
+Crates are type-strict. BANGLA only nets against BANGLA; ENGLISH only nets against ENGLISH.
+Crates are netted like money per type: if the wholesaler gave 200 BANGLA and later receives 300 BANGLA from the same party, the party no longer owes BANGLA and the wholesaler now holds 100 BANGLA belonging to that party.
+
+Refundable crate money exists for crate deposits/sales:
+- Permanent customer refundable money is stored on `wholesaler_customers.crate_deposit_held`.
+- Walk-in refundable crate money comes from crate sale ledger rows and is reduced by walk-in crate refunds.
 ```
 
-Locations tracked: in shop · with customers · with suppliers · lost/damaged.
+Owned crate locations tracked: in shop · with customers · with suppliers · lost/damaged.
+Other-party crates in the shop are shown separately as `Others Crate`; they are not active owned stock and must not be sold/lost/given as wholesaler crates.
 
 ```text
-Buy 100 BANGLA:                 in_shop +100
-Customer borrows 20:            in_shop −20,  with_customers +20, customer crate due +20
-Customer returns 12:            in_shop +12,  with_customers −12, customer crate due −12
-Supplier takes 10 for shipment: in_shop −10,  with_suppliers +10, supplier crate due +10
-Lost/damaged write-off:         removes from active inventory, valued at WAC
+Buy 100 BANGLA:                     owned in_shop +100
+Customer borrows 20:                owned in_shop -20, with_customers +20, customer crate due +20
+Customer returns 12:                owned in_shop +12, with_customers -12, customer crate due -12
+Customer returns 30 after owing 20: owned due clears 20; extra 10 becomes Others Crate/customer liability
+Supplier takes 10 for shipment:     owned in_shop -10, with_suppliers +10, supplier crate due +10
+Supplier returns extra same type:   supplier due clears first; extra becomes Others Crate/supplier liability
+Lost/damaged write-off:             removes from owned active inventory, valued at WAC
 ```
 
 ## Payment Model
@@ -184,7 +194,8 @@ Money movements are recorded by operation type; all also appear in transaction h
 customer pays previous due
 customer returns crates
 customer pays due + returns crates together
-→ cash reduces customer due; returned crates reduce crate due
+customer returns crates and receives refundable crate money
+→ cash reduces customer due; returned crates net same-type crate due; depositRefund reduces refundable money held
 ```
 
 ### Supplier money (`supplier_settlements`)
@@ -198,7 +209,8 @@ and expense are deductions inside the net payable, not money the supplier hands 
 ### Supplier crate operations (crate ledger/balance tables)
 ```text
 wholesaler gives crates to supplier / supplier returns crates
-→ updates crate location counts, supplier crate due, crate ledger
+→ updates owned crate location counts when settling wholesaler-owned crates
+→ extra returned same-type crates become supplier-owned crates held in the shop (`Others Crate`)
 ```
 
 ## Transaction History
@@ -218,7 +230,7 @@ Supplier net due = opening + sold − commission − expense − payments (one r
 Commission and expense are deductions, never supplier-paid transactions.
 The wholesaler pays the supplier; overpayment becomes an advance (negative due).
 Settling a shipment changes status only — it never moves money.
-Crate types are a global catalog; crates are wholesaler-owned; no jamanot.
+Crate types are a global catalog; owned crates and other-party crates are displayed separately; refundable crate money is tracked and returned when crates are refunded.
 Cancelled sales (status CANCELLED) are excluded from all sold/commission/due aggregates.
 Every sale / payment / crate movement writes a transaction-history row for audit.
 ```

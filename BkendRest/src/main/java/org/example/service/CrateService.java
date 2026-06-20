@@ -42,6 +42,8 @@ import org.example.repository.BoxInventoryRepository;
 import org.example.repository.BoxLedgerRepository;
 import org.example.repository.BoxTypeRepository;
 import org.example.repository.CrateTypeRepository;
+import org.example.repository.CustomerCrateHoldingRepository;
+import org.example.repository.SupplierCrateHoldingRepository;
 import org.example.repository.TransactionRepository;
 import org.example.repository.WholesalerCustomerRepository;
 import org.example.repository.WholesalerRepository;
@@ -59,6 +61,8 @@ public class CrateService {
     private final TransactionRepository transactionRepository;
     private final WholesalerCustomerRepository wholesalerCustomerRepository;
     private final WholesalerSupplierRepository wholesalerSupplierRepository;
+    private final CustomerCrateHoldingRepository customerCrateHoldingRepository;
+    private final SupplierCrateHoldingRepository supplierCrateHoldingRepository;
     private final AccountBalanceService accountBalanceService;
     private final AccountBalanceRepository accountBalanceRepository;
     private final AccountLedgerRepository accountLedgerRepository;
@@ -72,6 +76,8 @@ public class CrateService {
             TransactionRepository transactionRepository,
             WholesalerCustomerRepository wholesalerCustomerRepository,
             WholesalerSupplierRepository wholesalerSupplierRepository,
+            CustomerCrateHoldingRepository customerCrateHoldingRepository,
+            SupplierCrateHoldingRepository supplierCrateHoldingRepository,
             AccountBalanceService accountBalanceService,
             AccountBalanceRepository accountBalanceRepository,
             AccountLedgerRepository accountLedgerRepository,
@@ -84,6 +90,8 @@ public class CrateService {
         this.transactionRepository = transactionRepository;
         this.wholesalerCustomerRepository = wholesalerCustomerRepository;
         this.wholesalerSupplierRepository = wholesalerSupplierRepository;
+        this.customerCrateHoldingRepository = customerCrateHoldingRepository;
+        this.supplierCrateHoldingRepository = supplierCrateHoldingRepository;
         this.accountBalanceService = accountBalanceService;
         this.accountBalanceRepository = accountBalanceRepository;
         this.accountLedgerRepository = accountLedgerRepository;
@@ -102,6 +110,8 @@ public class CrateService {
 
         int totalOwned = typeResponses.stream().mapToInt(CrateInventoryTypeResponse::total).sum();
         int inHand = typeResponses.stream().mapToInt(CrateInventoryTypeResponse::inHand).sum();
+        int customerCratesInShop = safeInt(customerCrateHoldingRepository.sumHeldInShop(wholesalerId));
+        int supplierCratesInShop = safeInt(supplierCrateHoldingRepository.sumHeldInShop(wholesalerId));
         int withCustomers = typeResponses.stream().mapToInt(CrateInventoryTypeResponse::withCustomers).sum();
         int withSuppliers = typeResponses.stream().mapToInt(CrateInventoryTypeResponse::withSuppliers).sum();
         int lostDamaged = typeResponses.stream().mapToInt(CrateInventoryTypeResponse::lostDamaged).sum();
@@ -114,14 +124,21 @@ public class CrateService {
                 .reduce(BigDecimal.ZERO, BigDecimal::add)
                 .setScale(0, java.math.RoundingMode.CEILING);
 
+        BigDecimal refundableWalkInCrateSales = money(boxLedgerRepository.sumWalkInCrateRefundableSales(wholesalerId));
+        BigDecimal permanentCustomerRefundableMoney = money(wholesalerCustomerRepository.sumCrateDepositHeld(wholesalerId));
+        BigDecimal totalRefundableCrateMoney = refundableWalkInCrateSales.add(permanentCustomerRefundableMoney);
+
         return new CrateDashboardResponse(
                 wholesalerId,
                 totalOwned,
                 inHand,
+                customerCratesInShop,
+                supplierCratesInShop,
                 withCustomers,
                 withSuppliers,
                 lostDamaged,
                 totalCrateValue,
+                totalRefundableCrateMoney,
                 typeResponses
         );
     }
@@ -331,13 +348,13 @@ public class CrateService {
         // Walk-in sales carry a payment method (CASH lands in the drawer); on-account sales ignore it.
         PaymentMethod walkInMethod = customer == null ? parsePurchaseMethod(request.paymentMethod()) : null;
         for (CrateOpLine line : opLines(request.lines(), request.crateType(), request.quantity(), null, request.unitSalePrice())) {
-            applySale(wholesaler, wholesalerId, line.crateType(), line.quantity(), line.unitSalePrice(), customer, walkInMethod, request.note());
+            applySale(wholesaler, wholesalerId, line.crateType(), line.quantity(), line.unitSalePrice(), customer, walkInMethod, request.note(), request.saleId());
         }
         return getDashboard(wholesalerId);
     }
 
     /** Sells one crate type: removes from inventory, SOLD ledger (cost+sale snapshot), charges customer or records cash. */
-    private void applySale(Wholesaler wholesaler, Long wholesalerId, String crateType, Integer quantityInput, BigDecimal unitSalePriceInput, WholesalerCustomer customer, PaymentMethod walkInMethod, String note) {
+    private void applySale(Wholesaler wholesaler, Long wholesalerId, String crateType, Integer quantityInput, BigDecimal unitSalePriceInput, WholesalerCustomer customer, PaymentMethod walkInMethod, String note, Long saleId) {
         BoxType boxType = findBoxType(wholesalerId, crateType);
         int quantity = positiveQuantity(quantityInput);
         if (unitSalePriceInput == null || unitSalePriceInput.signum() <= 0) {
@@ -375,7 +392,8 @@ public class CrateService {
         ledger.setQuantity(quantity);
         ledger.setUnitCostSnapshot(unitCost);
         ledger.setUnitSalePrice(unitSale);
-        ledger.setReferenceType(BoxReferenceType.MANUAL);
+        ledger.setReferenceType(saleId == null ? BoxReferenceType.MANUAL : BoxReferenceType.SALE);
+        ledger.setReferenceId(saleId);
         ledger.setNote(clean(note));
         BoxLedger savedLedger = boxLedgerRepository.save(ledger);
 
@@ -407,6 +425,60 @@ public class CrateService {
                     "Walk-in sale — " + quantity + " " + boxType.getName() + " crates @ ৳" + unitSale
                             + " (" + walkInMethod + " ৳" + saleAmount + ")");
         }
+    }
+
+    @Transactional
+    public CrateDashboardResponse refundWalkInCrates(Long wholesalerId, org.example.dto.CrateRefundRequest request) {
+        Wholesaler wholesaler = findWholesaler(wholesalerId);
+        if (request == null) {
+            throw new BadRequestException("Request body is required.");
+        }
+        List<CrateOpLine> lines = opLines(request.lines(), null, null, null, null);
+        int totalQty = lines.stream().mapToInt((line) -> positiveQuantity(line.quantity())).sum();
+        BigDecimal refundAmount = positiveMoney(request.refundAmount(), "Refund amount must be greater than zero.");
+        BigDecimal refundable = money(boxLedgerRepository.sumWalkInCrateRefundableSales(wholesalerId));
+        if (refundAmount.compareTo(refundable) > 0) {
+            throw new BadRequestException("Refund cannot exceed refundable walk-in crate money ৳" + refundable.toPlainString() + ".");
+        }
+        PaymentMethod method = parsePurchaseMethod(request.paymentMethod());
+        BigDecimal unitRefund = refundAmount.divide(BigDecimal.valueOf(totalQty), 2, java.math.RoundingMode.HALF_UP);
+
+        for (CrateOpLine line : lines) {
+            applyWalkInRefund(wholesaler, wholesalerId, line.crateType(), line.quantity(), unitRefund, method, request.note());
+        }
+        saveTransaction(wholesalerId, "Walk-in crate refund — " + totalQty + " crates, ৳" + refundAmount + " (" + method + ")");
+        return getDashboard(wholesalerId);
+    }
+
+    private void applyWalkInRefund(Wholesaler wholesaler, Long wholesalerId, String crateType, Integer quantityInput, BigDecimal unitRefund, PaymentMethod paymentMethod, String note) {
+        BoxType boxType = findBoxType(wholesalerId, crateType);
+        int quantity = positiveQuantity(quantityInput);
+        BoxInventory inventory = findOrCreateInventory(wholesaler, boxType);
+        inventory.setInHand(inventory.getInHand() + quantity);
+        inventory.setTotalOwned(inventory.getTotalOwned() + quantity);
+        boxInventoryRepository.save(inventory);
+
+        BoxLedger ledger = new BoxLedger();
+        ledger.setWholesaler(wholesaler);
+        ledger.setBoxType(boxType);
+        ledger.setPartyType(BoxLedgerPartyType.WHOLESALER);
+        ledger.setPartyAccountId(null);
+        ledger.setMovementType(BoxMovementType.WALK_IN_REFUND);
+        ledger.setQuantity(quantity);
+        ledger.setUnitCostSnapshot(money(inventory.getWeightedAvgCost()));
+        ledger.setUnitSalePrice(unitRefund);
+        ledger.setPaymentMethod(paymentMethod);
+        ledger.setReferenceType(BoxReferenceType.MANUAL);
+        ledger.setNote(clean(note));
+        boxLedgerRepository.save(ledger);
+    }
+
+    private static BigDecimal positiveMoney(BigDecimal value, String message) {
+        BigDecimal normalized = money(value);
+        if (normalized.signum() <= 0) {
+            throw new BadRequestException(message);
+        }
+        return normalized;
     }
 
     private static BigDecimal money(BigDecimal value) {
@@ -475,18 +547,26 @@ public class CrateService {
         int withCustomers = value(inventory, BoxInventory::getWithCustomers);
         int withSuppliers = value(inventory, BoxInventory::getWithSuppliers);
         int lostDamaged = value(inventory, BoxInventory::getLostDamaged);
+        int customerCratesInShop = safeInt(customerCrateHoldingRepository.sumHeldInShopByBoxType(wholesalerId, boxType.getId()));
+        int supplierCratesInShop = safeInt(supplierCrateHoldingRepository.sumHeldInShopByBoxType(wholesalerId, boxType.getId()));
 
         return new CrateInventoryTypeResponse(
                 boxType.getId(),
                 boxType.getName(),
                 inHand + withCustomers + withSuppliers + lostDamaged,
                 inHand,
+                customerCratesInShop,
+                supplierCratesInShop,
                 withCustomers,
                 withSuppliers,
                 lostDamaged,
                 boxType.getPurchasePrice() == null ? BigDecimal.ZERO : boxType.getPurchasePrice(),
                 inventory == null || inventory.getWeightedAvgCost() == null ? BigDecimal.ZERO : inventory.getWeightedAvgCost()
         );
+    }
+
+    private int safeInt(Integer value) {
+        return value == null ? 0 : value;
     }
 
     private int value(BoxInventory inventory, InventoryValue valueReader) {

@@ -1,11 +1,11 @@
 import { useMemo, useState } from 'react';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { AlertTriangle, Filter, Plus, Wallet } from 'lucide-react';
+import { Filter, Plus, Wallet } from 'lucide-react';
 import { useData } from '../../data/DataContext';
 import { useAuth } from '../auth/AuthContext';
 import { queryKeys } from '../../services/queryKeys';
 import Modal from '../../shared/components/Modal';
-import { TablePager, usePagination, DateRangeFilter } from '../../shared/components';
+import { TablePager, usePagination, DateRangeFilter, ConfirmDialog } from '../../shared/components';
 import { formatDate } from '../../shared/utils/format';
 
 const fmt = (value) => '৳ ' + Math.ceil(Number(value) || 0).toLocaleString();
@@ -21,8 +21,12 @@ const PAYMENT_METHODS = [
 // Local calendar date (yyyy-mm-dd) — avoids the UTC day-shift of toISOString().
 const isoLocal = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
 const todayIso = () => isoLocal(new Date());
-const toStartOfDay = (s) => new Date(`${s}T00:00:00`).toISOString();
-const toEndOfDay = (s) => new Date(`${s}T23:59:59.999`).toISOString();
+const toStartOfDay = (s) => `${s}T00:00:00`;
+const toEndOfDay = (s) => `${s}T23:59:59.999`;
+const currentLocalTime = () => {
+  const d = new Date();
+  return `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}:${String(d.getSeconds()).padStart(2, '0')}`;
+};
 
 const ShopExpensesPage = () => {
   const { admin } = useAuth();
@@ -107,7 +111,7 @@ const ShopExpensesPage = () => {
         categoryId: Number(formCategoryId),
         amount: Number(formAmount),
         paymentMethod: formPaymentMethod,
-        expenseDate: new Date(`${formDate}T${new Date().toTimeString().slice(0, 8)}`).toISOString(),
+        expenseDate: `${formDate}T${currentLocalTime()}`,
         note: formNote.trim() || null,
       });
       setShowSaveWarning(false);
@@ -269,32 +273,22 @@ const ShopExpensesPage = () => {
       </Modal>
 
       {/* Save warning — expenses cannot be changed after saving */}
-      <Modal
+      <ConfirmDialog
         open={showSaveWarning}
-        onClose={() => { if (!formBusy) setShowSaveWarning(false); }}
-        title="Save this expense?"
-        icon={AlertTriangle}
-        iconClass="bg-amber-100 text-amber-600"
-        maxWidth="28rem"
-        footer={(
-          <div className="flex w-full justify-end gap-2">
-            <button type="button" onClick={() => setShowSaveWarning(false)} disabled={formBusy} className="btn-secondary">Back</button>
-            <button type="button" onClick={handleConfirmSave} disabled={formBusy} className="btn-primary">{formBusy ? 'Saving…' : 'Confirm Save'}</button>
-          </div>
-        )}
+        title="Confirm expense"
+        message="Save this expense?"
+        confirmLabel="Confirm Save"
+        busy={formBusy}
+        onCancel={() => setShowSaveWarning(false)}
+        onConfirm={handleConfirmSave}
       >
-        <div className="space-y-3">
-          <p className="text-sm text-slate-600">
-            Please review before saving — an expense <strong>cannot be changed or cancelled</strong> once recorded.
-          </p>
-          <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2 text-sm">
-            <div className="flex justify-between py-0.5"><span className="text-slate-500">Category</span><strong className="text-slate-800">{categories.find((c) => String(c.id) === String(formCategoryId))?.name || '—'}</strong></div>
-            <div className="flex justify-between py-0.5"><span className="text-slate-500">Amount</span><strong className="text-slate-900">{fmt(formAmount)}</strong></div>
-            <div className="flex justify-between py-0.5"><span className="text-slate-500">Payment</span><strong className="text-slate-800">{PAYMENT_METHODS.find((m) => m.value === formPaymentMethod)?.label || formPaymentMethod}</strong></div>
-            <div className="flex justify-between py-0.5"><span className="text-slate-500">Date</span><strong className="text-slate-800">{formatDate(formDate)}</strong></div>
-          </div>
+        <div className="space-y-1.5">
+          <div className="flex justify-between gap-4"><span className="text-slate-500">Category</span><span className="font-semibold text-slate-900">{categories.find((c) => String(c.id) === String(formCategoryId))?.name || '—'}</span></div>
+          <div className="flex justify-between gap-4"><span className="text-slate-500">Amount</span><span className="font-semibold text-slate-900">{fmt(formAmount)}</span></div>
+          <div className="flex justify-between gap-4"><span className="text-slate-500">Payment</span><span className="font-semibold text-slate-900">{PAYMENT_METHODS.find((m) => m.value === formPaymentMethod)?.label || formPaymentMethod}</span></div>
+          <div className="flex justify-between gap-4 border-t border-slate-200 pt-1.5"><span className="font-semibold text-slate-600">Date</span><span className="font-bold text-slate-900">{formatDate(formDate)}</span></div>
         </div>
-      </Modal>
+      </ConfirmDialog>
     </div>
   );
 };

@@ -27,6 +27,8 @@ public record SellCratesRequest(
          */
         String paymentMethod,
         /** Optional multi-type lines (each with its own unitSalePrice). When non-empty, used instead of the single fields. */
-        java.util.List<CrateOpLine> lines
+        java.util.List<CrateOpLine> lines,
+        /** Internal: sale that triggered this crate movement. Null for standalone crate sales. */
+        Long saleId
 ) {
 }

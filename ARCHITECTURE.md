@@ -46,8 +46,9 @@ Rules now enforced:
   add-confirmation modal guards creation. Per-lot table shows Total Sold / Commission /
   Expense / Net Payable and Unit Sold / Kg (`inventoryQuantityOnHand` for remaining).
 - **Crates**: types are a **global admin catalog** (not a fixed Bangla/China pair);
-  capital asset at weighted-average cost; **no jamanot/deposit**; movements recorded one
-  type per entry.
+  wholesaler-owned crates are capital assets at weighted-average cost; supplier/customer-owned
+  crates held in the shop render separately as `Others Crate`; refundable crate money is
+  tracked and returned through crate refund flows.
 
 ## Current Applications
 
@@ -151,10 +152,14 @@ SaleController
 PaymentController
   /wholesalers/{id}/payments/customer/settle
   /wholesalers/{id}/payments/customer/crate-borrow
+  /wholesalers/{id}/payments/customer/crate-receive     — customer-owned crates into shop custody
+  /wholesalers/{id}/payments/customer/crate-handback    — return customer-owned crates
   /wholesalers/{id}/payments/customer/{paymentId}/cancel
   /wholesalers/{id}/payments/supplier/product-pay      — the only supplier money operation
   /wholesalers/{id}/payments/supplier/crate-give
   /wholesalers/{id}/payments/supplier/crate-return
+  /wholesalers/{id}/payments/supplier/crate-receive     — supplier-owned crates into shop custody
+  /wholesalers/{id}/payments/supplier/crate-handback    — return supplier-owned crates
   /wholesalers/{id}/payments/supplier/{settlementId}/cancel
                                                        — only PRODUCT_PAYMENT reversible; ADJUSTMENT refused
 
@@ -162,6 +167,10 @@ CrateController                                        — crate inventory + los
   /wholesalers/{id}/crates/dashboard
   /wholesalers/{id}/crates/purchase/create
   /wholesalers/{id}/crates/lost-damaged/create
+  /wholesalers/{id}/crates/refund                       — walk-in crate refund
+  /wholesalers/{id}/crates/sell                         — crate asset sale
+  /wholesalers/{id}/crates/types/catalog
+  /wholesalers/{id}/crates/types/set-price
   /wholesalers/{id}/crates/loss-stats
 
 TransactionController
@@ -293,7 +302,7 @@ Once you see these recurring patterns, the whole schema makes sense:
 | `suppliers` | **Global** directory of supplier identity. Same trader sells to many wholesalers — don't duplicate his phone/address per shop. | `name`, `phone`, `address` |
 | `wholesaler_suppliers` | The **relationship** row: this shop's account with this supplier. Carries shop-specific state. **Every supplier-side balance/ledger row keys off this id, not `suppliers.id`** — because "money owed" only makes sense per-shop. | `opening_due`, `commission_rate`, `status` |
 | `customers` | Global directory of customer identity — same rationale as `suppliers`. | `name`, `phone`, `address` |
-| `wholesaler_customers` | Shop-specific customer relationship. **The party id used by all customer-side balances/ledgers.** | `opening_due`, `jamanot_balance` (cumulative crate-deposit money owed *to* the customer), `status`, `@Version` |
+| `wholesaler_customers` | Shop-specific customer relationship. **The party id used by all customer-side balances/ledgers.** | `opening_due`, `crate_deposit_held` (refundable crate money owed back to the customer), `status`, `@Version` |
 
 ### Product catalog (3 tables)
 
@@ -322,7 +331,7 @@ Once you see these recurring patterns, the whole schema makes sense:
 
 | Table | Why it exists | Key fields |
 |---|---|---|
-| `sales` | Sale header — one row per checkout. Carries the money summary so reports don't have to aggregate `sale_items`. `customer_name_snapshot`/`customer_phone_snapshot` capture one-time customers without writing to `wholesaler_customers`. | `wholesaler_customer_id` (nullable for one-time), `gross/discount/net/paid/due_amount`, `boxes_given`, `jamanot_amount`, `status` (POSTED/CANCELLED) |
+| `sales` | Sale header — one row per checkout. Carries the money summary so reports don't have to aggregate `sale_items`. `customer_name_snapshot`/`customer_phone_snapshot` capture one-time customers without writing to `wholesaler_customers`. | `wholesaler_customer_id` (nullable for one-time), `gross/discount/net/paid/due_amount`, `boxes_given`, `crate_deposit`, `status` (POSTED/CANCELLED) |
 | `sale_items` | Per-product line. **`delivery_id` is the load-bearing field for shipment-wise reporting** — every sold rupee can be traced to its lot. `commission_rate` is snapshotted because the lot's rate can be edited later. | `wholesaler_supplier_id`, `delivery_id`, `product_id`, `category_id`, `sub_category_id`, `quantity`, `unit_price`, `line_total`, `commission_rate` |
 
 ### Payments & settlements (2 tables)
@@ -331,7 +340,7 @@ Once you see these recurring patterns, the whole schema makes sense:
 
 | Table | Why it exists | Key fields |
 |---|---|---|
-| `payments` | Customer settlement events (cash, returned crates, jamanot refund). Carries the before/after snapshot so each row is auditable on its own. Partitioned by `created_at` for retention. | `cash_amount`, `boxes_returned`, `jamanot_amount`, `previous_due`, `due_after_payment`, `status` |
+| `payments` | Customer settlement events (cash, returned crates, refundable crate money refund). Carries the before/after snapshot so each row is auditable on its own. Partitioned by `created_at` for retention. | `cash_amount`, `boxes_returned`, `deposit_refund`, `previous_due`, `due_after_payment`, `status` |
 | `supplier_settlements` | Money flow with a supplier. The `settlement_type` enum is the dispatcher: `PRODUCT_PAYMENT` (the wholesaler paying the supplier for sold goods; overpaying creates an advance) and `ADJUSTMENT` (manual correction). The legacy `COMMISSION_RECEIVE` / `EXPENSE_RECEIVE` / `ADVANCE_PAYMENT` types were retired in `V4` — commission and expense are deductions from net due, not cash received. | `wholesaler_supplier_id`, `settlement_type`, `amount`, `previous_due`, `due_after_settlement`, `status` |
 
 ### Expense tracking (4 tables)
@@ -345,16 +354,18 @@ Once you see these recurring patterns, the whole schema makes sense:
 | `other_due_balances` | Per `(supplier, category)` rollup of `Σ(supplier_expenses.due_amount)`. **Read-optimized cache** — dashboards / supplier profile pages don't have to aggregate the source rows every time. Mutated alongside `supplier_expenses`. | `wholesaler_supplier_id`, `category_id`, `due_amount` |
 | `shop_expenses` | Pure wholesaler-borne overhead (salary, hospitality, lunch, rent, utilities). **No party, no reimbursement** — reduces cash + net profit only; never touches a balance. | `category_id`, `amount`, `payment_method`, `expense_date`, `status` |
 
-### Crate tracking (4 tables)  <!-- crate types are a global admin catalog; no jamanot/deposit -->
+### Crate tracking (6 tables)  <!-- crate types are a global admin catalog; UI says crate, DB often says box -->
 
-> Crates are physical wooden/plastic boxes lent to customers and borrowed from suppliers. Same **snapshot + ledger** model as money — because crates are a second kind of "balance" between you and a party.
+> Crates are physical reusable assets. Wholesaler-owned crates use the same **snapshot + ledger** model as money. Supplier/customer-owned crates physically held in the shop are separate liability snapshots and must not be counted as owned active stock.
 
 | Table | Why it exists | Key fields |
 |---|---|---|
 | `box_types` | Catalog per wholesaler (BANGLA, CHINA). Seeded on first `/crates/dashboard` hit. | `name` |
 | `box_inventory` | Warehouse-level totals per crate type. **DB CHECK enforces conservation**: `total_owned = in_hand + with_customers + with_suppliers + lost_damaged`. `@Version`. | `total_owned`, `in_hand`, `with_customers`, `with_suppliers`, `lost_damaged` |
-| `box_balances` | Per-party crate due — how many crates each customer/supplier owes you back. The "credit balance" for crates, mirroring `account_balances`. `@Version`. | `party_type`, `party_account_id`, `box_type_id`, `boxes_due` |
-| `box_ledger` | Append-only crate-movement log: PURCHASE / GIVEN_TO_CUSTOMER / RETURNED_FROM_CUSTOMER / GIVEN_TO_SUPPLIER / RETURNED_FROM_SUPPLIER / LOST / DAMAGED / ADJUSTMENT. Tagged with `reference_type`+`reference_id` (SALE / PAYMENT / SUPPLIER_DELIVERY / MANUAL) so every movement traces back to its trigger. **Audit trail behind `box_inventory` and `box_balances`.** | `box_type_id`, `party_type`, `party_account_id`, `movement_type`, `quantity`, `reference_type`, `reference_id` |
+| `box_balances` | Per-party crate due — how many wholesaler-owned crates each customer/supplier owes back. The "credit balance" for crates, mirroring `account_balances`. `@Version`. | `party_type`, `party_account_id`, `box_type_id`, `boxes_due` |
+| `supplier_crate_holdings` | Supplier-owned crates currently in the wholesaler shop. Liability snapshot; never touches `box_inventory`. | `wholesaler_supplier_id`, `box_type_id`, `quantity` |
+| `customer_crate_holdings` | Customer-owned crates currently in the wholesaler shop. Liability snapshot; never touches `box_inventory`. | `wholesaler_customer_id`, `box_type_id`, `quantity` |
+| `box_ledger` | Append-only crate-movement log: PURCHASE / GIVEN_TO_CUSTOMER / RETURNED_FROM_CUSTOMER / RECEIVED_FROM_CUSTOMER / RETURNED_TO_CUSTOMER / GIVEN_TO_SUPPLIER / RETURNED_FROM_SUPPLIER / RECEIVED_FROM_SUPPLIER / RETURNED_TO_SUPPLIER / SOLD / WALK_IN_REFUND / LOST / DAMAGED / ADJUSTMENT. Tagged with `reference_type`+`reference_id` (SALE / PAYMENT / SUPPLIER_DELIVERY / MANUAL) so every movement traces back to its trigger. | `box_type_id`, `party_type`, `party_account_id`, `movement_type`, `quantity`, `reference_type`, `reference_id` |
 
 ### Money balances & ledger (2 tables)
 
@@ -405,25 +416,28 @@ Each flow lists the tables touched, in order. `+` = INSERT, `~` = UPDATE.
 + account_ledger × 1‑2 (customer)        (DEBIT net; CREDIT paid if any)
 ~ account_balances (supplier)            (+net — full sale credits supplier regardless of customer payment)
 + account_ledger (supplier)              (CREDIT net, ref=SALE)
-[if crate sale]
+[if permanent customer borrows crates]
   ~ box_inventory                        (in_hand↓, with_customers↑)
   ~ box_balances (customer)              (boxes_due↑)
   + box_ledger                           (GIVEN_TO_CUSTOMER, ref=SALE)
-  ~ wholesaler_customers.jamanot_balance (+jamanot)
+  ~ wholesaler_customers.crate_deposit_held (+refundable crate money, when collected)
+[if walk-in crate sale]
+  ~ box_inventory                        (in_hand↓, total_owned↓)
+  + box_ledger                           (SOLD, refundable sale price snapshot)
 + transactions                           (transactionType=SALE)
 ```
 
 **3. Customer settles due / returns crates** (`PaymentService.settleCustomer`)
 ```
-+ payments                               (cash + bangla/china returned + jamanot refund)
-~ account_balances (customer)            (−cash)
++ payments                               (cash + returned crates + refundable crate money refund)
+~ account_balances (customer)            (-cash)
 + account_ledger                         (CREDIT cash, ref=PAYMENT)
 [per crate type returned]
-  ~ box_inventory                        (in_hand↑, with_customers↓)
-  ~ box_balances (customer)              (boxes_due↓)
-  + box_ledger                           (RETURNED_FROM_CUSTOMER, ref=PAYMENT)
-[if jamanot refunded]
-  ~ wholesaler_customers.jamanot_balance (−jamanot)
+  first clears same-type box_balances due
+  remainder becomes customer_crate_holdings (customer-owned crates in shop)
+  + box_ledger                           (RETURNED_FROM_CUSTOMER or RECEIVED_FROM_CUSTOMER)
+[if depositRefund]
+  ~ wholesaler_customers.crate_deposit_held (-depositRefund)
 + transactions                           (transactionType=PAYMENT)
 ```
 
@@ -456,7 +470,7 @@ Dashboard pulls these via `SUM(amount) WHERE status=POSTED AND expense_date IN p
   + stock_ledger                         (ADJUSTMENT IN, ref=SALE)
   ~ box_inventory + box_balances         (crates pulled back from customer)
   + box_ledger                           (RETURNED_FROM_CUSTOMER, ref=SALE)
-  ~ wholesaler_customers.jamanot_balance (jamanot reversed)
+  ~ wholesaler_customers.crate_deposit_held (crate deposit reversed when applicable)
 + transactions                           (description: "Cancellation of …")
 ```
 
@@ -464,6 +478,8 @@ Dashboard pulls these via `SUM(amount) WHERE status=POSTED AND expense_date IN p
 
 - `account_balances.balance` = `wholesaler_customer.opening_due` + Σ(`account_ledger.debit` − `account_ledger.credit`) for customers; sign flips for suppliers. Enforced lazily by `/admin/wholesalers/{id}/balances/audit`.
 - `box_inventory.total_owned` = `in_hand` + `with_customers` + `with_suppliers` + `lost_damaged` (DB CHECK constraint).
+- `box_inventory.in_hand` is owned stock in shop only. It excludes `supplier_crate_holdings` and `customer_crate_holdings`.
+- Dashboard `Others Crate` = Σ positive supplier/customer crate holdings in shop. It is a liability display value, not active owned stock.
 - `box_inventory.with_customers` = Σ(`box_balances.boxes_due` for WHOLESALER_CUSTOMER of that type). Audited.
 - `other_due_balances.due_amount` per (supplier, category) = Σ(`supplier_expenses.due_amount` for that supplier+category). Audited.
 - `sale_items.delivery_id` is the load-bearing field for shipment-wise P&L — every sold rupee can be attributed back to a specific lot.
@@ -1426,6 +1442,12 @@ total_owned = in_hand + with_customers + with_suppliers + lost_damaged
 
 customer crate due  = sum(box_balances.boxes_due WHERE party_type=WHOLESALER_CUSTOMER, party_account_id=wc.id)
 supplier crate due  = sum(box_balances.boxes_due WHERE party_type=WHOLESALER_SUPPLIER, party_account_id=ws.id)
+customer-owned crates in shop = sum(customer_crate_holdings.quantity WHERE wholesaler_customer_id=wc.id)
+supplier-owned crates in shop = sum(supplier_crate_holdings.quantity WHERE wholesaler_supplier_id=ws.id)
+
+Dashboard:
+In Shop      = box_inventory.in_hand only (owned crates)
+Others Crate = customer-owned + supplier-owned crates currently in shop
 ```
 
 **Crate operation rules (MUST):**
@@ -1434,12 +1456,16 @@ supplier crate due  = sum(box_balances.boxes_due WHERE party_type=WHOLESALER_SUP
 - A crate movement MUST never silently clamp counts to zero. If the count would
   go negative, reject the request — the data is inconsistent and clamping would
   break total_owned = in_hand + with_customers + with_suppliers + lost_damaged.
-- Every crate movement writes exactly one box_ledger row.
+- Every crate movement writes box_ledger history for the actual leg moved.
+- Same-type crate netting is required: returned crates clear same-type due first; extra same-type crates become party-owned crates held in shop.
+- Different crate types never net against each other.
 - Purchases and lost/damaged events MUST also write a transactions row
   (zero-money, sale_amount=0, payment_amount=0, due_amount=0, description set).
 - Crate dashboard's totalOwned read MUST equal in_hand + with_customers
   + with_suppliers + lost_damaged. Computing totalOwned without lost_damaged
   is a bug.
+- Crate dashboard's In Shop MUST NOT include supplier/customer-owned holdings;
+  those render separately as Others Crate.
 ```
 
 ```sql

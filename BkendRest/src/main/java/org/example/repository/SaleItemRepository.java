@@ -15,6 +15,10 @@ public interface SaleItemRepository extends JpaRepository<SaleItem, Long> {
 
     List<SaleItem> findBySale_Id(Long saleId);
 
+    Optional<SaleItem> findFirstBySale_IdAndWholesalerSupplier_Id(Long saleId, Long wholesalerSupplierId);
+
+    List<SaleItem> findBySale_IdAndWholesalerSupplier_Id(Long saleId, Long wholesalerSupplierId);
+
     @Query("select coalesce(sum(i.lineTotal), 0) from SaleItem i where i.wholesaler.id = :wholesalerId and i.wholesalerSupplier.id = :supplierAccountId and i.sale.status = org.example.model.enums.PostStatus.POSTED")
     BigDecimal sumLineTotalBySupplier(@Param("wholesalerId") Long wholesalerId, @Param("supplierAccountId") Long supplierAccountId);
 

@@ -1,8 +1,8 @@
-import { useMemo, useState } from 'react';
+import { Fragment, useMemo, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import {
-  ArrowLeft, Building2, ChevronRight, LayoutGrid, MapPin, Package, Phone,
+  ArrowLeft, Building2, ChevronDown, ChevronRight, LayoutGrid, MapPin, Package, Phone,
   RefreshCw, Truck, UserRound, Wallet,
 } from 'lucide-react';
 import Navbar from '../../shared/components/Navbar';
@@ -123,12 +123,42 @@ const ShipmentDetailBody = ({ shipment: s }) => {
 
 /* ── Wholesaler detail (opened from the table, like SupplierDetail) ─────── */
 
-const SalesTransactionsTable = ({ sales, isLoading, error }) => {
+const saleItemLabel = (item) => [item.productName, item.categoryName, item.subCategoryName].filter(Boolean).join(' / ') || 'Product';
+
+const SalesTransactionsTable = ({ sales, isLoading, error, supplierId, accountId, supplierHeaders }) => {
   const sortedSales = useMemo(() => [...(sales || [])].sort((a, b) => {
     const byDate = new Date(b.createdAt || 0).getTime() - new Date(a.createdAt || 0).getTime();
     return byDate || ((b.id || 0) - (a.id || 0));
   }), [sales]);
   const pager = usePagination(sortedSales, 8);
+  const [expandedSaleId, setExpandedSaleId] = useState(null);
+  const [detailCache, setDetailCache] = useState({});
+  const [detailLoadingId, setDetailLoadingId] = useState(null);
+  const [detailError, setDetailError] = useState('');
+
+  const toggleSaleDetail = async (saleId) => {
+    setDetailError('');
+    if (expandedSaleId === saleId) {
+      setExpandedSaleId(null);
+      return;
+    }
+    setExpandedSaleId(saleId);
+    if (detailCache[saleId] || !supplierId || !accountId) return;
+
+    setDetailLoadingId(saleId);
+    try {
+      const detail = await postJson(
+        apiPaths.supplierPortalSaleDetail(supplierId, saleId),
+        { accountId },
+        { headers: supplierHeaders },
+      );
+      setDetailCache((current) => ({ ...current, [saleId]: detail }));
+    } catch (detailLoadError) {
+      setDetailError(detailLoadError.message || 'Failed to load sale details.');
+    } finally {
+      setDetailLoadingId(null);
+    }
+  };
 
   return (
     <div className="supplier-panel">
@@ -147,13 +177,12 @@ const SalesTransactionsTable = ({ sales, isLoading, error }) => {
       ) : (
         <>
           <div className="overflow-x-auto rounded-xl border border-slate-200 bg-white">
-            <table className="center-table w-full text-sm min-w-[760px]">
+            <table className="center-table w-full text-sm min-w-[820px]">
               <thead>
                 <tr className="bg-slate-50 border-b border-slate-200">
                   <Th>Date</Th>
                   <Th>Buyer</Th>
                   <Th>Product</Th>
-                  <Th>Lot</Th>
                   <Th>Quantity</Th>
                   <Th>Weight</Th>
                   <Th>Unit Price</Th>
@@ -163,27 +192,96 @@ const SalesTransactionsTable = ({ sales, isLoading, error }) => {
               <tbody className="divide-y divide-slate-100">
                 {pager.pageItems.map((row) => {
                   const unit = String(row.unit || '').toLowerCase();
+                  const expanded = expandedSaleId === row.saleId;
+                  const detail = detailCache[row.saleId];
+                  const itemCount = detail?.items?.length || 0;
+                  const commissionTotal = (detail?.items || []).reduce((sum, item) => sum + (Number(item.commissionAmount) || 0), 0);
+                  const payableTotal = Math.max(0, (Number(detail?.netAmount) || 0) - commissionTotal);
                   return (
-                    <tr key={row.id} className="hover:bg-slate-50 transition-colors">
-                      <td className="px-4 py-3 text-slate-700 whitespace-nowrap">{formatDate(row.createdAt)}</td>
-                      <td className="px-4 py-3 text-left">
-                        <span className="font-semibold text-slate-900">{row.customerName || 'Walk-in buyer'}</span>
-                        {row.customerPhone ? <span className="block text-xs text-slate-500">{row.customerPhone}</span> : null}
-                      </td>
-                      <td className="px-4 py-3 text-left">
-                        <span className="font-extrabold text-slate-900">{row.productName || 'Product'}</span>
-                        {row.categoryName ? <span className="block text-xs text-slate-500">{row.categoryName}</span> : null}
-                      </td>
-                      <td className="px-4 py-3 text-slate-700">{row.subCategoryName || '-'}</td>
-                      <td className="px-4 py-3 font-semibold text-slate-700 tabular-nums">
-                        {formatQuantity(row.quantity)} {unit}
-                      </td>
-                      <td className="px-4 py-3 font-semibold text-slate-700 tabular-nums">
-                        {row.saleWeightKg != null ? `${formatQuantity(row.saleWeightKg)} kg` : '-'}
-                      </td>
-                      <td className="px-4 py-3 font-semibold text-slate-700 tabular-nums">{formatMoney(row.unitPrice, { decimals: 2 })}</td>
-                      <td className="px-4 py-3 font-bold text-slate-900 tabular-nums">{formatMoney(row.saleAmount)}</td>
-                    </tr>
+                    <Fragment key={row.id}>
+                      <tr
+                        role="button"
+                        tabIndex={0}
+                        onClick={() => toggleSaleDetail(row.saleId)}
+                        onKeyDown={(event) => {
+                          if (event.key === 'Enter' || event.key === ' ') {
+                            event.preventDefault();
+                            toggleSaleDetail(row.saleId);
+                          }
+                        }}
+                        className={'cursor-pointer transition-colors hover:bg-slate-50 ' + (expanded ? 'bg-slate-50' : '')}
+                      >
+                        <td className="px-4 py-3 text-slate-700 whitespace-nowrap">{formatDate(row.createdAt)}</td>
+                        <td className="px-4 py-3 text-left">
+                          <span className="inline-flex items-center gap-2 font-semibold text-slate-900">
+                            {expanded ? <ChevronDown size={15} /> : <ChevronRight size={15} />}
+                            {row.customerName || 'Walk-in buyer'}
+                          </span>
+                          {row.customerPhone ? <span className="block text-xs text-slate-500 pl-6">{row.customerPhone}</span> : null}
+                        </td>
+                        <td className="px-4 py-3 text-left">
+                          <span className="font-extrabold text-slate-900">{row.productName || 'Product'}</span>
+                          {row.categoryName ? <span className="block text-xs text-slate-500">{row.categoryName}</span> : null}
+                        </td>
+                        <td className="px-4 py-3 font-semibold text-slate-700 tabular-nums">
+                          {formatQuantity(row.quantity)} {unit}
+                        </td>
+                        <td className="px-4 py-3 font-semibold text-slate-700 tabular-nums">
+                          {row.saleWeightKg != null ? formatQuantity(row.saleWeightKg) + ' kg' : '-'}
+                        </td>
+                        <td className="px-4 py-3 font-semibold text-slate-700 tabular-nums">{formatMoney(row.unitPrice, { decimals: 2 })}</td>
+                        <td className="px-4 py-3 font-bold text-slate-900 tabular-nums">{formatMoney(row.saleAmount)}</td>
+                      </tr>
+                      {expanded && (
+                        <tr className="bg-white">
+                          <td colSpan={7} className="px-4 py-4 text-left">
+                            {detailLoadingId === row.saleId ? (
+                              <div className="data-load-panel py-4">
+                                <div className="windows-loader" aria-label="Loading sale details" />
+                              </div>
+                            ) : detailError && !detail ? (
+                              <ErrorBanner message={detailError} />
+                            ) : detail ? (
+                              <div className="space-y-3 rounded-lg border border-slate-200 bg-slate-50 p-4">
+                                <div className="grid gap-3 sm:grid-cols-3">
+                                  <div className="box-row bg-white"><span>Items</span><strong>{itemCount}</strong></div>
+                                  <div className="box-row bg-white"><span>Sold</span><strong>{formatMoney(detail.netAmount)}</strong></div>
+                                  <div className="box-row bg-white"><span>Payable</span><strong className="text-emerald-700">{formatMoney(payableTotal)}</strong></div>
+                                </div>
+                                <div className="overflow-x-auto rounded-lg border border-slate-200 bg-white">
+                                  <table className="center-table w-full min-w-[720px] text-xs">
+                                    <thead>
+                                      <tr className="bg-white border-b border-slate-200">
+                                        <Th>Product</Th>
+                                        <Th>Lot</Th>
+                                        <Th>Quantity</Th>
+                                        <Th>Weight</Th>
+                                        <Th>Rate</Th>
+                                        <Th>Total</Th>
+                                        <Th>Commission</Th>
+                                      </tr>
+                                    </thead>
+                                    <tbody className="divide-y divide-slate-100">
+                                      {(detail.items || []).map((item) => (
+                                        <tr key={item.saleItemId}>
+                                          <td className="px-3 py-2 text-left font-semibold text-slate-800">{saleItemLabel(item)}</td>
+                                          <td className="px-3 py-2 text-slate-600">{item.deliveryName || '-'}</td>
+                                          <td className="px-3 py-2 font-semibold text-slate-700">{formatQuantity(item.quantity)} {String(item.unit || '').toLowerCase()}</td>
+                                          <td className="px-3 py-2 text-slate-700">{item.saleWeightKg != null ? formatQuantity(item.saleWeightKg) + ' kg' : '-'}</td>
+                                          <td className="px-3 py-2 text-slate-700">{formatMoney(item.unitPrice, { decimals: 2 })}</td>
+                                          <td className="px-3 py-2 font-bold text-slate-900">{formatMoney(item.lineTotal)}</td>
+                                          <td className="px-3 py-2 text-slate-700">{formatMoney(item.commissionAmount)}</td>
+                                        </tr>
+                                      ))}
+                                    </tbody>
+                                  </table>
+                                </div>
+                              </div>
+                            ) : null}
+                          </td>
+                        </tr>
+                      )}
+                    </Fragment>
                   );
                 })}
               </tbody>
@@ -301,6 +399,9 @@ const WholesalerDetail = ({ link, shipments, supplierId, supplierHeaders, onBack
             sales={salesQuery.data || []}
             isLoading={salesQuery.isLoading}
             error={salesQuery.error}
+            supplierId={supplierId}
+            accountId={link.accountId}
+            supplierHeaders={supplierHeaders}
           />
         </main>
 

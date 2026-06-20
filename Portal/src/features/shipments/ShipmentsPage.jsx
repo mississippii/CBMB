@@ -124,6 +124,7 @@ const ShipmentsPage = () => {
   // Always keep the name in sync with the auto-generated pattern.
   useEffect(() => {
     if (!suggestedName) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setFormData((prev) => (prev.name === suggestedName ? prev : { ...prev, name: suggestedName }));
   }, [suggestedName]);
 
@@ -482,37 +483,23 @@ const ShipmentsPage = () => {
       )}
 
       {/* Confirm before creating a shipment */}
-      {showConfirm && (
-        <div className="modal-overlay">
-          <div className="modal-content" style={{ maxWidth: '28rem' }}>
-            <div className="modal-header">
-              <div className="flex items-center gap-2.5">
-                <div className="modal-icon-circle bg-amber-100 text-amber-700"><Truck size={18} /></div>
-                <div><h2>Add this shipment?</h2></div>
-              </div>
-              <button type="button" onClick={() => setShowConfirm(false)} className="modal-close-btn">✕</button>
-            </div>
-            <div className="modal-body">
-              <p className="text-sm text-slate-600">
-                Please review — adding a shipment updates stock and can only be reversed by settling or adjusting it.
-              </p>
-              <div className="mt-3 grid grid-cols-2 gap-3">
-                <div className="balance-pill"><p>Supplier</p><p>{selectedSupplier?.name || '—'}</p></div>
-                <div className="balance-pill"><p>Product</p><p>{selectedProduct?.name || '—'}</p></div>
-                <div className="balance-pill"><p>Total Quantity</p><p>{totalQuantity} {formData.unit}</p></div>
-                <div className="balance-pill"><p>Lines</p><p>{formData.lines.filter((l) => Number(l.quantity) > 0).length}</p></div>
-              </div>
-              <p className="mt-3 text-xs text-slate-500">Name: <span className="font-semibold text-slate-700">{formData.name || '—'}</span></p>
-            </div>
-            <div className="modal-footer">
-              <button type="button" onClick={() => setShowConfirm(false)} className="btn-secondary" disabled={isSaving}>Back</button>
-              <button type="button" onClick={handleConfirmCreate} className="btn-primary flex items-center gap-2" disabled={isSaving}>
-                <Save size={15} /> {isSaving ? 'Saving…' : 'Confirm & Add'}
-              </button>
-            </div>
-          </div>
+      <ConfirmDialog
+        open={showConfirm}
+        title="Confirm shipment"
+        message="Add this shipment?"
+        confirmLabel="Confirm & Add"
+        busy={isSaving}
+        onCancel={() => setShowConfirm(false)}
+        onConfirm={handleConfirmCreate}
+      >
+        <div className="space-y-1.5">
+          <div className="flex justify-between gap-4"><span className="text-slate-500">Supplier</span><span className="font-semibold text-slate-900">{selectedSupplier?.name || '—'}</span></div>
+          <div className="flex justify-between gap-4"><span className="text-slate-500">Product</span><span className="font-semibold text-slate-900">{selectedProduct?.name || '—'}</span></div>
+          <div className="flex justify-between gap-4"><span className="text-slate-500">Quantity</span><span className="font-semibold text-slate-900">{totalQuantity} {formData.unit}</span></div>
+          <div className="flex justify-between gap-4"><span className="text-slate-500">Lines</span><span className="font-semibold text-slate-900">{formData.lines.filter((l) => Number(l.quantity) > 0).length}</span></div>
+          <div className="flex justify-between gap-4 border-t border-slate-200 pt-1.5"><span className="font-semibold text-slate-600">Name</span><span className="font-bold text-slate-900">{formData.name || '—'}</span></div>
         </div>
-      )}
+      </ConfirmDialog>
 
       {/* Edit shipment (name / note only) */}
       {editTarget && (

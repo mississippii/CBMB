@@ -10,6 +10,7 @@ import { useAuth } from '../auth/AuthContext'
 import { useToast } from '../../shared/components/Toast'
 import { TablePager, usePagination, ConfirmDialog } from '../../shared/components'
 import { formatDate } from '../../shared/utils/format'
+import { isValidPhone, normalizePhone, PHONE_HINT } from '../../shared/utils/validation'
 import { postJson, apiPaths } from '../../services/apiClient'
 
 const formatCurrency = (value) => `৳ ${Math.ceil(Number(value) || 0).toLocaleString()}`
@@ -67,7 +68,7 @@ const SupplierDetail = ({ supplierId, onBack }) => {
   const [showTransactions, setShowTransactions] = useState(true)
   const [showStock, setShowStock] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
-  const [editForm, setEditForm] = useState({ name: '', businessName: '', location: '', commissionRate: 0 })
+  const [editForm, setEditForm] = useState({ name: '', businessName: '', phone: '', location: '' })
   const [editError, setEditError] = useState('')
   const [isSavingEdit, setIsSavingEdit] = useState(false)
   const [showDisableConfirm, setShowDisableConfirm] = useState(false)
@@ -258,8 +259,8 @@ const SupplierDetail = ({ supplierId, onBack }) => {
     setEditForm({
       name: supplier.name || '',
       businessName: supplier.businessName || '',
+      phone: normalizePhone(supplier.contact || supplier.phone),
       location: supplier.location || '',
-      commissionRate: supplier.commissionRate || 0,
     })
     setEditError('')
     setShowEditModal(true)
@@ -267,11 +268,7 @@ const SupplierDetail = ({ supplierId, onBack }) => {
 
   const requestEditSave = () => {
     if (!editForm.name.trim()) { setEditError('Supplier name is required.'); return }
-    const rate = Number(editForm.commissionRate)
-    if (editForm.commissionRate !== '' && (Number.isNaN(rate) || rate < 0 || rate > 100)) {
-      setEditError('Commission rate must be between 0 and 100.')
-      return
-    }
+    if (!isValidPhone(editForm.phone)) { setEditError(PHONE_HINT); return }
     setConfirm({ title: 'Update supplier', label: 'Confirm & Save', message: 'Save changes to this supplier?', run: handleEditSave })
   }
 
@@ -279,7 +276,12 @@ const SupplierDetail = ({ supplierId, onBack }) => {
     setIsSavingEdit(true)
     setEditError('')
     try {
-      const updated = await updateSupplier({ id: supplier.id, ...editForm, name: editForm.name.trim() })
+      const updated = await updateSupplier({
+        id: supplier.id,
+        ...editForm,
+        name: editForm.name.trim(),
+        phone: normalizePhone(editForm.phone),
+      })
       setProfile((prev) => (prev ? { ...prev, account: { ...prev.account, ...updated } } : prev))
       setShowEditModal(false)
       showToast('Supplier updated', 'success')
@@ -720,7 +722,6 @@ const SupplierDetail = ({ supplierId, onBack }) => {
             <div className="modal-header">
               <div>
                 <h2>Edit Supplier</h2>
-                <p className="text-xs text-slate-500 mt-0.5">Phone and opening due cannot be changed</p>
               </div>
               <button onClick={() => setShowEditModal(false)} className="modal-close-btn">✕</button>
             </div>
@@ -751,6 +752,18 @@ const SupplierDetail = ({ supplierId, onBack }) => {
                 </div>
                 <div className="form-field">
                   <label className="form-label">
+                    <Phone size={13} /> Phone Number <span className="text-red-500">*</span>
+                  </label>
+                  <input
+                    type="tel"
+                    value={editForm.phone}
+                    onChange={(e) => setEditForm((p) => ({ ...p, phone: normalizePhone(e.target.value) }))}
+                    className="input-field"
+                    inputMode="numeric"
+                  />
+                </div>
+                <div className="form-field">
+                  <label className="form-label">
                     <MapPin size={13} /> Location
                   </label>
                   <input
@@ -760,23 +773,6 @@ const SupplierDetail = ({ supplierId, onBack }) => {
                     className="input-field"
                   />
                 </div>
-                <div className="form-field">
-                  <label className="form-label">
-                    <Percent size={13} /> Commission Rate
-                  </label>
-                  <div className="input-with-suffix">
-                    <input
-                      type="number"
-                      min="0"
-                      max="100"
-                      step="0.5"
-                      value={editForm.commissionRate}
-                      onChange={(e) => setEditForm((p) => ({ ...p, commissionRate: e.target.value }))}
-                      className="input-field"
-                    />
-                    <span className="input-suffix">%</span>
-                  </div>
-                </div>
               </div>
               {editError && (
                 <div className="status-error mt-4">
@@ -785,7 +781,7 @@ const SupplierDetail = ({ supplierId, onBack }) => {
                 </div>
               )}
             </div>
-            <div className="modal-footer">
+            <div className="modal-footer justify-center">
               <button onClick={() => setShowEditModal(false)} className="btn-secondary" disabled={isSavingEdit}>Cancel</button>
               <button onClick={requestEditSave} disabled={isSavingEdit} className="btn-primary flex items-center gap-2">
                 {isSavingEdit ? 'Saving…' : (<><Pencil size={14} /> Save Changes</>)}

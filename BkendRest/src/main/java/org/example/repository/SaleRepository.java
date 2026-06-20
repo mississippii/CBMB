@@ -2,12 +2,17 @@ package org.example.repository;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.Optional;
 import org.example.model.Sale;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
 public interface SaleRepository extends JpaRepository<Sale, Long> {
+
+    boolean existsByTransactionCode(String transactionCode);
+
+    Optional<Sale> findByWholesaler_IdAndTransactionCode(Long wholesalerId, String transactionCode);
 
     @Query("select coalesce(sum(s.netAmount), 0) from Sale s where s.wholesaler.id = :wholesalerId and s.wholesalerCustomer.id = :customerAccountId")
     BigDecimal sumNetAmountByCustomer(@Param("wholesalerId") Long wholesalerId, @Param("customerAccountId") Long customerAccountId);

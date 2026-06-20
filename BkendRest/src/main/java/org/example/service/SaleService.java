@@ -2,8 +2,10 @@ package org.example.service;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.security.SecureRandom;
 import java.time.LocalDateTime;
 import org.example.dto.CreateSaleRequest;
+import org.example.dto.SaleDetailResponse;
 import org.example.dto.SaleResponse;
 import org.example.exception.BadRequestException;
 import org.example.model.AccountBalance;
@@ -38,6 +40,7 @@ import org.example.repository.AccountLedgerRepository;
 import org.example.repository.BoxBalanceRepository;
 import org.example.repository.BoxInventoryRepository;
 import org.example.repository.BoxLedgerRepository;
+import org.example.repository.CrateDepositMovementRepository;
 import org.example.repository.BoxTypeRepository;
 import org.example.repository.InventoryRepository;
 import org.example.repository.SaleItemRepository;
@@ -51,6 +54,10 @@ import org.springframework.transaction.annotation.Transactional;
 
 @Service
 public class SaleService {
+
+    private static final String TRANSACTION_CODE_CHARS = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789";
+    private static final int TRANSACTION_CODE_LENGTH = 10;
+    private static final SecureRandom TRANSACTION_CODE_RANDOM = new SecureRandom();
 
     private final WholesalerRepository wholesalerRepository;
     private final InventoryRepository inventoryRepository;
@@ -66,6 +73,7 @@ public class SaleService {
     private final BoxInventoryRepository boxInventoryRepository;
     private final BoxBalanceRepository boxBalanceRepository;
     private final BoxLedgerRepository boxLedgerRepository;
+    private final CrateDepositMovementRepository crateDepositMovementRepository;
     // Crate movement that rides along with a sale is delegated to these so the whole sale stays
     // atomic (same transaction) without duplicating crate borrow/sell/deposit logic.
     private final PaymentService paymentService;
@@ -86,6 +94,7 @@ public class SaleService {
             BoxInventoryRepository boxInventoryRepository,
             BoxBalanceRepository boxBalanceRepository,
             BoxLedgerRepository boxLedgerRepository,
+            CrateDepositMovementRepository crateDepositMovementRepository,
             PaymentService paymentService,
             CrateService crateService
     ) {
@@ -103,6 +112,7 @@ public class SaleService {
         this.boxInventoryRepository = boxInventoryRepository;
         this.boxBalanceRepository = boxBalanceRepository;
         this.boxLedgerRepository = boxLedgerRepository;
+        this.crateDepositMovementRepository = crateDepositMovementRepository;
         this.paymentService = paymentService;
         this.crateService = crateService;
     }
@@ -115,6 +125,157 @@ public class SaleService {
         BigDecimal unitPrice;
         BigDecimal lineGross;
         BigDecimal lineNet;
+    }
+
+    @Transactional(readOnly = true)
+    public SaleDetailResponse detail(Long wholesalerId, Long saleId) {
+        Sale sale = findSaleForWholesaler(wholesalerId, saleId);
+        return detailForSale(sale);
+    }
+
+    @Transactional(readOnly = true)
+    public SaleDetailResponse detailByTransactionCode(Long wholesalerId, String transactionCode) {
+        String cleanCode = transactionCode == null ? "" : transactionCode.trim().toUpperCase(java.util.Locale.ROOT);
+        Sale sale = saleRepository.findByWholesaler_IdAndTransactionCode(wholesalerId, cleanCode)
+                .orElseThrow(() -> new BadRequestException("Sale not found for this transaction ID."));
+        return detailForSale(sale);
+    }
+
+    private SaleDetailResponse detailForSale(Sale sale) {
+        java.util.List<SaleDetailResponse.Item> items = saleItemRepository.findBySale_Id(sale.getId())
+                .stream()
+                .map(this::toSaleDetailItem)
+                .toList();
+        return toSaleDetailResponse(sale, sale.getGrossAmount(), sale.getDiscountAmount(), sale.getNetAmount(),
+                sale.getPaidAmount(), sale.getDueAmount(), items);
+    }
+
+    @Transactional(readOnly = true)
+    public SaleDetailResponse detailForSupplier(Long wholesalerId, Long saleId, Long wholesalerSupplierId) {
+        Sale sale = findSaleForWholesaler(wholesalerId, saleId);
+        java.util.List<SaleDetailResponse.Item> items = saleItemRepository
+                .findBySale_IdAndWholesalerSupplier_Id(saleId, wholesalerSupplierId)
+                .stream()
+                .map(this::toSaleDetailItem)
+                .toList();
+        if (items.isEmpty()) {
+            throw new BadRequestException("Sale not found for this supplier.");
+        }
+        BigDecimal supplierSaleAmount = cashMoney(items.stream()
+                .map(SaleDetailResponse.Item::lineTotal)
+                .reduce(BigDecimal.ZERO, BigDecimal::add));
+        BigDecimal supplierPaidAmount = transactionRepository
+                .findFirstByWholesalerIdAndSaleIdAndWholesalerSupplierIdOrderByCreatedAtDesc(
+                        wholesalerId, saleId, wholesalerSupplierId)
+                .map(Transaction::getPaymentAmount)
+                .orElse(BigDecimal.ZERO);
+        return toSaleDetailResponse(sale, supplierSaleAmount, BigDecimal.ZERO, supplierSaleAmount,
+                supplierPaidAmount, supplierSaleAmount.subtract(supplierPaidAmount).max(BigDecimal.ZERO), items);
+    }
+
+    private Sale findSaleForWholesaler(Long wholesalerId, Long saleId) {
+        Sale sale = saleRepository.findById(saleId)
+                .orElseThrow(() -> new BadRequestException("Sale not found."));
+        if (!sale.getWholesaler().getId().equals(wholesalerId)) {
+            throw new BadRequestException("Sale does not belong to this wholesaler.");
+        }
+        return sale;
+    }
+
+    private SaleDetailResponse toSaleDetailResponse(
+            Sale sale,
+            BigDecimal grossAmount,
+            BigDecimal discountAmount,
+            BigDecimal netAmount,
+            BigDecimal paidAmount,
+            BigDecimal dueAmount,
+            java.util.List<SaleDetailResponse.Item> items
+    ) {
+        String customerName = sale.getCustomerNameSnapshot();
+        String customerPhone = sale.getCustomerPhoneSnapshot();
+        if (sale.getWholesalerCustomer() != null && sale.getWholesalerCustomer().getCustomer() != null) {
+            customerName = sale.getWholesalerCustomer().getCustomer().getName();
+            customerPhone = sale.getWholesalerCustomer().getCustomer().getPhone();
+        }
+
+        return new SaleDetailResponse(
+                sale.getId(),
+                sale.getTransactionCode(),
+                sale.getWholesalerCustomer() == null ? null : sale.getWholesalerCustomer().getId(),
+                customerName,
+                customerPhone,
+                sale.getCustomerType(),
+                sale.getSaleType().name(),
+                sale.getBoxesGiven(),
+                saleCrateLines(sale),
+                saleCrateDepositAmount(sale),
+                saleCrateSaleAmount(sale),
+                sale.getNote(),
+                grossAmount,
+                discountAmount,
+                netAmount,
+                paidAmount,
+                dueAmount,
+                sale.getPaymentMethod().name(),
+                sale.getStatus().name(),
+                sale.getSaleDate(),
+                items
+        );
+    }
+
+    private java.util.List<org.example.dto.CrateTypeQuantity> saleCrateLines(Sale sale) {
+        java.util.Map<String, Long> byType = new java.util.LinkedHashMap<>();
+        for (BoxLedger ledger : boxLedgerRepository.findByWholesaler_IdAndReferenceTypeAndReferenceId(
+                sale.getWholesaler().getId(), BoxReferenceType.SALE, sale.getId())) {
+            String name = ledger.getBoxType() == null ? "CRATE" : ledger.getBoxType().getName();
+            byType.merge(name, Long.valueOf(ledger.getQuantity()), Long::sum);
+        }
+        return byType.entrySet().stream()
+                .map(entry -> new org.example.dto.CrateTypeQuantity(entry.getKey(), entry.getValue()))
+                .toList();
+    }
+
+    private BigDecimal saleCrateDepositAmount(Sale sale) {
+        return crateDepositMovementRepository.findByWholesalerIdAndSaleId(sale.getWholesaler().getId(), sale.getId())
+                .stream()
+                .map(org.example.model.CrateDepositMovement::getAmount)
+                .filter(amount -> amount != null && amount.signum() > 0)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    private BigDecimal saleCrateSaleAmount(Sale sale) {
+        return boxLedgerRepository.findByWholesaler_IdAndReferenceTypeAndReferenceId(
+                sale.getWholesaler().getId(), BoxReferenceType.SALE, sale.getId())
+                .stream()
+                .filter(ledger -> ledger.getMovementType() == BoxMovementType.SOLD)
+                .map(ledger -> {
+                    BigDecimal unitSale = ledger.getUnitSalePrice() == null ? BigDecimal.ZERO : ledger.getUnitSalePrice();
+                    return unitSale.multiply(BigDecimal.valueOf(ledger.getQuantity()));
+                })
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+    }
+
+    private SaleDetailResponse.Item toSaleDetailItem(SaleItem item) {
+        return new SaleDetailResponse.Item(
+                item.getId(),
+                item.getWholesalerSupplier().getId(),
+                item.getWholesalerSupplier().getSupplier().getName(),
+                item.getDelivery() == null ? null : item.getDelivery().getId(),
+                item.getDelivery() == null ? null : item.getDelivery().getName(),
+                item.getProduct().getId(),
+                item.getProduct().getName(),
+                item.getCategory() == null ? null : item.getCategory().getId(),
+                item.getCategory() == null ? null : item.getCategory().getName(),
+                item.getSubCategory() == null ? null : item.getSubCategory().getId(),
+                item.getSubCategory() == null ? null : item.getSubCategory().getName(),
+                item.getQuantity(),
+                item.getSaleWeightKg(),
+                item.getUnit().name(),
+                item.getUnitPrice(),
+                item.getLineTotal(),
+                item.getCommissionRate(),
+                item.getCommissionAmount()
+        );
     }
 
     @Transactional
@@ -225,6 +386,7 @@ public class SaleService {
         sale.setCustomerNameSnapshot(customerNameSnapshot);
         sale.setCustomerPhoneSnapshot(customerPhoneSnapshot);
         sale.setCustomerType(oneTimeCustomer ? "ONE_TIME" : "PERMANENT");
+        sale.setTransactionCode(generateTransactionCode());
         sale.setSaleDate(LocalDateTime.now());
         sale.setSaleType(dueAmount.signum() == 0 ? SaleType.PAY_INSTANT : SaleType.PAY_LATER);
         sale.setGrossAmount(grossAmount);
@@ -324,6 +486,7 @@ public class SaleService {
         return new SaleResponse(
                 sale.getId(),
                 firstTransactionId,
+                sale.getTransactionCode(),
                 customerAccount == null ? null : customerAccount.getId(),
                 customerNameSnapshot,
                 customerPhoneSnapshot,
@@ -445,13 +608,13 @@ public class SaleService {
             if (oneTimeCustomer) {
                 crateService.sellCrates(wholesalerId, new org.example.dto.SellCratesRequest(
                         null, null, null, null, "Sold with sale #" + sale.getId(),
-                        request.cratePaymentMethod(), lines));
+                        request.cratePaymentMethod(), lines, sale.getId()));
             } else {
                 java.util.List<org.example.dto.CrateLineRequest> borrowLines = lines.stream()
                         .map(l -> new org.example.dto.CrateLineRequest(l.crateType(), l.quantity()))
                         .toList();
                 paymentService.borrowCustomerCrates(wholesalerId, new org.example.dto.CustomerCrateBorrowRequest(
-                        customerAccount.getId(), borrowLines, request.crateDeposit(), "Borrowed with sale #" + sale.getId()));
+                        customerAccount.getId(), borrowLines, request.crateDeposit(), "Borrowed with sale #" + sale.getId(), sale.getId()));
             }
             return;
         }
@@ -571,6 +734,21 @@ public class SaleService {
         transaction.setDueAmount(dueAmount);
         transaction.setDescription("Sale #" + sale.getId());
         return transactionRepository.save(transaction);
+    }
+
+    private String generateTransactionCode() {
+        for (int attempt = 0; attempt < 20; attempt++) {
+            StringBuilder code = new StringBuilder(TRANSACTION_CODE_LENGTH);
+            for (int i = 0; i < TRANSACTION_CODE_LENGTH; i++) {
+                code.append(TRANSACTION_CODE_CHARS.charAt(
+                        TRANSACTION_CODE_RANDOM.nextInt(TRANSACTION_CODE_CHARS.length())));
+            }
+            String transactionCode = code.toString();
+            if (!saleRepository.existsByTransactionCode(transactionCode)) {
+                return transactionCode;
+            }
+        }
+        throw new BadRequestException("Could not generate a unique transaction ID. Please try again.");
     }
 
     private Wholesaler findWholesaler(Long wholesalerId) {

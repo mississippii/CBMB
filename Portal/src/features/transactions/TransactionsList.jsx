@@ -23,8 +23,8 @@ const TransactionsList = () => {
   const [typeFilter, setTypeFilter] = useState('all');
 
   // Server-side date filter for the heavy query; client-side type/search filter stays local.
-  const fromIso = startDate ? new Date(`${startDate}T00:00:00`).toISOString() : null;
-  const toIso = endDate ? new Date(`${endDate}T23:59:59.999`).toISOString() : null;
+  const fromIso = startDate ? `${startDate}T00:00:00` : null;
+  const toIso = endDate ? `${endDate}T23:59:59.999` : null;
 
   const { data: transactionsRaw = [] } = useQuery({
     queryKey: queryKeys.transactions.list(admin?.wholesalerId, fromIso, toIso),
@@ -54,6 +54,7 @@ const TransactionsList = () => {
     subCategoryName: t.subCategoryName || '',
     quantity: Number(t.quantity) || 0,
     unit: String(t.unit || '').toLowerCase(),
+    saleWeightKg: Number(t.saleWeightKg) || 0,
     unitPrice: Number(t.unitPrice) || 0,
     totalAmount: Number(t.saleAmount) || 0,
     grossAmount: Number(t.grossAmount) || 0,
@@ -193,39 +194,26 @@ const TransactionsList = () => {
     return formatCurrency(transaction.totalAmount);
   };
 
-  // Product column: the sold product, or "Crate" for crate-only movements.
-  const getItemLabel = (transaction) => {
-    if (transaction.product) {
-      const parts = [transaction.product];
-      if (transaction.category && transaction.category !== 'No Category') parts.push(transaction.category);
-      const label = parts.join(' · ');
-      const qty = Number(transaction.quantity) > 0
-        ? ` · ${transaction.quantity} ${String(transaction.unit || '').toUpperCase()}`.trimEnd()
-        : '';
-      return label + qty;
-    }
-    const op = String(transaction.paymentOperationType || transaction.note || '').toUpperCase();
-    if (op.includes('CRATE')) {
-      const n = Number(transaction.cratesReturned || 0);
-      return n > 0 ? `Crate · ${n}` : 'Crate';
-    }
-    return '—';
-  };
-
 
   const getItemParts = (transaction) => {
-    if (!transaction.product) return { title: getItemLabel(transaction), meta: '' };
-    const quantity = Number(transaction.quantity) > 0
-      ? `${transaction.quantity} ${String(transaction.unit || '').toUpperCase()}`.trim()
-      : '';
-    return {
-      title: transaction.product,
-      meta: [
-        transaction.category && transaction.category !== 'No Category' ? transaction.category : null,
-        transaction.subCategoryName || null,
-        quantity,
-      ].filter(Boolean).join(' · '),
-    };
+    if (transaction.transactionType !== 'Payment') {
+      const parts = [];
+      if (transaction.product) {
+        parts.push(['Includes', [transaction.product, transaction.category && transaction.category !== 'No Category' ? transaction.category : null, transaction.subCategoryName || null].filter(Boolean).join(' · ')]);
+      }
+      if (Number(transaction.quantity) > 0) {
+        parts.push(['Qty', transaction.quantity + ' ' + String(transaction.unit || '').toUpperCase()]);
+      }
+      if (Number(transaction.saleWeightKg) > 0) {
+        parts.push(['Kg', Number(transaction.saleWeightKg).toLocaleString()]);
+      }
+      return {
+        title: 'Sale recorded',
+        meta: parts.map(([label, value]) => label + ': ' + value).join(' · '),
+      };
+    }
+
+    return { title: getPaymentOperationLabel(transaction), meta: transaction.note || '' };
   };
 
   // Payment method column: how it was paid, or "Due" when a sale was taken on credit.
@@ -251,30 +239,21 @@ const TransactionsList = () => {
 
   const renderDetails = (transaction) => {
     if (transaction.transactionType === 'Payment') {
-      // Crate-only operations (purchase, lost/damaged, customer borrow) have no
-      // paymentType but carry the meaningful description from the backend.
       const hasPaymentType = String(transaction.paymentOperationType || '').trim().length > 0;
       const hasParty = transaction.customer || transaction.supplier;
       const description = String(transaction.note || '').trim();
-      if (!hasPaymentType && !hasParty && description) {
-        return description;
-      }
+      if (!hasPaymentType && !hasParty && description) return description;
 
       const crates = Number(transaction.cratesReturned || 0);
       const parts = [getPaymentOperationLabel(transaction)];
-      if (crates > 0) parts.push('Crates: ' + crates);
+      if (crates > 0) parts.push('Crates ' + crates);
       if (Number(transaction.customerNewDue) > 0) parts.push('Due ' + formatCurrency(transaction.customerNewDue));
       return parts.join(' • ');
     }
 
-    const productLabel = [transaction.product, transaction.category && transaction.category !== 'No Category' ? transaction.category : null]
-      .filter(Boolean)
-      .join(' · ');
-    const quantity = Number(transaction.quantity) > 0
-      ? (transaction.quantity + ' ' + String(transaction.unit || '').toUpperCase()).trim()
-      : '';
-    const parts = [productLabel || 'Sale', quantity].filter(Boolean);
-    if (Number(transaction.paymentAmount) > 0) parts.push('Paid ' + formatCurrency(transaction.paymentAmount));
+    const parts = ['Sale recorded'];
+    if (transaction.supplier) parts.push('supplier share');
+    if (Number(transaction.paymentAmount) > 0) parts.push('paid ' + formatCurrency(transaction.paymentAmount));
     return parts.join(' • ');
   };
 
@@ -445,7 +424,7 @@ const TransactionsList = () => {
                   <tr className="bg-slate-50 border-b border-slate-200">
                     <th className="px-4 py-3 font-semibold text-slate-700">Date</th>
                     <th className="px-4 py-3 font-semibold text-slate-700">Type</th>
-                    <th className="px-4 py-3 font-semibold text-slate-700">Product</th>
+                    <th className="px-4 py-3 font-semibold text-slate-700">Details</th>
                     <th className="px-4 py-3 font-semibold text-slate-700">Supplier</th>
                     <th className="px-4 py-3 font-semibold text-slate-700">Customer</th>
                     <th className="px-4 py-3 font-semibold text-slate-700">Amount</th>

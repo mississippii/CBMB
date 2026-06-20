@@ -35,6 +35,9 @@ const asArray = (value) => (Array.isArray(value) ? value : []);
 const EMPTY_CRATE_INVENTORY = {
   totalCratesOwned: 0,
   cratesInShop: 0,
+  customerCratesInShop: 0,
+  supplierCratesInShop: 0,
+  othersCratesInShop: 0,
   cratesWithSuppliers: 0,
   cratesWithCustomers: 0,
   cratesLostDamaged: 0,
@@ -62,6 +65,9 @@ const mapCrateDashboard = (dashboard) => {
     byType[name] = {
       total: Number(item.total) || 0,
       inShop: Number(item.inHand) || 0,
+      customerCratesInShop: Number(item.customerCratesInShop) || 0,
+      supplierCratesInShop: Number(item.supplierCratesInShop) || 0,
+      othersCratesInShop: (Number(item.customerCratesInShop) || 0) + (Number(item.supplierCratesInShop) || 0),
       withSuppliers: Number(item.withSuppliers) || 0,
       withCustomers: Number(item.withCustomers) || 0,
       lost: Number(item.lostDamaged) || 0,
@@ -72,10 +78,14 @@ const mapCrateDashboard = (dashboard) => {
   return {
     totalCratesOwned: Number(dashboard?.totalCratesOwned) || 0,
     cratesInShop: Number(dashboard?.cratesInShop) || 0,
+    customerCratesInShop: Number(dashboard?.customerCratesInShop) || 0,
+    supplierCratesInShop: Number(dashboard?.supplierCratesInShop) || 0,
+    othersCratesInShop: (Number(dashboard?.customerCratesInShop) || 0) + (Number(dashboard?.supplierCratesInShop) || 0),
     cratesWithSuppliers: Number(dashboard?.cratesWithSuppliers) || 0,
     cratesWithCustomers: Number(dashboard?.cratesWithCustomers) || 0,
     cratesLostDamaged: Number(dashboard?.cratesLostDamaged) || 0,
     totalCrateValue: Number(dashboard?.totalCrateValue) || 0,
+    refundableWalkInCrateSales: Number(dashboard?.refundableWalkInCrateSales) || 0,
     byType,
   };
 };
@@ -365,7 +375,7 @@ export const DataProvider = ({ children }) => {
       businessName: supplierData.businessName || null,
       phone: supplierData.contact || supplierData.phone,
       location: supplierData.location || null,
-      commissionRate: Number(supplierData.commissionRate) || 0,
+      commissionRate: supplierData.commissionRate == null ? null : Number(supplierData.commissionRate) || 0,
       openingDue: Number(supplierData.openingDue) || 0,
     };
 
@@ -384,8 +394,9 @@ export const DataProvider = ({ children }) => {
       accountId: Number(supplierData.id),
       name: supplierData.name,
       businessName: supplierData.businessName || null,
+      phone: supplierData.phone || supplierData.contact,
       location: supplierData.location || null,
-      commissionRate: Number(supplierData.commissionRate) || 0,
+      commissionRate: supplierData.commissionRate == null ? null : Number(supplierData.commissionRate) || 0,
     };
     const account = await postJson(apiPaths.wholesalerSuppliersUpdate(admin.wholesalerId), payload);
     const updated = mapSupplierAccount(account);
@@ -639,6 +650,26 @@ export const DataProvider = ({ children }) => {
     setCustomers((prev) => [...prev, newCustomer]);
     invalidate.customers();
     return newCustomer;
+  };
+
+  const updateCustomer = async (customerData) => {
+    if (!admin?.wholesalerId) {
+      throw new Error('Wholesaler profile not found for this user.');
+    }
+
+    const payload = {
+      accountId: Number(customerData.id),
+      name: customerData.name,
+      ownerName: customerData.owner || customerData.ownerName || null,
+      phone: customerData.phone,
+      address: customerData.address || null,
+    };
+
+    const account = await postJson(apiPaths.wholesalerCustomersUpdate(admin.wholesalerId), payload);
+    const updated = mapCustomerAccount(account);
+    setCustomers((prev) => prev.map((c) => (c.id === updated.id ? { ...c, ...updated } : c)));
+    invalidate.customers();
+    return updated;
   };
 
   const recordSale = async (saleData) => {
@@ -1204,6 +1235,7 @@ export const DataProvider = ({ children }) => {
         refreshShipments,
         refreshAll,
         addCustomer,
+        updateCustomer,
         setCustomerStatus,
         reloadCustomers,
         addTransaction: recordSale,
