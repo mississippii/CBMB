@@ -210,6 +210,7 @@ const mapTransaction = (transaction) => ({
   createdAt: transaction.createdAt || new Date().toISOString(),
   transactionType: transaction.transactionType === 'PAYMENT' ? 'Payment' : 'Sale',
   saleId: transaction.saleId || null,
+  transactionCode: transaction.transactionCode || null,
   paymentId: transaction.paymentId || null,
   settlementId: transaction.settlementId || null,
   customerId: transaction.wholesalerCustomerId,

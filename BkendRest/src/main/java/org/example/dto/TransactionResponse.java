@@ -7,6 +7,7 @@ public record TransactionResponse(
         Long id,
         String transactionType,
         Long saleId,
+        String transactionCode,
         Long paymentId,
         Long settlementId,
         Long wholesalerCustomerId,

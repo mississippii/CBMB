@@ -11,6 +11,9 @@ import org.example.model.AccountLedger;
 import org.example.model.BoxBalance;
 import org.example.model.BoxInventory;
 import org.example.model.BoxLedger;
+import org.example.model.BoxType;
+import org.example.model.CrateDepositMovement;
+import org.example.model.CustomerCrateHolding;
 import org.example.model.Inventory;
 import org.example.model.Sale;
 import org.example.model.SaleItem;
@@ -23,6 +26,7 @@ import org.example.model.enums.AccountReferenceType;
 import org.example.model.enums.BoxLedgerPartyType;
 import org.example.model.enums.BoxMovementType;
 import org.example.model.enums.BoxReferenceType;
+import org.example.model.enums.CrateDepositMovementType;
 import org.example.model.enums.InventoryStatus;
 import org.example.model.enums.PartyType;
 import org.example.model.enums.PostStatus;
@@ -35,6 +39,8 @@ import org.example.repository.AccountLedgerRepository;
 import org.example.repository.BoxBalanceRepository;
 import org.example.repository.BoxInventoryRepository;
 import org.example.repository.BoxLedgerRepository;
+import org.example.repository.CrateDepositMovementRepository;
+import org.example.repository.CustomerCrateHoldingRepository;
 import org.example.repository.InventoryRepository;
 import org.example.repository.SaleItemRepository;
 import org.example.repository.SaleRepository;
@@ -58,6 +64,11 @@ import org.springframework.transaction.annotation.Transactional;
  *   Supplier AccountLedger SALE    → write DUE_ADJUSTMENT debit for saleAmount.
  *   StockLedger SALE OUT           → write ADJUSTMENT IN; restore inventory.qty_on_hand.
  *   BoxLedger GIVEN_TO_CUSTOMER    → write RETURNED_FROM_CUSTOMER; flip box_inventory + box_balance.
+ *   BoxLedger RETURNED_TO_CUSTOMER → write RECEIVED_FROM_CUSTOMER; restore customer_crate_holdings
+ *                                    (undoes the borrow-time netting offset).
+ *   BoxLedger SOLD (walk-in)       → write WALK_IN_REFUND at the sold price; restore box_inventory
+ *                                    (in_hand + total_owned) and refund the cash.
+ *   CrateDepositMovement TAKEN     → write REFUNDED reversal; reduce crate_deposit_held + refund cash.
  */
 @Service
 public class SaleCancellationService {
@@ -72,6 +83,8 @@ public class SaleCancellationService {
     private final BoxLedgerRepository boxLedgerRepository;
     private final BoxBalanceRepository boxBalanceRepository;
     private final BoxInventoryRepository boxInventoryRepository;
+    private final CrateDepositMovementRepository crateDepositMovementRepository;
+    private final CustomerCrateHoldingRepository customerCrateHoldingRepository;
     private final WholesalerCustomerRepository wholesalerCustomerRepository;
     private final TransactionRepository transactionRepository;
     private final AccountBalanceService accountBalanceService;
@@ -87,6 +100,8 @@ public class SaleCancellationService {
             BoxLedgerRepository boxLedgerRepository,
             BoxBalanceRepository boxBalanceRepository,
             BoxInventoryRepository boxInventoryRepository,
+            CrateDepositMovementRepository crateDepositMovementRepository,
+            CustomerCrateHoldingRepository customerCrateHoldingRepository,
             WholesalerCustomerRepository wholesalerCustomerRepository,
             TransactionRepository transactionRepository,
             AccountBalanceService accountBalanceService
@@ -101,6 +116,8 @@ public class SaleCancellationService {
         this.boxLedgerRepository = boxLedgerRepository;
         this.boxBalanceRepository = boxBalanceRepository;
         this.boxInventoryRepository = boxInventoryRepository;
+        this.crateDepositMovementRepository = crateDepositMovementRepository;
+        this.customerCrateHoldingRepository = customerCrateHoldingRepository;
         this.wholesalerCustomerRepository = wholesalerCustomerRepository;
         this.transactionRepository = transactionRepository;
         this.accountBalanceService = accountBalanceService;
@@ -131,6 +148,7 @@ public class SaleCancellationService {
         BigDecimal supplierBalanceAfter = reverseSupplierSide(wholesaler, sale, items, cleanReason);
         ReverseInventoryResult invResult = reverseInventoryAndStock(wholesaler, sale, items, cleanReason);
         CrateReversalResult crateResult = reverseCrateMovements(wholesaler, sale, cleanReason);
+        reverseCrateDeposit(wholesaler, sale, cleanReason);
 
         sale.setStatus(PostStatus.CANCELLED);
         sale.setNote(joinNote(sale.getNote(), cleanReason));
@@ -257,51 +275,159 @@ public class SaleCancellationService {
         List<BoxLedger> entries = boxLedgerRepository.findByWholesaler_IdAndReferenceTypeAndReferenceId(
                 wholesaler.getId(), BoxReferenceType.SALE, sale.getId());
         for (BoxLedger entry : entries) {
-            if (entry.getMovementType() != BoxMovementType.GIVEN_TO_CUSTOMER) {
-                // Unexpected — sale only writes GIVEN_TO_CUSTOMER today.
-                continue;
-            }
             int qty = entry.getQuantity();
-            if (customer == null) {
-                continue;
+            BoxType boxType = entry.getBoxType();
+            switch (entry.getMovementType()) {
+                case GIVEN_TO_CUSTOMER -> {
+                    // Permanent customer borrowed our crates on the sale: pull them back.
+                    requireCustomer(customer, boxType);
+                    BoxInventory inv = findBoxInventory(wholesaler, boxType);
+                    if (inv.getWithCustomers() < qty) {
+                        throw new BadRequestException("Cannot cancel: " + boxType.getName() + " crate inventory with_customers (" + inv.getWithCustomers() + ") < " + qty + ". Customer may have already returned crates.");
+                    }
+                    BoxBalance balance = boxBalanceRepository
+                            .findByWholesaler_IdAndPartyTypeAndPartyAccountIdAndBoxType_Id(
+                                    wholesaler.getId(), PartyType.WHOLESALER_CUSTOMER, customer.getId(), boxType.getId())
+                            .orElseThrow(() -> new BadRequestException("Crate balance missing for customer."));
+                    if (balance.getBoxesDue() < qty) {
+                        throw new BadRequestException("Cannot cancel: customer crate due (" + balance.getBoxesDue() + ") < " + qty + ".");
+                    }
+                    inv.setInHand(inv.getInHand() + qty);
+                    inv.setWithCustomers(inv.getWithCustomers() - qty);
+                    boxInventoryRepository.save(inv);
+                    balance.setBoxesDue(balance.getBoxesDue() - qty);
+                    boxBalanceRepository.save(balance);
+                    writeCrateReversal(wholesaler, boxType, customer.getId(), BoxMovementType.RETURNED_FROM_CUSTOMER, qty, sale.getId(), reason);
+                    totalCrates += qty;
+                }
+                case RETURNED_TO_CUSTOMER -> {
+                    // Borrow-time netting handed the customer their own held crates back; undo it
+                    // by taking those crates back into our custody (no owned-inventory change).
+                    requireCustomer(customer, boxType);
+                    CustomerCrateHolding holding = findOrCreateCustomerHolding(wholesaler, customer, boxType);
+                    holding.setQuantity(safeQty(holding.getQuantity()) + qty);
+                    customerCrateHoldingRepository.save(holding);
+                    writeCrateReversal(wholesaler, boxType, customer.getId(), BoxMovementType.RECEIVED_FROM_CUSTOMER, qty, sale.getId(), reason);
+                }
+                case SOLD -> {
+                    if (entry.getPartyAccountId() != null) {
+                        // Sale flow only ever sells crates walk-in; an on-account crate sale would
+                        // need its account ledger reversed too — refuse rather than half-reverse.
+                        throw new BadRequestException("Cannot cancel: sale includes an on-account crate sale. Reverse that crate sale manually first.");
+                    }
+                    // Walk-in crate sale: return crates to owned stock and refund the cash with a
+                    // WALK_IN_REFUND row at the exact sold price (cash book reads this as cash out).
+                    BoxInventory inv = findBoxInventory(wholesaler, boxType);
+                    inv.setInHand(inv.getInHand() + qty);
+                    inv.setTotalOwned(inv.getTotalOwned() + qty);
+                    boxInventoryRepository.save(inv);
+
+                    BoxLedger refund = new BoxLedger();
+                    refund.setWholesaler(wholesaler);
+                    refund.setBoxType(boxType);
+                    refund.setPartyType(BoxLedgerPartyType.WHOLESALER);
+                    refund.setPartyAccountId(null);
+                    refund.setMovementType(BoxMovementType.WALK_IN_REFUND);
+                    refund.setQuantity(qty);
+                    refund.setUnitCostSnapshot(entry.getUnitCostSnapshot());
+                    refund.setUnitSalePrice(entry.getUnitSalePrice());
+                    refund.setPaymentMethod(entry.getPaymentMethod());
+                    refund.setReferenceType(BoxReferenceType.SALE);
+                    refund.setReferenceId(sale.getId());
+                    refund.setNote(reason);
+                    boxLedgerRepository.save(refund);
+                    totalCrates += qty;
+                }
+                default -> {
+                    // PURCHASE / LOST / DAMAGED / ADJUSTMENT never carry a SALE reference; ignore.
+                }
             }
-            BoxInventory inv = boxInventoryRepository
-                    .findByWholesaler_IdAndBoxType_Id(wholesaler.getId(), entry.getBoxType().getId())
-                    .orElseThrow(() -> new BadRequestException("Crate inventory missing for " + entry.getBoxType().getName() + "."));
-            if (inv.getWithCustomers() < qty) {
-                throw new BadRequestException("Cannot cancel: " + entry.getBoxType().getName() + " crate inventory with_customers (" + inv.getWithCustomers() + ") < " + qty + ". Customer may have already returned crates.");
-            }
-            BoxBalance balance = boxBalanceRepository
-                    .findByWholesaler_IdAndPartyTypeAndPartyAccountIdAndBoxType_Id(
-                            wholesaler.getId(), PartyType.WHOLESALER_CUSTOMER, customer.getId(), entry.getBoxType().getId())
-                    .orElseThrow(() -> new BadRequestException("Crate balance missing for customer."));
-            if (balance.getBoxesDue() < qty) {
-                throw new BadRequestException("Cannot cancel: customer crate due (" + balance.getBoxesDue() + ") < " + qty + ".");
-            }
-
-            inv.setInHand(inv.getInHand() + qty);
-            inv.setWithCustomers(inv.getWithCustomers() - qty);
-            boxInventoryRepository.save(inv);
-
-            balance.setBoxesDue(balance.getBoxesDue() - qty);
-            boxBalanceRepository.save(balance);
-
-            BoxLedger reversal = new BoxLedger();
-            reversal.setWholesaler(wholesaler);
-            reversal.setBoxType(entry.getBoxType());
-            reversal.setPartyType(BoxLedgerPartyType.WHOLESALER_CUSTOMER);
-            reversal.setPartyAccountId(customer.getId());
-            reversal.setMovementType(BoxMovementType.RETURNED_FROM_CUSTOMER);
-            reversal.setQuantity(qty);
-            reversal.setReferenceType(BoxReferenceType.SALE);
-            reversal.setReferenceId(sale.getId());
-            reversal.setNote(reason);
-            boxLedgerRepository.save(reversal);
-
-            totalCrates += qty;
         }
 
         return new CrateReversalResult(totalCrates);
+    }
+
+    /**
+     * Reverse any refundable crate deposit taken at sale time: drop crate_deposit_held back and
+     * post a REFUNDED movement so the cash book counts the money going back out. Refuses the
+     * cancellation if the deposit was already partly refunded through a later payment.
+     */
+    private void reverseCrateDeposit(Wholesaler wholesaler, Sale sale, String reason) {
+        WholesalerCustomer customer = sale.getWholesalerCustomer();
+        if (customer == null) {
+            return;
+        }
+        BigDecimal depositTaken = BigDecimal.ZERO;
+        for (CrateDepositMovement movement : crateDepositMovementRepository
+                .findByWholesalerIdAndSaleId(wholesaler.getId(), sale.getId())) {
+            if (movement.getMovementType() == CrateDepositMovementType.TAKEN && movement.getAmount() != null) {
+                depositTaken = depositTaken.add(movement.getAmount());
+            }
+        }
+        depositTaken = money(depositTaken);
+        if (depositTaken.signum() <= 0) {
+            return;
+        }
+        BigDecimal held = customer.getCrateDepositHeld() == null ? BigDecimal.ZERO : customer.getCrateDepositHeld();
+        if (depositTaken.compareTo(held) > 0) {
+            throw new BadRequestException("Cannot cancel: the crate deposit from this sale was already partly refunded. Reconcile the deposit first.");
+        }
+        customer.setCrateDepositHeld(money(held.subtract(depositTaken)));
+        wholesalerCustomerRepository.save(customer);
+
+        CrateDepositMovement reversal = new CrateDepositMovement();
+        reversal.setWholesalerId(wholesaler.getId());
+        reversal.setWholesalerCustomerId(customer.getId());
+        reversal.setAmount(depositTaken.negate());
+        reversal.setMovementType(CrateDepositMovementType.REFUNDED);
+        reversal.setSaleId(sale.getId());
+        reversal.setPaymentId(null);
+        reversal.setNote(reason + " — reverse crate deposit");
+        crateDepositMovementRepository.save(reversal);
+    }
+
+    private BoxInventory findBoxInventory(Wholesaler wholesaler, BoxType boxType) {
+        return boxInventoryRepository
+                .findByWholesaler_IdAndBoxType_Id(wholesaler.getId(), boxType.getId())
+                .orElseThrow(() -> new BadRequestException("Crate inventory missing for " + boxType.getName() + "."));
+    }
+
+    private CustomerCrateHolding findOrCreateCustomerHolding(Wholesaler wholesaler, WholesalerCustomer customer, BoxType boxType) {
+        return customerCrateHoldingRepository
+                .findByWholesaler_IdAndWholesalerCustomerIdAndBoxType_Id(wholesaler.getId(), customer.getId(), boxType.getId())
+                .orElseGet(() -> {
+                    CustomerCrateHolding holding = new CustomerCrateHolding();
+                    holding.setWholesaler(wholesaler);
+                    holding.setBoxType(boxType);
+                    holding.setWholesalerCustomerId(customer.getId());
+                    holding.setQuantity(0);
+                    return holding;
+                });
+    }
+
+    private void writeCrateReversal(Wholesaler wholesaler, BoxType boxType, Long customerAccountId,
+                                    BoxMovementType movementType, int qty, Long saleId, String reason) {
+        BoxLedger reversal = new BoxLedger();
+        reversal.setWholesaler(wholesaler);
+        reversal.setBoxType(boxType);
+        reversal.setPartyType(BoxLedgerPartyType.WHOLESALER_CUSTOMER);
+        reversal.setPartyAccountId(customerAccountId);
+        reversal.setMovementType(movementType);
+        reversal.setQuantity(qty);
+        reversal.setReferenceType(BoxReferenceType.SALE);
+        reversal.setReferenceId(saleId);
+        reversal.setNote(reason);
+        boxLedgerRepository.save(reversal);
+    }
+
+    private void requireCustomer(WholesalerCustomer customer, BoxType boxType) {
+        if (customer == null) {
+            throw new BadRequestException("Cannot cancel: " + boxType.getName() + " crate movement has no customer account to reverse against.");
+        }
+    }
+
+    private static int safeQty(Integer value) {
+        return value == null ? 0 : value;
     }
 
     private void writeAccountAdjustment(Wholesaler wholesaler, PartyType partyType, Long partyAccountId,
