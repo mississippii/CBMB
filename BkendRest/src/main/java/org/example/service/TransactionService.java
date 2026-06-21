@@ -102,6 +102,7 @@ public class TransactionService {
                 transaction.getId(),
                 transaction.getTransactionType().name(),
                 transaction.getSaleId(),
+                sale == null ? null : sale.getTransactionCode(),
                 transaction.getPaymentId(),
                 transaction.getSettlementId(),
                 transaction.getWholesalerCustomerId(),

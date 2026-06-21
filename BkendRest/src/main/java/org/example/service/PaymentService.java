@@ -475,10 +475,11 @@ public class PaymentService {
     }
 
     /**
-     * Leg 2: move the SUPPLIER's own crates in/out of the wholesaler's custody.
-     * receive=true → crates arrive (wholesaler now owes the supplier more); receive=false →
-     * crates handed back. These crates are not the wholesaler's, so this touches ONLY
-     * supplier_crate_holdings + box_ledger — never box_inventory, never any money.
+     * Leg 2: record the SUPPLIER's own crates arriving (receive=true) or being handed back
+     * (receive=false). Same-type netting applies via {@link #applySupplierCrateMovement}:
+     * incoming crates first clear any crates the supplier owes us (box_balances → box_inventory),
+     * and only the remainder is tracked as supplier-owned crates held in the shop
+     * (supplier_crate_holdings). It is simply the inverse direction of give/return.
      */
     private PaymentOperationResponse moveSupplierHeldCrates(Long wholesalerId, SupplierCrateRequest request, boolean receive) {
         Wholesaler wholesaler = findWholesaler(wholesalerId);
@@ -505,41 +506,12 @@ public class PaymentService {
         return response(transaction, null, null, null, supplierAccount.getId(), currentDue, currentDue, BigDecimal.ZERO, total, crateLines, operationType);
     }
 
-    private void applySupplierHeldCrateMovement(Wholesaler wholesaler, WholesalerSupplier supplierAccount, String crateTypeValue, int quantity, boolean receive, String note) {
-        BoxType boxType = findBoxType(wholesaler.getId(), crateTypeValue);
-        var existing = supplierCrateHoldingRepository
-                .findByWholesaler_IdAndWholesalerSupplierIdAndBoxType_Id(wholesaler.getId(), supplierAccount.getId(), boxType.getId());
-
-        if (!receive && existing.isEmpty()) {
-            throw new BadRequestException("You are not holding any " + crateTypeValue + " crates from this supplier.");
-        }
-
-        SupplierCrateHolding holding = existing.orElseGet(() -> {
-            SupplierCrateHolding newHolding = new SupplierCrateHolding();
-            newHolding.setWholesaler(wholesaler);
-            newHolding.setBoxType(boxType);
-            newHolding.setWholesalerSupplierId(supplierAccount.getId());
-            newHolding.setQuantity(0);
-            return newHolding;
-        });
-
-        if (receive) {
-            holding.setQuantity(holding.getQuantity() + quantity);
-            saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), BoxMovementType.RECEIVED_FROM_SUPPLIER, quantity, BoxReferenceType.PAYMENT, null, note);
-        } else {
-            if (holding.getQuantity() < quantity) {
-                throw new BadRequestException("Handed-back " + crateTypeValue + " crates cannot exceed the " + holding.getQuantity() + " held from this supplier.");
-            }
-            holding.setQuantity(holding.getQuantity() - quantity);
-            saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_SUPPLIER, supplierAccount.getId(), BoxMovementType.RETURNED_TO_SUPPLIER, quantity, BoxReferenceType.PAYMENT, null, note);
-        }
-        supplierCrateHoldingRepository.save(holding);
-    }
-
     /**
-     * Customer leg 2: move the CUSTOMER's own crates in/out of the wholesaler's custody.
-     * receive=true → crates arrive (wholesaler owes the customer); receive=false → handed back.
-     * Touches ONLY customer_crate_holdings + box_ledger — never box_inventory, never money.
+     * Customer leg 2: record the CUSTOMER's own crates arriving (receive=true) or being handed
+     * back (receive=false). Same-type netting applies via {@link #applyCustomerCrateReturn}/
+     * {@link #applyCustomerCrateBorrow}: incoming crates first clear any crates the customer owes
+     * us (box_balances → box_inventory), and only the remainder becomes customer-owned crates held
+     * in the shop (customer_crate_holdings).
      */
     private PaymentOperationResponse moveCustomerHeldCrates(Long wholesalerId, org.example.dto.CustomerCrateBorrowRequest request, boolean receive) {
         Wholesaler wholesaler = findWholesaler(wholesalerId);
@@ -568,37 +540,6 @@ public class PaymentService {
                 wholesaler.getId(), null, null, customerAccount.getId(), null, BigDecimal.ZERO, currentDue, description
         );
         return response(transaction, null, null, customerAccount.getId(), null, currentDue, currentDue, BigDecimal.ZERO, total, crateLines, operationType);
-    }
-
-    private void applyCustomerHeldCrateMovement(Wholesaler wholesaler, WholesalerCustomer customerAccount, String crateTypeValue, int quantity, boolean receive, String note) {
-        BoxType boxType = findBoxType(wholesaler.getId(), crateTypeValue);
-        var existing = customerCrateHoldingRepository
-                .findByWholesaler_IdAndWholesalerCustomerIdAndBoxType_Id(wholesaler.getId(), customerAccount.getId(), boxType.getId());
-
-        if (!receive && existing.isEmpty()) {
-            throw new BadRequestException("You are not holding any " + crateTypeValue + " crates from this customer.");
-        }
-
-        CustomerCrateHolding holding = existing.orElseGet(() -> {
-            CustomerCrateHolding newHolding = new CustomerCrateHolding();
-            newHolding.setWholesaler(wholesaler);
-            newHolding.setBoxType(boxType);
-            newHolding.setWholesalerCustomerId(customerAccount.getId());
-            newHolding.setQuantity(0);
-            return newHolding;
-        });
-
-        if (receive) {
-            holding.setQuantity(holding.getQuantity() + quantity);
-            saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), BoxMovementType.RECEIVED_FROM_CUSTOMER, quantity, BoxReferenceType.PAYMENT, null, note);
-        } else {
-            if (holding.getQuantity() < quantity) {
-                throw new BadRequestException("Handed-back " + crateTypeValue + " crates cannot exceed the " + holding.getQuantity() + " held from this customer.");
-            }
-            holding.setQuantity(holding.getQuantity() - quantity);
-            saveBoxLedger(wholesaler, boxType, BoxLedgerPartyType.WHOLESALER_CUSTOMER, customerAccount.getId(), BoxMovementType.RETURNED_TO_CUSTOMER, quantity, BoxReferenceType.PAYMENT, null, note);
-        }
-        customerCrateHoldingRepository.save(holding);
     }
 
     private BoxBalance findOrCreateBoxBalance(Wholesaler wholesaler, PartyType partyType, Long partyAccountId, BoxType boxType) {

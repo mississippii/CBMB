@@ -65,6 +65,7 @@ const SupplierDetail = ({ supplierId, onBack }) => {
   const showToast = useToast()
   const [profile, setProfile] = useState(null)
   const [txFilter, setTxFilter] = useState('all')
+  const [showSettled, setShowSettled] = useState(false)
   const [showTransactions, setShowTransactions] = useState(true)
   const [showStock, setShowStock] = useState(false)
   const [showEditModal, setShowEditModal] = useState(false)
@@ -478,12 +479,58 @@ const SupplierDetail = ({ supplierId, onBack }) => {
                 </tr>
               </thead>
               <tbody className="divide-y divide-slate-100">
-                {[...openShipments, ...settledShipments].map(renderLotRow)}
+                {openShipments.length === 0 ? (
+                  <tr>
+                    <td colSpan={8} className="px-3 py-6 text-center text-sm text-slate-500">
+                      No open shipments — all are settled.
+                    </td>
+                  </tr>
+                ) : (
+                  openShipments.map(renderLotRow)
+                )}
               </tbody>
             </table>
           </div>
         )}
       </div>
+
+          {/* SETTLED SHIPMENTS (separate card, collapsed by default) */}
+          {settledShipments.length > 0 && (
+          <div className="supplier-panel">
+            <button
+              type="button"
+              onClick={() => setShowSettled((v) => !v)}
+              className="flex w-full items-center justify-between gap-3 text-left"
+            >
+              <h3 className="flex items-center gap-2"><Check size={18} className="text-emerald-600" /> Settled Shipments</h3>
+              <span className="flex items-center gap-2 text-sm text-slate-500">
+                {settledShipments.length} lot{settledShipments.length === 1 ? '' : 's'}
+                {showSettled ? <ChevronUp size={18} className="text-slate-400" /> : <ChevronDown size={18} className="text-slate-400" />}
+              </span>
+            </button>
+            {showSettled && (
+              <div className="mt-4 overflow-x-auto rounded-xl border border-slate-200">
+                <table className="center-table w-full min-w-[760px] text-sm">
+                  <thead>
+                    <tr className="bg-slate-50 border-b border-slate-200">
+                      <th className="px-3 py-2 font-semibold text-slate-700 text-left">Shipment</th>
+                      <th className="px-3 py-2 font-semibold text-slate-700">Unit Sold</th>
+                      <th className="px-3 py-2 font-semibold text-slate-700">Kg</th>
+                      <th className="px-3 py-2 font-semibold text-slate-700">Total Sold</th>
+                      <th className="px-3 py-2 font-semibold text-slate-700">Commission</th>
+                      <th className="px-3 py-2 font-semibold text-slate-700">Expense</th>
+                      <th className="px-3 py-2 font-semibold text-slate-700">Net Payable</th>
+                      <th className="px-3 py-2 font-semibold text-slate-700">Settle</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-slate-100">
+                    {settledShipments.map(renderLotRow)}
+                  </tbody>
+                </table>
+              </div>
+            )}
+          </div>
+          )}
 
       {/* TRANSACTIONS (sales, payments & money movements for this supplier) */}
           <div className="supplier-panel">

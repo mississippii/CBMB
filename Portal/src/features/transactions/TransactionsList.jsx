@@ -39,6 +39,7 @@ const TransactionsList = () => {
     createdAt: t.createdAt || new Date().toISOString(),
     transactionType: t.transactionType === 'PAYMENT' ? 'Payment' : 'Sale',
     saleId: t.saleId || null,
+    transactionCode: t.transactionCode || null,
     paymentId: t.paymentId || null,
     customerId: t.wholesalerCustomerId,
     customer: t.customerName || null,
@@ -375,6 +376,7 @@ const TransactionsList = () => {
                     <div className="mb-2 flex items-start justify-between gap-3">
                       <div>
                         <p className="text-sm font-bold text-slate-900">{formatDate(transaction.createdAt || transaction.date)}</p>
+                        {transaction.transactionCode ? <p className="font-mono text-[11px] font-semibold tracking-wide text-slate-400">{transaction.transactionCode}</p> : null}
                         <div className="mt-1">
                           {(() => {
                             const item = getItemParts(transaction);
@@ -436,7 +438,10 @@ const TransactionsList = () => {
                     const method = getMethod(transaction);
                     return (
                       <tr key={transaction.id} className="hover:bg-slate-50 transition">
-                        <td className="px-4 py-3 font-semibold text-slate-900 whitespace-nowrap">{formatDate(transaction.createdAt || transaction.date)}</td>
+                        <td className="px-4 py-3 font-semibold text-slate-900 whitespace-nowrap">
+                          {formatDate(transaction.createdAt || transaction.date)}
+                          {transaction.transactionCode ? <span className="block font-mono text-[11px] font-semibold tracking-wide text-slate-400">{transaction.transactionCode}</span> : null}
+                        </td>
                         <td className="px-4 py-3">
                           <span
                             className={`rounded-full px-2.5 py-1 text-xs font-bold ${
